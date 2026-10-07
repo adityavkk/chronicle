@@ -672,9 +672,29 @@ where C: RaftTypeConfig
     /// It is same as [`Raft::client_write`] but does not wait for the response.
     #[tracing::instrument(level = "debug", skip(self, app_data))]
     pub async fn client_write_ff(&self, app_data: C::D) -> Result<ResponderReceiverOf<C>, Fatal<C::NodeId>> {
+        self.client_write_ff_expected(app_data, None).await
+    }
+
+    /// Like [`Raft::client_write_ff`], but reject if leadership changed before
+    /// RaftCore assigns the entry. A mismatch returns `ForwardToLeader` through
+    /// the response receiver without allocating a log index or writing storage.
+    /// Backported from upstream `WriteRequest::with_leader`; see vendor provenance.
+    pub async fn client_write_ff_with_leader(
+        &self,
+        app_data: C::D,
+        expected_leader: crate::CommittedLeaderId<C::NodeId>,
+    ) -> Result<ResponderReceiverOf<C>, Fatal<C::NodeId>> {
+        self.client_write_ff_expected(app_data, Some(expected_leader)).await
+    }
+
+    async fn client_write_ff_expected(
+        &self,
+        app_data: C::D,
+        expected_leader: Option<crate::CommittedLeaderId<C::NodeId>>,
+    ) -> Result<ResponderReceiverOf<C>, Fatal<C::NodeId>> {
         let (app_data, tx, rx) = ResponderOf::<C>::from_app_data(app_data);
 
-        self.inner.send_msg(RaftMsg::ClientWriteRequest { app_data, tx }).await?;
+        self.inner.send_msg(RaftMsg::ClientWriteRequest { app_data, tx, expected_leader }).await?;
 
         Ok(rx)
     }

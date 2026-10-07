@@ -20,6 +20,8 @@ and epoll SSE paths serve reads. No SQLite, RocksDB or Redis payload dependency.
   hidden publication and descendant-aware release.
 * [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md): partition-owned durable webhook/pull-wake
   leases, cursors, fencing, retries, signing, SSRF validation and catalog repair.
+* [ASYNC.md](ASYNC.md): opt-in local-fsync202 receipts, await helper, bounded
+  admission and committed-only reads; acceptance can be lost after failover.
 * [evidence/README.md](evidence/README.md): executed gates and preserved failures.
 
 Paths hash to fixed groups, not to the current node count. Replica movement uses
@@ -28,8 +30,9 @@ One ordered stream still has one owner group. There is no general cross-group
 transaction or global read snapshot. The experimental control plane is trusted,
 loopback-only; it is not a production authentication/transport design.
 
-Only quorum-fsync writes are offered. An HTTP timeout/503 after admission can
-have committed; producer epoch/sequence handles append retry effects. Reads use
+Quorum-fsync remains the default. Opt-in local-fsync POST appends return 202 and
+a receipt, not a session or a successful append result. An HTTP timeout/503 after
+admission can have committed; producer epoch/sequence handles retry effects. Reads use
 `Stream-Consistency: linearizable` by default. `prefix` allows unbounded staleness;
 `session` requires a same-cluster, same-partition `Stream-Session` response token.
 Live streams become committed-prefix feeds after their initial read barrier.
@@ -48,6 +51,8 @@ python3 experiments/electric-replication/scripts/fork_faults.py experiments/elec
 python3 experiments/electric-replication/scripts/subscription_faults.py experiments/electric-replication/evidence/subscription-fault-new
 python3 experiments/electric-replication/scripts/storage_faults.py experiments/electric-replication/evidence/storage-fault-new
 python3 experiments/electric-replication/scripts/reclaim_faults.py experiments/electric-replication/evidence/reclaim-fault-new
+python3 experiments/electric-replication/scripts/async_faults.py experiments/electric-replication/evidence/async-fault-new
+node --test experiments/electric-replication/client/receipts.test.mjs
 ```
 
 `scripts/benchmark.py` uses the pinned unmodified native server and ds-bench
@@ -81,8 +86,19 @@ qualification. Bounded pipelined batching now passes `conformance-012`, 132 Rust
 tests and five real-process campaigns. Three fresh `write-diagnostics-003` runs
 measure **53–58k one-member writes/s versus 99–104k native**, a 1.72–1.89× gap with
 unchanged local-fsync guarantees. See [BATCHING.md](BATCHING.md) for the causal
-diagnosis, exact runs and remaining profiling work. Async local acceptance is
-approved but not yet implemented; no uncommitted read mode will be offered.
+diagnosis, exact runs and remaining profiling work. Async local acceptance with
+epoch-fenced admission now passes `conformance-014` (332/332), 135 Rust tests,
+190 vendored OpenRaft unit tests and `async-fault-002`: 39 receipts resolve to
+21 committed, one rejected and 17 invalidated outcomes, with five unknown request
+outcomes retained. Two unchanged upstream forensic Rust helpers remain ignored;
+no conformance tests are skipped. Current strong fault reruns also pass (see the
+ledger). The longer `async-writes-001` runs measure 88–99k native, 39–43k one-member
+and 25–28k three-member quorum writes/s. All three async saturation cells fail the
+zero-error gate: 28–30k acceptances/s with substantial bounded-backlog rejection.
+Every accepted byte drains to all replicas, but this is not async performance
+parity. The single-member gap in these runs is 2.29–2.34×; window length, snapshot
+work and changed batch scheduling require further attribution. Raw failures stay
+in the ledger; the earlier short-run result does not supersede them.
 
 The broader **pre-batching** `bench-local-004` completes all **45/45** matched ds-bench cells
 after arrival-fenced read coalescing. The prior `bench-local-003` three-replica,

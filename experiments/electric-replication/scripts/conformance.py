@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from lab import Lab, ROOT, EXPERIMENT, BINARY
+from lab import Lab, ROOT, EXPERIMENT, BINARY, source_hashes
 
 
 def run(output, partitions=2):
@@ -22,8 +22,7 @@ def run(output, partitions=2):
     assert metadata["version"] == "0.3.5"
     vitest = package.parent.parent / "vitest/vitest.mjs"
     lab = Lab(output, partitions=partitions, port=19400)
-    hashes = {str(path.relative_to(EXPERIMENT)): hashlib.sha256(path.read_bytes()).hexdigest()
-              for path in (EXPERIMENT / "engine/src").rglob("*.rs")}
+    hashes = source_hashes()
     hashes["binary"] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
     for path in sorted((package / "dist").glob("*.js")):
         hashes["suite/" + path.name] = hashlib.sha256(path.read_bytes()).hexdigest()

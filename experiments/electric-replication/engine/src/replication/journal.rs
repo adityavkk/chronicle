@@ -86,6 +86,7 @@ impl Index {
 pub struct Journal {
     pub shard: Arc<Shard>,
     pub index: Mutex<Index>,
+    pub changed: tokio::sync::Notify,
     dir: PathBuf,
     maintenance: tokio::sync::Mutex<()>,
     snapshot_ready: tokio::sync::Notify,
@@ -122,6 +123,7 @@ impl Journal {
         Ok(Arc::new(Self {
             shard,
             index: Mutex::new(index),
+            changed: tokio::sync::Notify::new(),
             dir,
             maintenance: tokio::sync::Mutex::new(()),
             snapshot_ready: tokio::sync::Notify::new(),
@@ -178,7 +180,18 @@ impl Journal {
     async fn persist(&self, event: Event) -> io::Result<()> {
         let lsn = self.stage(event)?;
         self.shard.wait_durable(lsn).await;
+        self.changed.notify_waiters();
         Ok(())
+    }
+
+    pub fn id_at(&self, index: u64) -> Option<LogId<u64>> {
+        self.index.lock().unwrap().entries.get(&index).map(|(id, _)| *id)
+    }
+
+    pub fn uncommitted(&self) -> Vec<LogId<u64>> {
+        let index = self.index.lock().unwrap();
+        let from = index.committed.map_or(0, |id| id.index + 1);
+        index.entries.range(from..).map(|(_, (id, _))| *id).collect()
     }
 
     /// Called only by the serialized apply worker before native publication.
@@ -256,15 +269,26 @@ impl RaftLogStorage<Types> for Arc<Journal> {
         I::IntoIter: Send,
     {
         let mut last = None;
+        let mut accepted = Vec::new();
         for entry in entries {
+            if let EntryPayload::Normal(batch) = &entry.payload {
+                if let Some(durable) = &batch.durable {
+                    accepted.push((entry.log_id, durable.clone()));
+                }
+            }
             last = Some(self.stage(Event::Entry(entry)).map_err(storage_error)?);
         }
         let shard = self.shard.clone();
+        let journal = self.clone();
         tokio::spawn(async move {
             if let Some(lsn) = last {
                 shard.wait_durable(lsn).await;
             }
+            for (id, durable) in accepted {
+                if let Some(send) = durable.lock().unwrap().take() { let _ = send.send(id); }
+            }
             callback.log_io_completed(Ok(()));
+            journal.changed.notify_waiters();
         });
         Ok(())
     }
@@ -333,7 +357,7 @@ mod tests {
             .unwrap_or(0);
         let entry = Entry {
             log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
-            payload: EntryPayload::Normal(commands),
+            payload: EntryPayload::Normal(commands.into()),
         };
         machine
             .journal
@@ -428,6 +452,79 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
         #[test]
+        fn async_mixed_results_snapshot_replay_and_shorter_replacement(
+            sizes in prop::collection::vec(1usize..300,2..10), snapshot in any::<bool>(),
+            orphan_count in 2u64..9,
+        ) {
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut machine,"PUT","/async",1000,vec![],vec![3,251]).await.status,201);
+                let id = |term,index|LogId::new(openraft::CommittedLeaderId::new(term,1),index);
+                let mut commands = Vec::new();
+                let mut expected = vec![3,251];
+                for (i,size) in sizes.iter().enumerate() {
+                    expected.extend(vec![i as u8+37;*size]);
+                    for kind in 0..3 {
+                        commands.push(Command {method:"POST".into(),path:"/async".into(),time:1001,
+                            headers:vec![("content-type".into(),"application/octet-stream".into()),
+                                ("producer-id".into(),"receipts".into()),("producer-epoch".into(),"0".into()),
+                                ("producer-seq".into(),(if kind==2 {i+2} else {i}).to_string()),
+                                ("stream-durability".into(),if (i*3+kind)%2==0 {"local-fsync"} else {"quorum-fsync"}.into())],
+                            body:vec![if kind==0 {i as u8+37} else {0xEE};*size]});
+                    }
+                }
+                let commands_count=commands.len();
+                let replies=issue_batch(&mut machine,commands).await;
+                assert_eq!(bytes(&machine,"/async").await,(200,expected.clone()));
+                machine=reopen(machine,snapshot).await;
+                for (ordinal,expected_reply) in replies.iter().enumerate() {
+                    assert_eq!(expected_reply.status,[200,204,409][ordinal%3]);
+                    let view=machine.view.read().await;
+                    let position=receipts::Position {log_id:id(1,1),ordinal};
+                    let (state,reply)=view.receipts.lookup(position,view.applied,machine.journal.id_at(1));
+                    assert_eq!(state,if ordinal%2!=0 {"unknown"} else if ordinal%3==2 {"rejected"} else {"committed"});
+                    if ordinal%2==0 {
+                        assert_eq!(bincode::serialize(reply.unwrap()).unwrap(),bincode::serialize(expected_reply).unwrap());
+                    }
+                }
+                assert!(commands_count>3);
+                for index in 2..2+orphan_count {
+                    machine.journal.persist(Event::Entry(Entry {log_id:id(1,index),payload:EntryPayload::Normal(vec![Command {
+                        method:"POST".into(),path:"/async".into(),time:1002,
+                        headers:vec![("stream-durability".into(),"local-fsync".into())],body:vec![0xDD;91],
+                    }].into())})).await.unwrap();
+                }
+                machine=reopen(machine,snapshot).await;
+                let suffix=machine.journal.uncommitted();
+                assert_eq!(suffix.len(),orphan_count as usize);
+                assert!(machine.unresolved(&suffix).await);
+                assert_eq!(bytes(&machine,"/async").await,(200,expected.clone()));
+                let position=receipts::Position {log_id:id(1,2),ordinal:0};
+                {
+                    let view=machine.view.read().await;
+                    assert_eq!(view.receipts.lookup(position,view.applied,machine.journal.id_at(2)).0,"pending");
+                }
+                machine.journal.persist(Event::Truncate(id(1,2))).await.unwrap();
+                let replacement=Entry {log_id:id(2,2),payload:EntryPayload::Blank};
+                machine.journal.persist(Event::Entry(replacement.clone())).await.unwrap();
+                assert!(!machine.unresolved(&suffix).await,"must not wait for the old numeric high-water index");
+                {
+                    let view=machine.view.read().await;
+                    assert_eq!(view.receipts.lookup(position,view.applied,machine.journal.id_at(2)).0,"unknown",
+                        "an uncommitted replacement cannot prove invalidation");
+                }
+                machine.apply([replacement]).await.unwrap();
+                machine=reopen(machine,snapshot).await;
+                let view=machine.view.read().await;
+                assert_eq!(view.receipts.lookup(position,view.applied,machine.journal.id_at(2)).0,"invalidated");
+                assert_eq!(view.receipts.lookup(receipts::Position {log_id:id(1,1),ordinal:0},view.applied,None).0,"committed");
+            });
+        }
+
+        #[test]
         fn append_batch_replies_dedup_and_partial_materialization_recover(
             sizes in prop::collection::vec(1usize..511,3..18), partial in 0usize..18,
             snapshot in any::<bool>(),
@@ -457,7 +554,7 @@ mod tests {
                     commands.push(command(i+2,vec![0xEE;13])); // Gap must not reserve/consume sequence.
                 }
                 let id=|index|LogId::new(openraft::CommittedLeaderId::new(1,1),index);
-                let entry=Entry {log_id:id(1),payload:EntryPayload::Normal(commands)};
+                let entry=Entry {log_id:id(1),payload:EntryPayload::Normal(commands.into())};
                 machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
                 assert_eq!(bytes(&machine,"/batched").await,(200,vec![1,255]));
                 machine.journal.shard.fail_next_write();
@@ -480,7 +577,7 @@ mod tests {
                     expected.extend_from_slice(&body);
                     next.push(command(sizes.len()+i,body));
                 }
-                machine.journal.persist(Event::Entry(Entry {log_id:id(2),payload:EntryPayload::Normal(next.clone())})).await.unwrap();
+                machine.journal.persist(Event::Entry(Entry {log_id:id(2),payload:EntryPayload::Normal(next.clone().into())})).await.unwrap();
                 machine.journal.cover_apply(id(2)).await.unwrap();
                 // Crash after publishing only a strict prefix of a COMMITTED
                 // batch. Hot files are not a recovery authority; replay must
@@ -503,7 +600,7 @@ mod tests {
                 expected.extend_from_slice(&[7,91,219]);
                 machine.journal.persist(Event::Entry(Entry {log_id:id(5),
                     payload:EntryPayload::Normal(vec![command(sizes.len()*2+1,vec![0xAA]),
-                        command(sizes.len()*2+2,vec![0xBB])])})).await.unwrap();
+                        command(sizes.len()*2+2,vec![0xBB])].into())})).await.unwrap();
                 machine=reopen(machine,true).await;
                 assert_eq!(machine.view.read().await.applied,Some(id(4)));
                 assert_eq!(bytes(&machine,"/batched").await,(200,expected));
@@ -543,7 +640,7 @@ mod tests {
                 for index in count+1..=count+3 {
                     machine.journal.persist(Event::Entry(Entry {log_id:id(index),payload:EntryPayload::Normal(vec![Command {
                         method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xEE;payload],time:1002,
-                    }])})).await.unwrap();
+                    }].into())})).await.unwrap();
                 }
                 let old_files: Vec<_> = std::fs::read_dir(&wal).unwrap().map(|p|p.unwrap().path())
                     .filter(|p|p.extension().is_some_and(|e|e=="wal")).collect();
@@ -553,7 +650,7 @@ mod tests {
                 assert!(old_files.iter().any(|p|!p.exists()),"must physically reclaim segments");
                 journal.persist(Event::Entry(Entry {log_id:id(count+4),payload:EntryPayload::Normal(vec![Command {
                     method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xCD;payload],time:1002,
-                }])})).await.unwrap();
+                }].into())})).await.unwrap();
                 let retained = journal.index.lock().unwrap().entries[&retained_from].1;
                 let checkpoint = wal.join("journal-checkpoint");
                 let good = std::fs::read(&checkpoint).unwrap();
@@ -582,7 +679,8 @@ mod tests {
                 assert_eq!(entries.len(),8);
                 for (index,entry) in (retained_from..=count+4).zip(entries) {
                     assert_eq!(entry.log_id,id(index));
-                    let EntryPayload::Normal(commands) = entry.payload else {panic!("lost command")};
+                    let EntryPayload::Normal(batch) = entry.payload else {panic!("lost command")};
+                    let commands = batch.commands;
                     assert_eq!(commands.len(),1);
                     assert_eq!(commands[0].body,vec![if index<=count {index as u8} else if index==count+4 {0xCD} else {0xEE};payload]);
                 }
@@ -630,7 +728,7 @@ mod tests {
                         let data = vec![index as u8, 0xDA];
                         expected.extend_from_slice(&data);
                         EntryPayload::Normal(vec![Command {method:"POST".into(),path:"/batch".into(),
-                            headers:vec![("content-type".into(),"application/octet-stream".into())],body:data,time:1001}])
+                            headers:vec![("content-type".into(),"application/octet-stream".into())],body:data,time:1001}].into())
                     };
                     let entry = Entry {log_id:LogId::new(openraft::CommittedLeaderId::new(1,1),index as u64),payload};
                     machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
@@ -960,7 +1058,7 @@ mod tests {
                 let make = |i, n, term| Entry {
                     log_id: LogId::new(openraft::CommittedLeaderId::new(term, 1), i),
                     payload: EntryPayload::Normal(vec![Command { method: "POST".into(), path: "/p".into(),
-                        headers: vec![], body: vec![i as u8 + term as u8; n], time: 0 }]),
+                        headers: vec![], body: vec![i as u8 + term as u8; n], time: 0 }].into()),
                 };
                 let journal = Journal::open(dir.path().into(), 1024).unwrap();
                 for (i, n) in sizes.iter().enumerate() {
@@ -975,7 +1073,8 @@ mod tests {
                     assert_eq!(entries.len(), keep + 1);
                     for (i, entry) in entries.iter().enumerate() {
                         let expected = if i == keep { vec![i as u8 + 2; 31] } else { vec![i as u8 + 1; sizes[i]] };
-                        let EntryPayload::Normal(commands) = &entry.payload else { panic!("missing command") };
+                        let EntryPayload::Normal(batch) = &entry.payload else { panic!("missing command") };
+                        let commands = &batch.commands;
                         assert_eq!(commands.len(),1);
                         assert_eq!(commands[0].body, expected);
                     }

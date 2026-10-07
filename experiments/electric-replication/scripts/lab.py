@@ -16,6 +16,15 @@ EXPERIMENT = ROOT / "experiments/electric-replication"
 BINARY = EXPERIMENT / "engine/target/release/durable-streams-server"
 
 
+def source_hashes():
+    paths = [EXPERIMENT / name for name in (
+        "engine/Cargo.toml", "engine/Cargo.lock", "vendor/openraft/Cargo.toml",
+        "vendor/openraft/LICENSE-APACHE", "vendor/openraft/LICENSE-MIT")]
+    for root in ("engine/src", "vendor/openraft/src"):
+        paths.extend(p for p in (EXPERIMENT / root).rglob("*") if p.is_file())
+    return {str(p.relative_to(EXPERIMENT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
+
+
 class Lab:
     def __init__(self, output, replicas=3, partitions=2, port=19300, binary=BINARY):
         self.output = Path(output).resolve()
@@ -29,13 +38,17 @@ class Lab:
         self.nodes = set()
         self.genesis = {str(n): {"addr": f"127.0.0.1:{port+n}"} for n in range(1, replicas+1)}
 
-    def start(self, node, environment=None, cpus=None, fault_testing=True, stats_secs=0):
+    def start(self, node, environment=None, cpus=None, fault_testing=True, stats_secs=0,
+              pending_commands=256, pending_bytes=16 * 1024 * 1024, append_durability="quorum-fsync"):
         config = dict(cluster=self.cluster, node=node, listen=f"127.0.0.1:{self.port+node}",
                       dir=str(self.data / str(node)), partitions=self.partitions,
                       workers=2, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis,
-                      stats_secs=stats_secs)
+                      stats_secs=stats_secs, pending_commands=pending_commands, pending_bytes=pending_bytes,
+                      append_durability=append_durability)
         path = self.output / f"node-{node}.json"
         path.write_text(json.dumps(config, indent=2) + "\n")
+        with open(self.output / "config-history.jsonl", "a") as history:
+            history.write(json.dumps(dict(unix_ms=time.time_ns()//1_000_000, config=config))+"\n")
         env = "env " + " ".join(shlex.quote(f"{k}={v}") for k,v in environment.items()) + " " if environment else ""
         affinity = f"taskset -c {shlex.quote(cpus)} " if cpus else ""
         command = (f"ulimit -c 0; exec {env}{affinity}{shlex.quote(str(self.binary))} --cluster-config {shlex.quote(str(path))} "
@@ -81,8 +94,8 @@ class Lab:
                 logs[path.name+".gz"] = hashlib.file_digest(source, "sha256").hexdigest()
         (self.output / "log-sha256.json").write_text(json.dumps(logs, indent=2)+"\n")
 
-    def request(self, node, method, path, body=b"", headers=None, timeout=12):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port+node, timeout=timeout)
+    def request(self, node, method, path, body=b"", headers=None, timeout=12, connection=None):
+        connection = connection or http.client.HTTPConnection("127.0.0.1", self.port+node, timeout=timeout)
         try:
             connection.request(method, path, body, headers or {})
             response = connection.getresponse()

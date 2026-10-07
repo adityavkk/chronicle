@@ -1,0 +1,76 @@
+{
+  "arm": "raft3",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "node_pids": [
+    63683,
+    63710,
+    63739
+  ],
+  "affinity": {
+    "63683": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "63710": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "63739": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 63747,
+  "process_sample_gaps": [
+    {
+      "pid": 63747,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791395592785,
+    "end_unix_ms": 1791395626836,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 3.1338810003944673,
+    "target_bytes": 238190592,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 238190592
+      },
+      {
+        "node": 2,
+        "committed_bytes": 238190592
+      },
+      {
+        "node": 3,
+        "committed_bytes": 238190592
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "verify_pid": 65753,
+  "verify_window": {
+    "start_unix_ms": 1791395626841,
+    "end_unix_ms": 1791395626851,
+    "exit_code": 0
+  }
+}

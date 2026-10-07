@@ -6,6 +6,7 @@ mod forks;
 mod journal;
 mod machine;
 mod network;
+mod receipts;
 mod subscription_io;
 mod subscriptions;
 
@@ -24,7 +25,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
-openraft::declare_raft_types!(pub Types: D = Vec<Command>, R = Vec<Reply>, SnapshotData = tokio::fs::File);
+openraft::declare_raft_types!(pub Types: D = batch::Batch, R = Vec<Reply>, SnapshotData = tokio::fs::File);
 type Entry = openraft::Entry<Types>;
 type Raft = openraft::Raft<Types>;
 pub static CLUSTER: OnceLock<Cluster> = OnceLock::new();
@@ -133,7 +134,16 @@ struct Config {
     /// Native WAL/appender diagnostics; zero keeps clock probes disabled.
     #[serde(default)]
     stats_secs: u64,
+    #[serde(default = "pending_commands")]
+    pending_commands: usize,
+    #[serde(default = "pending_bytes")]
+    pending_bytes: usize,
+    #[serde(default = "quorum_fsync")]
+    append_durability: String,
 }
+fn pending_commands() -> usize { batch::CAPACITY }
+fn pending_bytes() -> usize { 16 * 1024 * 1024 }
+fn quorum_fsync() -> String { "quorum-fsync".into() }
 fn long_poll_ms() -> u64 {
     30_000
 }
@@ -145,6 +155,8 @@ struct Group {
     raft: Raft,
     machine: Arc<machine::Machine>,
     slots: Arc<Semaphore>,
+    bytes: Arc<Semaphore>,
+    admitted_term: Arc<AtomicU64>,
     proposals: tokio::sync::mpsc::Sender<batch::Pending>,
     reads: ReadBarrier,
 }
@@ -171,17 +183,28 @@ impl ReadBarrier {
 }
 
 impl Group {
-    async fn propose(
-        &self,
-        command: Command,
-    ) -> Result<batch::Committed, u16> {
+    async fn submit(&self, command: Command) -> Result<batch::Outcome, u16> {
+        {
+            let receiver = self.raft.metrics();
+            let metrics = receiver.borrow();
+            if metrics.current_leader != Some(metrics.id) { return Err(503); }
+        }
         let permit = self.slots.clone().try_acquire_owned().map_err(|_| 429u16)?;
+        let size = u32::try_from(command.encoded_len()).map_err(|_| 413u16)?;
+        let bytes = self.bytes.clone().try_acquire_many_owned(size).map_err(|_| 429u16)?;
         let (result, receive) = tokio::sync::oneshot::channel();
         // The queue/consensus worker, not the HTTP future, owns this permit.
-        self.proposals.try_send(batch::Pending { command, result, permit }).map_err(|_| 503u16)?;
+        self.proposals.try_send(batch::Pending { command, result, permit, bytes }).map_err(|_| 503u16)?;
         match tokio::time::timeout(Duration::from_secs(3), receive).await {
             Ok(Ok(result)) => result,
             _ => Err(503),
+        }
+    }
+
+    async fn propose(&self, command: Command) -> Result<batch::Committed, u16> {
+        match self.submit(command).await? {
+            batch::Outcome::Committed(result) => Ok(result),
+            batch::Outcome::Accepted(_) => unreachable!("control mutation requested local acceptance"),
         }
     }
 }
@@ -265,7 +288,7 @@ impl Cluster {
         resp
     }
 
-    pub async fn handle(&self, req: Req) -> Resp {
+    pub async fn handle(&self, mut req: Req) -> Resp {
         if req.path == "/health" {
             return response(200, "experimental electric replica");
         }
@@ -275,6 +298,7 @@ impl Cluster {
                 Err(_) => response(503, "admin/RPC timeout: outcome unknown"),
             };
         }
+        if req.path.starts_with("/_receipts/") { return self.receipt(req).await; }
         if subscription_io::reserved(&req.path) {
             return self.subscriptions(req).await;
         }
@@ -286,11 +310,16 @@ impl Cluster {
             return response(413, "replicated command limit: 1 MiB");
         }
         if matches!(req.method, Method::Put | Method::Post | Method::Delete) {
-            if req
-                .header("stream-durability")
-                .is_some_and(|v| v != "quorum-fsync")
-            {
-                return response(400, "only quorum-fsync writes are supported");
+            let default = if req.method == Method::Post { self.config.append_durability.as_str() } else { "quorum-fsync" };
+            match req.header("stream-durability").unwrap_or(default) {
+                "quorum-fsync" => (),
+                "local-fsync" if req.method == Method::Post => {
+                    // Persist the selected mode; replay never reads node config.
+                    if req.header("stream-durability").is_none() {
+                        req.headers.push(("stream-durability".into(), "local-fsync".into()));
+                    }
+                }
+                _ => return response(400, "expected quorum-fsync, or local-fsync for POST append only"),
             }
             if g.raft.metrics().borrow().current_leader != Some(self.config.node) {
                 return self.unavailable(group, "not leader; mutation was not forwarded");
@@ -314,8 +343,9 @@ impl Cluster {
                 body: req.body.to_vec(),
                 time: clock::millis(std::time::SystemTime::now()),
             };
-            return match g.propose(command).await {
-                Ok(result) => {
+            return match g.submit(command).await {
+                Ok(batch::Outcome::Accepted(position)) => self.accepted(group, position),
+                Ok(batch::Outcome::Committed(result)) => {
                     let mut resp = result.data.into_resp();
                     resp.headers
                         .push(("stream-session", self.token(group, result.log_id.index)));
@@ -324,6 +354,7 @@ impl Cluster {
                     resp
                 }
                 Err(429) => response(429, "pending proposal bound reached"),
+                Err(413) => response(413, "encoded command exceeds admission bound"),
                 _ => self.unavailable(group, "write outcome unknown; retry with producer identity"),
             };
         }
@@ -567,6 +598,11 @@ pub fn run() {
         "experimental control APIs are loopback-only"
     );
     assert!(config.node > 0 && (1..=64).contains(&config.partitions) && config.workers > 0);
+    assert!((1..=65536).contains(&config.pending_commands), "pending_commands must be 1..65536");
+    assert!((2 * 1024 * 1024..=1024 * 1024 * 1024).contains(&config.pending_bytes),
+        "pending_bytes must be 2 MiB..1 GiB");
+    assert!(matches!(config.append_durability.as_str(), "quorum-fsync" | "local-fsync"),
+        "append_durability must be quorum-fsync or local-fsync");
     assert!(!config.genesis.is_empty() && config.genesis.keys().all(|id| *id > 0));
     assert!(
         !config.cluster.is_empty()
@@ -603,7 +639,7 @@ pub fn run() {
             "data directory already owned"
         );
         let identity = serde_json::to_vec(&(
-            5u32,
+            6u32,
             &config.cluster,
             config.node,
             config.partitions,
@@ -673,11 +709,14 @@ pub fn run() {
             )
             .await
             .expect("start Raft");
+            let admitted_term = Arc::new(AtomicU64::new(0));
             groups.push(Group {
-                proposals: batch::start(raft.clone()),
+                proposals: batch::start(raft.clone(), machine.clone(), config.pending_commands, admitted_term.clone()),
                 raft,
                 machine,
-                slots: Arc::new(Semaphore::new(batch::CAPACITY)),
+                slots: Arc::new(Semaphore::new(config.pending_commands)),
+                bytes: Arc::new(Semaphore::new(config.pending_bytes)),
+                admitted_term,
                 reads: ReadBarrier::default(),
             });
         }

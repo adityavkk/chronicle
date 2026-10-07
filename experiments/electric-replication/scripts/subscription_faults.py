@@ -18,7 +18,7 @@ import time
 import traceback
 from urllib.parse import quote
 
-from lab import Lab, BINARY, EXPERIMENT, ROOT, partition
+from lab import Lab, BINARY, EXPERIMENT, ROOT, partition, source_hashes
 from check_subscriptions import check
 
 
@@ -31,8 +31,7 @@ def run(output):
     provenance = dict(binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(), partitions=2,
         processes=3, consistency="linearizable default", durability="quorum-fsync default",
         faults="SIGKILL, full restart, lost/delayed webhook replies, failed dispatch, claim races",
-        sources={str(p.relative_to(EXPERIMENT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                 for p in (EXPERIMENT / "engine/src").rglob("*.rs")})
+        sources=source_hashes())
     (lab.output / "provenance.json").write_text(json.dumps(provenance,indent=2)+"\n")
 
     def record(event):

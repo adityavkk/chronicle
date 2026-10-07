@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 
-from lab import Lab, BINARY, EXPERIMENT, partition
+from lab import Lab, BINARY, EXPERIMENT, partition, source_hashes
 from check_forks import check
 
 
@@ -21,8 +21,7 @@ def run(output):
     history = []
     provenance = dict(binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(), partitions=2,
                       processes=3, storage="native WAL + wire files", faults="import scheduling pause, SIGKILL, snapshot learner, restart",
-                      sources={str(p.relative_to(EXPERIMENT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                               for p in (EXPERIMENT / "engine/src").rglob("*.rs")})
+                      sources=source_hashes())
     (lab.output / "provenance.json").write_text(json.dumps(provenance, indent=2)+"\n")
 
     def record(event):

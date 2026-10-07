@@ -13,7 +13,7 @@ import sys
 import time
 
 from check_history import check
-from lab import Lab, BINARY, EXPERIMENT, ROOT, partition
+from lab import Lab, BINARY, EXPERIMENT, ROOT, partition, source_hashes
 
 
 def run(output):
@@ -25,8 +25,7 @@ def run(output):
     path = next(f"/storage/{i}" for i in range(100) if partition(f"/storage/{i}", 2) == 0)
     history = []
     faults = []
-    sources = {str(p.relative_to(EXPERIMENT)): hashlib.sha256(p.read_bytes()).hexdigest()
-               for p in (EXPERIMENT / "engine/src").rglob("*.rs")}
+    sources = source_hashes()
     (lab.output / "provenance.json").write_text(json.dumps(dict(
         binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(), sources=sources,
         interposer=hashlib.sha256(interposer.read_bytes()).hexdigest(),

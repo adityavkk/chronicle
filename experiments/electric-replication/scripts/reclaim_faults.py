@@ -11,7 +11,7 @@ import sys
 import time
 
 from check_history import check
-from lab import Lab, BINARY, EXPERIMENT, ROOT, partition
+from lab import Lab, BINARY, EXPERIMENT, ROOT, partition, source_hashes
 
 
 def run(output):
@@ -23,8 +23,7 @@ def run(output):
     subprocess.run(command, check=True)
     (lab.output / "provenance.json").write_text(json.dumps(dict(
         binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(),
-        sources={str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest()
-                 for p in (EXPERIMENT / "engine/src").rglob("*.rs")},
+        sources=source_hashes(),
         interposer_source=hashlib.sha256(source.read_bytes()).hexdigest(),
         interposer=hashlib.sha256(interposer.read_bytes()).hexdigest(), compile_command=command,
         processes=3, partitions=2, durability="quorum-fsync", consistency="linearizable default"), indent=2)+"\n")

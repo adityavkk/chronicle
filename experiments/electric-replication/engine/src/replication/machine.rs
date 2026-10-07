@@ -11,6 +11,7 @@ pub struct View {
     pub membership: StoredMembership<u64, BasicNode>,
     pub subscriptions: subscriptions::State,
     pub forks: forks::State,
+    pub(super) receipts: receipts::State,
 }
 
 pub struct Machine {
@@ -36,18 +37,19 @@ impl Machine {
         if hot.exists() {
             std::fs::remove_dir_all(&hot)?;
         }
-        let (applied, membership, time, subscriptions, forks) = if let Some(snapshot) = snapshot {
+        let (applied, membership, time, subscriptions, forks, receipts) = if let Some(snapshot) = snapshot {
             let file = dir.join(&snapshot.file);
             if digest_file(&file)? != snapshot.sha256 {
                 return Err(io::Error::other("snapshot digest mismatch"));
             }
-            let (time, subscriptions, forks) = unpack(&file, &hot, &snapshot.meta)?;
+            let (time, subscriptions, forks, receipts) = unpack(&file, &hot, &snapshot.meta)?;
             (
                 snapshot.meta.last_log_id,
                 snapshot.meta.last_membership,
                 time,
                 subscriptions,
                 forks,
+                receipts,
             )
         } else {
             (
@@ -56,6 +58,7 @@ impl Machine {
                 0,
                 subscriptions::State::default(),
                 forks::State::default(),
+                receipts::State::default(),
             )
         };
         let store = Arc::new(Store::new_with_tier(
@@ -70,6 +73,7 @@ impl Machine {
                 membership,
                 subscriptions,
                 forks,
+                receipts,
             }),
             journal,
             dir,
@@ -93,6 +97,14 @@ impl Machine {
         }
         machine.cleanup_snapshots()?;
         Ok(machine)
+    }
+
+    /// Credit recovery is about a retained suffix, not terminal receipt proof.
+    /// A truncated entry frees storage admission even if its outcome is unknown.
+    pub async fn unresolved(&self, ids: &[LogId<u64>]) -> bool {
+        let view = self.view.read().await;
+        ids.iter().any(|id| view.applied.is_none_or(|a| a.index < id.index)
+            && self.journal.id_at(id.index) == Some(*id))
     }
 
     /// Caller is either booting privately or holds the view write lock after a
@@ -147,10 +159,11 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         }
         for entry in entries {
             let reply = match entry.payload {
-                EntryPayload::Normal(commands) => {
+                EntryPayload::Normal(batch) => {
                     view.store.set_create_id(entry.log_id.index);
-                    let mut output = Vec::with_capacity(commands.len());
-                    for command in commands {
+                    let mut output = Vec::with_capacity(batch.commands.len());
+                    for (ordinal, command) in batch.commands.into_iter().enumerate() {
+                        let receipt = command.local();
                         view.store.clock.advance(command.time);
                         let resp = if command.method == "SUB" {
                             let action = serde_json::from_slice(&command.body)
@@ -200,7 +213,11 @@ impl RaftStateMachine<Types> for Arc<Machine> {
                                 "native committed apply failed",
                             )));
                         }
-                        output.push(Reply::from_resp(resp));
+                        let reply = Reply::from_resp(resp);
+                        if receipt {
+                            view.receipts.record(receipts::Position { log_id: entry.log_id, ordinal }, reply.clone());
+                        }
+                        output.push(reply);
                     }
                     output
                 }
@@ -213,6 +230,8 @@ impl RaftStateMachine<Types> for Arc<Machine> {
             view.applied = Some(entry.log_id);
             replies.push(reply);
         }
+        drop(view);
+        self.journal.changed.notify_waiters();
         Ok(replies)
     }
     async fn get_snapshot_builder(&mut self) -> Self {
@@ -242,7 +261,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         let mut view = self.view.write().await;
         let incoming = self.dir.join("receiving");
         let generation = self.dir.join(format!("hot-{}", nonce()));
-        let (time, subscriptions, forks) =
+        let (time, subscriptions, forks, receipts) =
             unpack(&incoming, &generation, meta).map_err(storage_error)?;
         let store = Arc::new(
             Store::new_with_tier(generation, crate::tier::TierConfig::default())
@@ -267,7 +286,10 @@ impl RaftStateMachine<Types> for Arc<Machine> {
             membership: meta.last_membership.clone(),
             subscriptions,
             forks,
+            receipts,
         };
+        drop(view);
+        self.journal.changed.notify_waiters();
         Ok(())
     }
     async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot<Types>>, StorageError<u64>> {
@@ -306,6 +328,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
             &view.store,
             &view.subscriptions,
             &view.forks,
+            &view.receipts,
             &target,
             &meta,
         )
@@ -360,12 +383,13 @@ fn pack(
     store: &Store,
     subscriptions: &subscriptions::State,
     forks: &forks::State,
+    receipts: &receipts::State,
     path: &std::path::Path,
     meta: &SnapshotMeta<u64, BasicNode>,
 ) -> io::Result<()> {
     let control = store.data_dir.join("streams/.control");
     let mut writer = io::BufWriter::new(std::fs::File::create(&control)?);
-    serde_json::to_writer(&mut writer, &(subscriptions, forks)).map_err(io::Error::other)?;
+    serde_json::to_writer(&mut writer, &(subscriptions, forks, receipts)).map_err(io::Error::other)?;
     writer.flush()?;
     drop(writer);
     let mut files = vec![store.data_dir.join("streams/.lanes"), control];
@@ -381,7 +405,7 @@ fn pack(
         .write(true)
         .create_new(true)
         .open(path)?;
-    out.write_all(b"ERSP0004")?;
+    out.write_all(b"ERSP0005")?;
     let header = serde_json::to_vec(&(meta, files.len(), clock::millis(store.clock.now())))
         .map_err(io::Error::other)?;
     out.write_all(&(header.len() as u64).to_le_bytes())?;
@@ -411,7 +435,7 @@ fn unpack(
     path: &std::path::Path,
     target: &std::path::Path,
     expected: &SnapshotMeta<u64, BasicNode>,
-) -> io::Result<(u64, subscriptions::State, forks::State)> {
+) -> io::Result<(u64, subscriptions::State, forks::State, receipts::State)> {
     let mut input = std::fs::File::open(path)?;
     let len = input.metadata()?.len();
     if !(48..=8 * 1024 * 1024 * 1024).contains(&len) {
@@ -426,7 +450,7 @@ fn unpack(
     input.rewind()?;
     let mut magic = [0; 8];
     input.read_exact(&mut magic)?;
-    if &magic != b"ERSP0004" {
+    if &magic != b"ERSP0005" {
         return Err(io::Error::other("snapshot version"));
     }
     let mut length = [0; 8];
@@ -471,6 +495,6 @@ fn unpack(
         return Err(io::Error::other("snapshot trailing bytes"));
     }
     let control = io::BufReader::new(std::fs::File::open(streams.join(".control"))?);
-    let (subscriptions, forks) = serde_json::from_reader(control).map_err(io::Error::other)?;
-    Ok((time, subscriptions, forks))
+    let (subscriptions, forks, receipts) = serde_json::from_reader(control).map_err(io::Error::other)?;
+    Ok((time, subscriptions, forks, receipts))
 }

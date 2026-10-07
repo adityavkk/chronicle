@@ -13,6 +13,52 @@ import re
 import sys
 
 
+def summarize_progress(samples, begin, end):
+    nodes, groups = {}, {}
+    for sample in samples:
+        for observation in sample.get("replicas", []):
+            when = observation["end_unix_ms"]
+            if not begin <= observation["unix_ms"] <= when <= end:
+                continue
+            node = str(observation["node"])
+            row = nodes.setdefault(node, dict(heads=[], errors=0))
+            row["errors"] += int("error" in observation or observation.get("head_status") != 200)
+            if "committed_bytes" in observation:
+                row["heads"].append(dict(unix_ms=when, bytes=observation["committed_bytes"],
+                                        collection_ms=when-observation["unix_ms"]))
+            for group, metrics in enumerate(observation.get("groups", [])):
+                if metrics.get("last_log_index") is None or metrics.get("last_applied") is None:
+                    continue
+                lag = metrics["last_log_index"]-metrics["last_applied"]["index"]
+                state = groups.setdefault(f"{node}/{group}", dict(unapplied_entries=[], matched_gap_entries=[], snapshots=set()))
+                state["unapplied_entries"].append(lag)
+                for matched in (metrics.get("replication") or {}).values():
+                    if matched is not None:
+                        state["matched_gap_entries"].append(metrics["last_log_index"]-matched["index"])
+                snapshot = metrics.get("snapshot")
+                if snapshot is not None:
+                    state["snapshots"].add(snapshot["index"])
+    for row in nodes.values():
+        heads = row.pop("heads")
+        row["samples"] = len(heads)
+        if heads:
+            row.update(first=heads[0], last=heads[-1], max_collection_ms=max(h["collection_ms"] for h in heads))
+        if len(heads) >= 2:
+            seconds = (heads[-1]["unix_ms"]-heads[0]["unix_ms"])/1000
+            if seconds > 0:
+                row["committed_bytes_per_second"] = (heads[-1]["bytes"]-heads[0]["bytes"])/seconds
+    for state in groups.values():
+        for key in ("unapplied_entries", "matched_gap_entries"):
+            values = state[key]
+            state[key] = dict(samples=len(values), first=values[0], last=values[-1],
+                              minimum=min(values), maximum=max(values)) if values else None
+        state["observed_snapshot_indices"] = sorted(state.pop("snapshots"))
+    return dict(nodes=nodes, groups=groups,
+        scope="Committed HEAD byte rates between individual observation completions, not exact client-window acks. "
+              "Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. "
+              "Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible.")
+
+
 def summarize(directory):
     root = Path(directory)
     provenance = json.loads((root / "provenance.json").read_text())
@@ -33,6 +79,7 @@ def summarize(directory):
         first, last, sockets = {}, {}, {}
         peaks = dict(sut_rss_bytes=0,client_rss_bytes=0)
         window = []
+        progress = []
         samples = cell / "samples.jsonl.gz"
         if samples.exists():
             with gzip.open(samples,"rt") as file:
@@ -41,6 +88,8 @@ def summarize(directory):
                     if not begin <= sample["unix_ms"] <= end:
                         continue
                     window.append(sample["unix_ms"])
+                    if "replicas" in sample:
+                        progress.append(sample)
                     for pid, process in sample["processes"].items():
                         first.setdefault(pid,process)
                         last[pid] = process
@@ -62,6 +111,9 @@ def summarize(directory):
                 sut_write_bytes=sum(last[p]["io"]["write_bytes"]-first[p]["io"]["write_bytes"] for p in nodes if p in first),
                 sut_read_bytes=sum(last[p]["io"]["read_bytes"]-first[p]["io"]["read_bytes"] for p in nodes if p in first))
         row["resources"] = resources
+        if result.get("progress_sampling"):
+            row["progress"] = summarize_progress(progress, begin, end)
+            row["drain"] = result.get("drain")
         storage_file = cell / "storage-bytes.json"
         if storage_file.exists():
             storage = json.loads(storage_file.read_text())
@@ -85,7 +137,9 @@ def summarize(directory):
             row["wal_diagnostics"] = dict(staged_records=staged, fsyncs=syncs,
                 client_acks_all_phases=acknowledgements,
                 fsyncs_per_ack=syncs/acknowledgements, records_per_ack=staged/acknowledgements,
-                scope="aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs")
+                final_counter_interval_captured=result.get("diagnostic_tail_captured", result["verdict"] == "PASS"),
+                scope="aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. "
+                      "If final_counter_interval_captured is false, counters and ratios are lower bounds only.")
         rows.append(row)
     output = dict(provenance_sha256=hashlib.sha256((root/"provenance.json").read_bytes()).hexdigest(),
                   analyzer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), rows=rows,

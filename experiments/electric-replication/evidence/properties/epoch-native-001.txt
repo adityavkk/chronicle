@@ -1,0 +1,138 @@
+   Compiling openraft v0.9.25 (/home/user/workspace/repo/experiments/electric-replication/vendor/openraft)
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+error[E0277]: the trait bound `[({integer}, BasicNode); 1]: IntoNodes<u64, BasicNode>` is not satisfied
+   --> src/replication/batch.rs:236:25
+    |
+236 |         raft.initialize([(7, BasicNode::new("127.0.0.1:1"))]).await.unwrap();
+    |              ---------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |              |
+    |              required by a bound introduced by this call
+    |
+    = help: the trait `openraft::membership::into_nodes::IntoNodes<u64, openraft::BasicNode>` is not implemented for `[({integer}, openraft::BasicNode); 1]`
+help: the following other types implement trait `openraft::membership::into_nodes::IntoNodes<NID, N>`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/membership/into_nodes.rs:31:1
+    |
+ 31 | / impl<NID, N> IntoNodes<NID, N> for ()
+ 32 | | where
+ 33 | |     N: Node,
+ 34 | |     NID: NodeId,
+    | |________________^ `()`
+...
+ 41 | / impl<NID, N> IntoNodes<NID, N> for BTreeSet<NID>
+ 42 | | where
+ 43 | |     N: Node,
+ 44 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeSet<NID>`
+...
+ 51 | / impl<NID, N> IntoNodes<NID, N> for Option<BTreeSet<NID>>
+ 52 | | where
+ 53 | |     N: Node,
+ 54 | |     NID: NodeId,
+    | |________________^ `std::option::Option<std::collections::BTreeSet<NID>>`
+...
+ 64 | / impl<NID, N> IntoNodes<NID, N> for BTreeMap<NID, N>
+ 65 | | where
+ 66 | |     N: Node,
+ 67 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeMap<NID, N>`
+note: required by a bound in `openraft::Raft::<C>::initialize`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/raft/mod.rs:737:12
+    |
+732 |     pub async fn initialize<T>(
+    |                  ---------- required by a bound in this associated function
+...
+737 |         T: IntoNodes<C::NodeId, C::Node> + Debug,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Raft::<C>::initialize`
+    = note: the full name for the type has been written to '/home/user/workspace/repo/experiments/electric-replication/engine/target/debug/deps/durable_streams_server-d15addeb649b1f7a.long-type-12648837635209367540.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `[({integer}, BasicNode); 1]: IntoNodes<u64, BasicNode>` is not satisfied
+   --> src/replication/batch.rs:236:9
+    |
+236 |         raft.initialize([(7, BasicNode::new("127.0.0.1:1"))]).await.unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `openraft::membership::into_nodes::IntoNodes<u64, openraft::BasicNode>` is not implemented for `[({integer}, openraft::BasicNode); 1]`
+help: the following other types implement trait `openraft::membership::into_nodes::IntoNodes<NID, N>`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/membership/into_nodes.rs:31:1
+    |
+ 31 | / impl<NID, N> IntoNodes<NID, N> for ()
+ 32 | | where
+ 33 | |     N: Node,
+ 34 | |     NID: NodeId,
+    | |________________^ `()`
+...
+ 41 | / impl<NID, N> IntoNodes<NID, N> for BTreeSet<NID>
+ 42 | | where
+ 43 | |     N: Node,
+ 44 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeSet<NID>`
+...
+ 51 | / impl<NID, N> IntoNodes<NID, N> for Option<BTreeSet<NID>>
+ 52 | | where
+ 53 | |     N: Node,
+ 54 | |     NID: NodeId,
+    | |________________^ `std::option::Option<std::collections::BTreeSet<NID>>`
+...
+ 64 | / impl<NID, N> IntoNodes<NID, N> for BTreeMap<NID, N>
+ 65 | | where
+ 66 | |     N: Node,
+ 67 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeMap<NID, N>`
+note: required by a bound in `openraft::Raft::<C>::initialize`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/raft/mod.rs:737:12
+    |
+732 |     pub async fn initialize<T>(
+    |                  ---------- required by a bound in this associated function
+...
+737 |         T: IntoNodes<C::NodeId, C::Node> + Debug,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Raft::<C>::initialize`
+    = note: the full name for the type has been written to '/home/user/workspace/repo/experiments/electric-replication/engine/target/debug/deps/durable_streams_server-d15addeb649b1f7a.long-type-12648837635209367540.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `[({integer}, BasicNode); 1]: IntoNodes<u64, BasicNode>` is not satisfied
+   --> src/replication/batch.rs:236:63
+    |
+236 |         raft.initialize([(7, BasicNode::new("127.0.0.1:1"))]).await.unwrap();
+    |                                                               ^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `openraft::membership::into_nodes::IntoNodes<u64, openraft::BasicNode>` is not implemented for `[({integer}, openraft::BasicNode); 1]`
+help: the following other types implement trait `openraft::membership::into_nodes::IntoNodes<NID, N>`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/membership/into_nodes.rs:31:1
+    |
+ 31 | / impl<NID, N> IntoNodes<NID, N> for ()
+ 32 | | where
+ 33 | |     N: Node,
+ 34 | |     NID: NodeId,
+    | |________________^ `()`
+...
+ 41 | / impl<NID, N> IntoNodes<NID, N> for BTreeSet<NID>
+ 42 | | where
+ 43 | |     N: Node,
+ 44 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeSet<NID>`
+...
+ 51 | / impl<NID, N> IntoNodes<NID, N> for Option<BTreeSet<NID>>
+ 52 | | where
+ 53 | |     N: Node,
+ 54 | |     NID: NodeId,
+    | |________________^ `std::option::Option<std::collections::BTreeSet<NID>>`
+...
+ 64 | / impl<NID, N> IntoNodes<NID, N> for BTreeMap<NID, N>
+ 65 | | where
+ 66 | |     N: Node,
+ 67 | |     NID: NodeId,
+    | |________________^ `std::collections::BTreeMap<NID, N>`
+note: required by a bound in `openraft::Raft::<C>::initialize`
+   --> /home/user/workspace/repo/experiments/electric-replication/vendor/openraft/src/raft/mod.rs:737:12
+    |
+732 |     pub async fn initialize<T>(
+    |                  ---------- required by a bound in this associated function
+...
+737 |         T: IntoNodes<C::NodeId, C::Node> + Debug,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Raft::<C>::initialize`
+    = note: the full name for the type has been written to '/home/user/workspace/repo/experiments/electric-replication/engine/target/debug/deps/durable_streams_server-d15addeb649b1f7a.long-type-12648837635209367540.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `durable-streams` (bin "durable-streams-server" test) due to 3 previous errors

@@ -72,6 +72,7 @@ where C: RaftTypeConfig
     ClientWriteRequest {
         app_data: C::D,
         tx: ResponderOf<C>,
+        expected_leader: Option<crate::CommittedLeaderId<C::NodeId>>,
     },
 
     CheckIsLeaderRequest {

@@ -1,0 +1,2224 @@
+{
+  "provenance_sha256": "bd8fcec88e3386608688bf2cf4ff4f354117df6a6f7486a817b60f8735358415",
+  "analyzer_sha256": "15a191239927aa73170e2ab7f2b8d80bfa8b7cdc110c8d25811f49acd3587928",
+  "rows": [
+    {
+      "cell": "async-writes-001-native-write-1-256-repeat1",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 2969838,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 98994.6,
+        "per_stream_ops_per_sec_mean": 98994.6,
+        "latency_ms": {
+          "count": 2969838,
+          "mean_ms": 2.5816939159644403,
+          "p50_ms": 2.391,
+          "p90_ms": 3.105,
+          "p99_ms": 5.171,
+          "p999_ms": 19.743,
+          "max_ms": 310.783
+        },
+        "measure_start_unix_ms": 1791395255308,
+        "measure_end_unix_ms": 1791395285308,
+        "ok_total_all_phases": 3221865,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395255308,
+        "end_unix_ms": 1791395285308,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 7380992,
+          "client_rss_bytes": 59740160
+        },
+        "samples": 57,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.376,
+        "average_sut_cpu_cores": 1.753131808278867,
+        "sut_write_bytes": 1856733184,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395255596,
+              "bytes": 69678592,
+              "collection_ms": 3
+            },
+            "last": {
+              "unix_ms": 1791395284970,
+              "bytes": 817693696,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 5,
+            "committed_bytes_per_second": 25465210.86675291
+          }
+        },
+        "groups": {},
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 1.2394859950290993,
+        "target_bytes": 824797440,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 824797440
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 849963589,
+        "wal": 25165624,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 3221865,
+        "fsyncs": 67695,
+        "client_acks_all_phases": 3221865,
+        "fsyncs_per_ack": 0.021011122439953258,
+        "records_per_ack": 1.0,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-native-write-1-256-repeat2",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 2979372,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 99312.4,
+        "per_stream_ops_per_sec_mean": 99312.4,
+        "latency_ms": {
+          "count": 2979372,
+          "mean_ms": 2.573338735478479,
+          "p50_ms": 2.425,
+          "p90_ms": 3.129,
+          "p99_ms": 4.583,
+          "p999_ms": 20.111,
+          "max_ms": 344.319
+        },
+        "measure_start_unix_ms": 1791395520985,
+        "measure_end_unix_ms": 1791395550985,
+        "ok_total_all_phases": 3274219,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395520985,
+        "end_unix_ms": 1791395550985,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6279168,
+          "client_rss_bytes": 56946688
+        },
+        "samples": 58,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.627,
+        "average_sut_cpu_cores": 1.7558308299861614,
+        "sut_write_bytes": 1850019840,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 58,
+            "first": {
+              "unix_ms": 1791395521084,
+              "bytes": 78060800,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395550711,
+              "bytes": 830838016,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 2,
+            "committed_bytes_per_second": 25408486.04313633
+          }
+        },
+        "groups": {},
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 0.7320719960262068,
+        "target_bytes": 838200064,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 838200064
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 871754621,
+        "wal": 33554032,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 3274219,
+        "fsyncs": 64000,
+        "client_acks_all_phases": 3274219,
+        "fsyncs_per_ack": 0.019546646085677227,
+        "records_per_ack": 1.0,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-native-write-1-256-repeat3",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 2653529,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 88450.96666666666,
+        "per_stream_ops_per_sec_mean": 88450.96666666666,
+        "latency_ms": {
+          "count": 2653529,
+          "mean_ms": 2.889530676695074,
+          "p50_ms": 2.445,
+          "p90_ms": 4.351,
+          "p99_ms": 9.223,
+          "p999_ms": 19.679,
+          "max_ms": 56.831
+        },
+        "measure_start_unix_ms": 1791395635807,
+        "measure_end_unix_ms": 1791395665807,
+        "ok_total_all_phases": 2859671,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395635807,
+        "end_unix_ms": 1791395665807,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6086656,
+          "client_rss_bytes": 58646528
+        },
+        "samples": 58,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.689,
+        "average_sut_cpu_cores": 1.4830408568830207,
+        "sut_write_bytes": 1685774336,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 58,
+            "first": {
+              "unix_ms": 1791395635886,
+              "bytes": 54717440,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395665576,
+              "bytes": 728198656,
+              "collection_ms": 2
+            },
+            "max_collection_ms": 6,
+            "committed_bytes_per_second": 22683772.852812394
+          }
+        },
+        "groups": {},
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 0.5653920015902258,
+        "target_bytes": 732075776,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 732075776
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 765630333,
+        "wal": 33554032,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 2859671,
+        "fsyncs": 64472,
+        "client_acks_all_phases": 2859671,
+        "fsyncs_per_ack": 0.022545250834798827,
+        "records_per_ack": 1.0,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft1-write-1-256-repeat1",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 1271318,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 42377.26666666667,
+        "per_stream_ops_per_sec_mean": 42377.26666666667,
+        "latency_ms": {
+          "count": 1271318,
+          "mean_ms": 6.036722488787215,
+          "p50_ms": 5.183,
+          "p90_ms": 8.023,
+          "p99_ms": 14.495,
+          "p999_ms": 27.727,
+          "max_ms": 821.247
+        },
+        "measure_start_unix_ms": 1791395292684,
+        "measure_end_unix_ms": 1791395322684,
+        "ok_total_all_phases": 1409822,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395292684,
+        "end_unix_ms": 1791395322684,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 13615104,
+          "client_rss_bytes": 58920960
+        },
+        "samples": 56,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.676,
+        "average_sut_cpu_cores": 1.163566518398706,
+        "sut_write_bytes": 1749237760,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395292831,
+              "bytes": 37198336,
+              "collection_ms": 3
+            },
+            "last": {
+              "unix_ms": 1791395322507,
+              "bytes": 358577920,
+              "collection_ms": 3
+            },
+            "max_collection_ms": 708,
+            "committed_bytes_per_second": 10829612.61625556
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "matched_gap_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": [
+              10000,
+              20001,
+              30001
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 0.7176450017141178,
+        "target_bytes": 360914432,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 360914432
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 811155984,
+        "wal": 175913126,
+        "snapshots": 274322753
+      },
+      "wal_diagnostics": {
+        "staged_records": 79556,
+        "fsyncs": 78060,
+        "client_acks_all_phases": 1409822,
+        "fsyncs_per_ack": 0.05536869193415907,
+        "records_per_ack": 0.05642981879982012,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft1-write-1-256-repeat2",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 1277075,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 42569.166666666664,
+        "per_stream_ops_per_sec_mean": 42569.166666666664,
+        "latency_ms": {
+          "count": 1277075,
+          "mean_ms": 6.009674307303787,
+          "p50_ms": 5.223,
+          "p90_ms": 7.467,
+          "p99_ms": 13.447,
+          "p999_ms": 40.063,
+          "max_ms": 1024.511
+        },
+        "measure_start_unix_ms": 1791395407610,
+        "measure_end_unix_ms": 1791395437610,
+        "ok_total_all_phases": 1362079,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395407610,
+        "end_unix_ms": 1791395437610,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 16035840,
+          "client_rss_bytes": 62222336
+        },
+        "samples": 54,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.439,
+        "average_sut_cpu_cores": 1.1878800230986106,
+        "sut_write_bytes": 1712611328,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 54,
+            "first": {
+              "unix_ms": 1791395407877,
+              "bytes": 23474944,
+              "collection_ms": 2
+            },
+            "last": {
+              "unix_ms": 1791395437316,
+              "bytes": 344830208,
+              "collection_ms": 3
+            },
+            "max_collection_ms": 803,
+            "committed_bytes_per_second": 10915970.78705119
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 54,
+              "first": 1,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 7
+            },
+            "matched_gap_entries": {
+              "samples": 54,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": [
+              10000,
+              20001,
+              30002
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 54,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 54,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 0.7831139955669641,
+        "target_bytes": 348692224,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 348692224
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 785118226,
+        "wal": 167608488,
+        "snapshots": 268811841
+      },
+      "wal_diagnostics": {
+        "staged_records": 77226,
+        "fsyncs": 75683,
+        "client_acks_all_phases": 1362079,
+        "fsyncs_per_ack": 0.05556432482991075,
+        "records_per_ack": 0.05669715192731112,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft1-write-1-256-repeat3",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 1160296,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 38676.53333333333,
+        "per_stream_ops_per_sec_mean": 38676.53333333333,
+        "latency_ms": {
+          "count": 1160296,
+          "mean_ms": 6.615794090473488,
+          "p50_ms": 5.383,
+          "p90_ms": 9.567,
+          "p99_ms": 15.823,
+          "p999_ms": 37.567,
+          "max_ms": 1015.295
+        },
+        "measure_start_unix_ms": 1791395673114,
+        "measure_end_unix_ms": 1791395703114,
+        "ok_total_all_phases": 1265988,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395673114,
+        "end_unix_ms": 1791395703114,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 13971456,
+          "client_rss_bytes": 58867712
+        },
+        "samples": 56,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 29.562,
+        "average_sut_cpu_cores": 1.0357891888234896,
+        "sut_write_bytes": 1624825856,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395673268,
+              "bytes": 28872960,
+              "collection_ms": 2
+            },
+            "last": {
+              "unix_ms": 1791395702828,
+              "bytes": 321926400,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 739,
+            "committed_bytes_per_second": 9913851.150202977
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 2,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 10
+            },
+            "matched_gap_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": [
+              10000,
+              20001,
+              30002
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 0.5735269951401278,
+        "target_bytes": 324092928,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 324092928
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 714463437,
+        "wal": 125653091,
+        "snapshots": 264711745
+      },
+      "wal_diagnostics": {
+        "staged_records": 74712,
+        "fsyncs": 73173,
+        "client_acks_all_phases": 1265988,
+        "fsyncs_per_ack": 0.0577991260580669,
+        "records_per_ack": 0.059014777391254894,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-local-write-1-256-repeat1",
+      "arm": "raft3-local",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "FAIL",
+      "error": "AssertionError()",
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 852896,
+          "backpressure": 134911,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 28429.866666666665,
+        "per_stream_ops_per_sec_mean": 28429.866666666665,
+        "latency_ms": {
+          "count": 852896,
+          "mean_ms": 5.405982428103768,
+          "p50_ms": 5.151,
+          "p90_ms": 8.671,
+          "p99_ms": 12.479,
+          "p999_ms": 29.103,
+          "max_ms": 145.151
+        },
+        "measure_start_unix_ms": 1791395331601,
+        "measure_end_unix_ms": 1791395361601,
+        "ok_total_all_phases": 939707,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395331601,
+        "end_unix_ms": 1791395361601,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 85331968,
+          "client_rss_bytes": 60260352
+        },
+        "samples": 55,
+        "observed_replication_sent_bytes_lower_bound": 834764151,
+        "sampled_seconds": 29.322,
+        "average_sut_cpu_cores": 2.190164381692927,
+        "sut_write_bytes": 2940620800,
+        "sut_read_bytes": 61829120
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 55,
+            "first": {
+              "unix_ms": 1791395331829,
+              "bytes": 23975680,
+              "collection_ms": 14
+            },
+            "last": {
+              "unix_ms": 1791395361142,
+              "bytes": 236117248,
+              "collection_ms": 5
+            },
+            "max_collection_ms": 540,
+            "committed_bytes_per_second": 7237115.5460034795
+          },
+          "2": {
+            "errors": 0,
+            "samples": 55,
+            "first": {
+              "unix_ms": 1791395331832,
+              "bytes": 24008960,
+              "collection_ms": 3
+            },
+            "last": {
+              "unix_ms": 1791395361143,
+              "bytes": 236117248,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 27,
+            "committed_bytes_per_second": 7236473.951758726
+          },
+          "3": {
+            "errors": 0,
+            "samples": 55,
+            "first": {
+              "unix_ms": 1791395331833,
+              "bytes": 24008960,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395361144,
+              "bytes": 236117248,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 18,
+            "committed_bytes_per_second": 7236473.951758726
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 49,
+              "last": 14,
+              "minimum": 0,
+              "maximum": 77
+            },
+            "matched_gap_entries": {
+              "samples": 165,
+              "first": 0,
+              "last": 7,
+              "minimum": 0,
+              "maximum": 49
+            },
+            "observed_snapshot_indices": [
+              10001,
+              20003
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 165,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 4,
+              "last": 7,
+              "minimum": 0,
+              "maximum": 57
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10001,
+              20003
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 4,
+              "last": 4,
+              "minimum": 0,
+              "maximum": 39
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              9999,
+              20003
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 55,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 2.0005449987365864,
+        "target_bytes": 240564992,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 240564992
+          },
+          {
+            "node": 2,
+            "committed_bytes": 240564992
+          },
+          {
+            "node": 3,
+            "committed_bytes": 240564992
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1721431699,
+        "wal": 452265805,
+        "snapshots": 538000152
+      },
+      "wal_diagnostics": {
+        "staged_records": 94144,
+        "fsyncs": 54027,
+        "client_acks_all_phases": 939707,
+        "fsyncs_per_ack": 0.05749345274644118,
+        "records_per_ack": 0.10018441918598031,
+        "final_counter_interval_captured": false,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-local-write-1-256-repeat2",
+      "arm": "raft3-local",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "FAIL",
+      "error": "AssertionError()",
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 843612,
+          "backpressure": 113720,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 28120.4,
+        "per_stream_ops_per_sec_mean": 28120.4,
+        "latency_ms": {
+          "count": 843612,
+          "mean_ms": 6.029987366229969,
+          "p50_ms": 5.527,
+          "p90_ms": 9.023,
+          "p99_ms": 13.895,
+          "p999_ms": 138.111,
+          "max_ms": 269.567
+        },
+        "measure_start_unix_ms": 1791395445905,
+        "measure_end_unix_ms": 1791395475905,
+        "ok_total_all_phases": 939250,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395445905,
+        "end_unix_ms": 1791395475905,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 83267584,
+          "client_rss_bytes": 59879424
+        },
+        "samples": 56,
+        "observed_replication_sent_bytes_lower_bound": 844779952,
+        "sampled_seconds": 29.532,
+        "average_sut_cpu_cores": 2.124136529865908,
+        "sut_write_bytes": 2965819392,
+        "sut_read_bytes": 4096
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395446090,
+              "bytes": 25985536,
+              "collection_ms": 10
+            },
+            "last": {
+              "unix_ms": 1791395475619,
+              "bytes": 238677504,
+              "collection_ms": 7
+            },
+            "max_collection_ms": 398,
+            "committed_bytes_per_second": 7202816.485488841
+          },
+          "2": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395446093,
+              "bytes": 26019072,
+              "collection_ms": 3
+            },
+            "last": {
+              "unix_ms": 1791395475621,
+              "bytes": 238677504,
+              "collection_ms": 2
+            },
+            "max_collection_ms": 66,
+            "committed_bytes_per_second": 7201924.681658087
+          },
+          "3": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395446094,
+              "bytes": 26019072,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395475622,
+              "bytes": 238677504,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 58,
+            "committed_bytes_per_second": 7201924.681658087
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 9,
+              "last": 8,
+              "minimum": 0,
+              "maximum": 86
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 3,
+              "minimum": 0,
+              "maximum": 76
+            },
+            "observed_snapshot_indices": [
+              10001,
+              20007
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 3,
+              "minimum": 0,
+              "maximum": 64
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10001,
+              20002
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 8,
+              "last": 3,
+              "minimum": 0,
+              "maximum": 64
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10001,
+              20002
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 1.9427469960646704,
+        "target_bytes": 240448000,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 240448000
+          },
+          {
+            "node": 2,
+            "committed_bytes": 240448000
+          },
+          {
+            "node": 3,
+            "committed_bytes": 240448000
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1695430338,
+        "wal": 401890284,
+        "snapshots": 562325536
+      },
+      "wal_diagnostics": {
+        "staged_records": 89499,
+        "fsyncs": 52784,
+        "client_acks_all_phases": 939250,
+        "fsyncs_per_ack": 0.056198030343359066,
+        "records_per_ack": 0.0952877295714666,
+        "final_counter_interval_captured": false,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-local-write-1-256-repeat3",
+      "arm": "raft3-local",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "FAIL",
+      "error": "AssertionError()",
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 900836,
+          "backpressure": 122710,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 30027.866666666665,
+        "per_stream_ops_per_sec_mean": 30027.866666666665,
+        "latency_ms": {
+          "count": 900836,
+          "mean_ms": 5.444735211514633,
+          "p50_ms": 5.259,
+          "p90_ms": 8.615,
+          "p99_ms": 12.143,
+          "p999_ms": 24.607,
+          "max_ms": 61.983
+        },
+        "measure_start_unix_ms": 1791395559380,
+        "measure_end_unix_ms": 1791395589380,
+        "ok_total_all_phases": 990669,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395559380,
+        "end_unix_ms": 1791395589380,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 84709376,
+          "client_rss_bytes": 60592128
+        },
+        "samples": 56,
+        "observed_replication_sent_bytes_lower_bound": 903159568,
+        "sampled_seconds": 29.488,
+        "average_sut_cpu_cores": 2.2117471513836136,
+        "sut_write_bytes": 3102801920,
+        "sut_read_bytes": 4096
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395559614,
+              "bytes": 24955136,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395589107,
+              "bytes": 251134976,
+              "collection_ms": 6
+            },
+            "max_collection_ms": 246,
+            "committed_bytes_per_second": 7668932.967144746
+          },
+          "2": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395559616,
+              "bytes": 24955136,
+              "collection_ms": 2
+            },
+            "last": {
+              "unix_ms": 1791395589110,
+              "bytes": 251283200,
+              "collection_ms": 3
+            },
+            "max_collection_ms": 29,
+            "committed_bytes_per_second": 7673698.514952194
+          },
+          "3": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395559617,
+              "bytes": 24955136,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395589111,
+              "bytes": 251283200,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 4,
+            "committed_bytes_per_second": 7673698.514952194
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 26,
+              "minimum": 0,
+              "maximum": 49
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 4,
+              "minimum": 0,
+              "maximum": 37
+            },
+            "observed_snapshot_indices": [
+              9999,
+              20005
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 1,
+              "last": 18,
+              "minimum": 0,
+              "maximum": 23
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              9999,
+              20005
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 1,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 23
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              9999,
+              20005
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 2.0720379980048165,
+        "target_bytes": 253611264,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 253611264
+          },
+          {
+            "node": 2,
+            "committed_bytes": 253611264
+          },
+          {
+            "node": 3,
+            "committed_bytes": 253611264
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1814144266,
+        "wal": 477329218,
+        "snapshots": 564558489
+      },
+      "wal_diagnostics": {
+        "staged_records": 95105,
+        "fsyncs": 55511,
+        "client_acks_all_phases": 990669,
+        "fsyncs_per_ack": 0.056033851871815914,
+        "records_per_ack": 0.09600078330905681,
+        "final_counter_interval_captured": false,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-write-1-256-repeat1",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 751673,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 25055.766666666666,
+        "per_stream_ops_per_sec_mean": 25055.766666666666,
+        "latency_ms": {
+          "count": 751673,
+          "mean_ms": 10.213887971232154,
+          "p50_ms": 9.247,
+          "p90_ms": 11.159,
+          "p99_ms": 14.575,
+          "p999_ms": 333.055,
+          "max_ms": 1412.095
+        },
+        "measure_start_unix_ms": 1791395369665,
+        "measure_end_unix_ms": 1791395399665,
+        "ok_total_all_phases": 835845,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395369665,
+        "end_unix_ms": 1791395399665,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 40157184,
+          "client_rss_bytes": 56745984
+        },
+        "samples": 56,
+        "observed_replication_sent_bytes_lower_bound": 695405367,
+        "sampled_seconds": 29.573,
+        "average_sut_cpu_cores": 1.5723802116795726,
+        "sut_write_bytes": 2637205504,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395369827,
+              "bytes": 22667008,
+              "collection_ms": 2
+            },
+            "last": {
+              "unix_ms": 1791395399399,
+              "bytes": 212133120,
+              "collection_ms": 2
+            },
+            "max_collection_ms": 301,
+            "committed_bytes_per_second": 6406942.783714324
+          },
+          "2": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395369828,
+              "bytes": 22667008,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395399400,
+              "bytes": 212133120,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 11,
+            "committed_bytes_per_second": 6406942.783714324
+          },
+          "3": {
+            "errors": 0,
+            "samples": 56,
+            "first": {
+              "unix_ms": 1791395369829,
+              "bytes": 22667008,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395399401,
+              "bytes": 212133632,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 307,
+            "committed_bytes_per_second": 6406960.097389422
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 1,
+              "last": 9,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "observed_snapshot_indices": [
+              10002,
+              20003
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 168,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10002,
+              20003
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 1,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 12
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10002,
+              20003
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 56,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 1.4584410018869676,
+        "target_bytes": 213976320,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 213976320
+          },
+          {
+            "node": 2,
+            "committed_bytes": 213976320
+          },
+          {
+            "node": 3,
+            "committed_bytes": 213976320
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1451275998,
+        "wal": 326609334,
+        "snapshots": 482719881
+      },
+      "wal_diagnostics": {
+        "staged_records": 109347,
+        "fsyncs": 86423,
+        "client_acks_all_phases": 835845,
+        "fsyncs_per_ack": 0.1033959645628077,
+        "records_per_ack": 0.13082210218401738,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-write-1-256-repeat2",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 780827,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 26027.566666666666,
+        "per_stream_ops_per_sec_mean": 26027.566666666666,
+        "latency_ms": {
+          "count": 780827,
+          "mean_ms": 9.844967466545066,
+          "p50_ms": 8.959,
+          "p90_ms": 10.863,
+          "p99_ms": 14.431,
+          "p999_ms": 168.831,
+          "max_ms": 1004.543
+        },
+        "measure_start_unix_ms": 1791395483097,
+        "measure_end_unix_ms": 1791395513097,
+        "ok_total_all_phases": 858646,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395483097,
+        "end_unix_ms": 1791395513097,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 38305792,
+          "client_rss_bytes": 56610816
+        },
+        "samples": 57,
+        "observed_replication_sent_bytes_lower_bound": 721723083,
+        "sampled_seconds": 29.4,
+        "average_sut_cpu_cores": 1.585374149659864,
+        "sut_write_bytes": 2705768448,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395483281,
+              "bytes": 21106176,
+              "collection_ms": 5
+            },
+            "last": {
+              "unix_ms": 1791395512678,
+              "bytes": 217708032,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 187,
+            "committed_bytes_per_second": 6687820.389835698
+          },
+          "2": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395483282,
+              "bytes": 21106176,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395512679,
+              "bytes": 217708032,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 6,
+            "committed_bytes_per_second": 6687820.389835698
+          },
+          "3": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395483283,
+              "bytes": 21106176,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395512680,
+              "bytes": 217708032,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 18,
+            "committed_bytes_per_second": 6687820.389835698
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 10
+            },
+            "matched_gap_entries": {
+              "samples": 171,
+              "first": 0,
+              "last": 2,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "observed_snapshot_indices": [
+              9999,
+              19999
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 171,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 1,
+              "last": 1,
+              "minimum": 0,
+              "maximum": 8
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              9999,
+              19999
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 1,
+              "last": 1,
+              "minimum": 0,
+              "maximum": 10
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              9999,
+              19999
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 1.9169070001225919,
+        "target_bytes": 219813376,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 219813376
+          },
+          {
+            "node": 2,
+            "committed_bytes": 219813376
+          },
+          {
+            "node": 3,
+            "committed_bytes": 219813376
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1542548956,
+        "wal": 402031924,
+        "snapshots": 481059465
+      },
+      "wal_diagnostics": {
+        "staged_records": 112622,
+        "fsyncs": 88978,
+        "client_acks_all_phases": 858646,
+        "fsyncs_per_ack": 0.10362594130759359,
+        "records_per_ack": 0.1311623183477242,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    },
+    {
+      "cell": "async-writes-001-raft3-write-1-256-repeat3",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 30,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 30.0,
+        "counts": {
+          "ok": 846082,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 28202.733333333334,
+        "per_stream_ops_per_sec_mean": 28202.733333333334,
+        "latency_ms": {
+          "count": 846082,
+          "mean_ms": 9.074220148874504,
+          "p50_ms": 8.671,
+          "p90_ms": 10.559,
+          "p99_ms": 14.759,
+          "p999_ms": 74.559,
+          "max_ms": 516.351
+        },
+        "measure_start_unix_ms": 1791395596793,
+        "measure_end_unix_ms": 1791395626793,
+        "ok_total_all_phases": 930432,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791395596793,
+        "end_unix_ms": 1791395626793,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 38076416,
+          "client_rss_bytes": 57262080
+        },
+        "samples": 57,
+        "observed_replication_sent_bytes_lower_bound": 780561472,
+        "sampled_seconds": 29.373,
+        "average_sut_cpu_cores": 1.6593470193715316,
+        "sut_write_bytes": 2871103488,
+        "sut_read_bytes": 0
+      },
+      "progress": {
+        "nodes": {
+          "1": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395596946,
+              "bytes": 22712064,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395626324,
+              "bytes": 235269120,
+              "collection_ms": 5
+            },
+            "max_collection_ms": 127,
+            "committed_bytes_per_second": 7235245.966369392
+          },
+          "2": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395596947,
+              "bytes": 22712064,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395626325,
+              "bytes": 235269120,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 3,
+            "committed_bytes_per_second": 7235245.966369392
+          },
+          "3": {
+            "errors": 0,
+            "samples": 57,
+            "first": {
+              "unix_ms": 1791395596948,
+              "bytes": 22712064,
+              "collection_ms": 1
+            },
+            "last": {
+              "unix_ms": 1791395626326,
+              "bytes": 235334400,
+              "collection_ms": 1
+            },
+            "max_collection_ms": 3,
+            "committed_bytes_per_second": 7237468.037306828
+          }
+        },
+        "groups": {
+          "1/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "matched_gap_entries": {
+              "samples": 171,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 10
+            },
+            "observed_snapshot_indices": [
+              10002,
+              20005
+            ]
+          },
+          "1/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": {
+              "samples": 171,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "observed_snapshot_indices": []
+          },
+          "2/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 1,
+              "last": 1,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10002,
+              20005
+            ]
+          },
+          "2/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          },
+          "3/0": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 1,
+              "last": 11,
+              "minimum": 0,
+              "maximum": 11
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": [
+              10002,
+              20005
+            ]
+          },
+          "3/1": {
+            "unapplied_entries": {
+              "samples": 57,
+              "first": 0,
+              "last": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "matched_gap_entries": null,
+            "observed_snapshot_indices": []
+          }
+        },
+        "scope": "Committed HEAD byte rates between individual observation completions, not exact client-window acks. Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible."
+      },
+      "drain": {
+        "observed_ms": 3.1338810003944673,
+        "target_bytes": 238190592,
+        "replicas": [
+          {
+            "node": 1,
+            "committed_bytes": 238190592
+          },
+          {
+            "node": 2,
+            "committed_bytes": 238190592
+          },
+          {
+            "node": 3,
+            "committed_bytes": 238190592
+          }
+        ],
+        "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+      },
+      "final_storage_bytes": {
+        "total": 1674567857,
+        "wal": 477409481,
+        "snapshots": 482569353
+      },
+      "wal_diagnostics": {
+        "staged_records": 122354,
+        "fsyncs": 96407,
+        "client_acks_all_phases": 930432,
+        "fsyncs_per_ack": 0.10361530987756225,
+        "records_per_ack": 0.13150235589489614,
+        "final_counter_interval_captured": true,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. If final_counter_interval_captured is false, counters and ratios are lower bounds only."
+      }
+    }
+  ],
+  "scope": "single-host resource qualification; profile cells are perturbed and never capacity rows"
+}

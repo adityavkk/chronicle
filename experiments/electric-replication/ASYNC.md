@@ -1,8 +1,9 @@
 # Local acceptance without speculative reads
 
 Settled user contract, specified before implementation. The strong default remains
-quorum-fsync. This document does not claim the async implementation or its gates
-have passed yet.
+quorum-fsync. Implemented local qualifications and retained failures are listed in
+[the evidence ledger](evidence/README.md); these are not independent-disk/AZ or
+production qualifications.
 
 ## HTTP contract
 
@@ -73,8 +74,10 @@ consensus resolves it. Waiting for quorum to free the *batch dispatch* window
 would unnecessarily make local acceptance throughput depend on quorum latency.
 Count and encoded-byte admission limits bound queued plus unresolved commands;
 HTTP cancellation, timeout and successful 202 do not free those credits. A full
-backlog returns 429. Followers that cannot keep up eventually stop admission;
-an ever-growing backlog is not a successful throughput measurement.
+backlog returns 429. If no durable majority can keep up (or committed apply falls
+behind), admission eventually stops. A slow minority alone need not stop the
+leader; it can catch up by snapshot. An ever-growing backlog is not a successful
+throughput measurement.
 
 Restart does not mint a fresh backlog allowance on top of orphaned accepted
 entries. New WAL proposals remain fenced until the recovered uncommitted suffix is

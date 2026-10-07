@@ -21,7 +21,7 @@ import threading
 import time
 import traceback
 
-from lab import Lab, BINARY, EXPERIMENT, ROOT
+from lab import Lab, BINARY, EXPERIMENT, ROOT, source_hashes
 
 CLIENT = ROOT / ".tmp/electric-tools/bench-target/release/ds-bench"
 NATIVE = ROOT / ".tmp/electric-tools/upstream-target/release/durable-streams-server"
@@ -55,16 +55,19 @@ def sample(pids, ports, node_pids):
     return dict(unix_ms=time.time_ns()//1_000_000, monotonic_ns=time.monotonic_ns(), processes=processes, sockets=sockets, process_gaps=gaps)
 
 
-def cell(output, arm, workload, profile=False, diagnostics=False):
-    replicas = 3 if arm == "raft3" else 1
+def cell(output, arm, workload, profile=False, diagnostics=False, pending_commands=256, duration=8, progress=False):
+    replicas = 3 if arm.startswith("raft3") else 1
     lab = Lab(output, replicas=replicas, partitions=2, port=19800)
     lab.cluster = "bench-"+hashlib.sha256(str(lab.output).encode()).hexdigest()[:16]
     native = arm == "native"
+    local_ack = arm == "raft3-local"
     node_pids = []
     trace = None
     sampler = None
     stop = threading.Event()
-    result = dict(arm=arm, workload=workload, profile=profile, diagnostics=diagnostics, verdict="FAIL")
+    result = dict(arm=arm, workload=workload, profile=profile, diagnostics=diagnostics, verdict="FAIL",
+                  ack_contract="local-fsync acceptance, not commitment" if local_ack else "applied after durable quorum" if not native else "native local-fsync",
+                  pending_commands=pending_commands, progress_sampling=progress)
     env = {k:v for k,v in os.environ.items() if not k.startswith("DS_BENCH_") and k != "LD_PRELOAD"}
     env["DS_BENCH_HDR_OUT"] = str(lab.output / "hdr")
     (lab.output / "hdr").mkdir()
@@ -127,7 +130,9 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
             assert len(node_pids) == 1
         else:
             for node in range(1,replicas+1):
-                lab.start(node, cpus="0-3", fault_testing=False, stats_secs=int(diagnostics))
+                lab.start(node, cpus="0-3", fault_testing=False, stats_secs=int(diagnostics),
+                          pending_commands=pending_commands,
+                          append_durability="local-fsync" if local_ack else "quorum-fsync")
                 node_pids.append(int((lab.output / f"node-{node}.pid").read_text()))
             for group in range(2):
                 assert lab.admin(1, group, "init", lab.genesis) == {"Ok":None}
@@ -149,7 +154,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
             _, streams, concurrency = workload
             args = ["multi-stream", "--streams", str(streams), "--connections", str(concurrency), "--batch", "1",
                     "--rate-per-stream", "0", "--payload-bytes", "256", "--setup-concurrency", "32",
-                    "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", "8"]
+                    "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", str(duration)]
         args += ["--request-timeout-secs", "30"]
         if profile:
             command = ["strace", "-f", "-c", "-w", "-o", str(lab.output / "syscall-profile.txt")]
@@ -167,6 +172,23 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
                         pids = node_pids + ([result["client_pid"]] if "client_pid" in result else [])
                         observation = sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids)
                         result.setdefault("process_sample_gaps",[]).extend(observation["process_gaps"])
+                        if progress:
+                            observation["replicas"] = []
+                            for node in sorted(lab.nodes):
+                                row = dict(node=node, unix_ms=time.time_ns()//1_000_000)
+                                try:
+                                    if not native:
+                                        row["groups"] = [lab.admin(node,g,"metrics") for g in range(2)]
+                                    if workload == ("write",1,256):
+                                        status, headers, _ = lab.request(node,"HEAD","/v1/stream/s00000000",
+                                                                       headers={"stream-consistency":"prefix"})
+                                        row["head_status"] = status
+                                        if status == 200:
+                                            row["committed_bytes"] = int(headers["stream-next-offset"].rsplit("_",1)[-1])
+                                except (OSError, AssertionError, KeyError, ValueError) as error:
+                                    row["error"] = repr(error)
+                                row["end_unix_ms"] = time.time_ns()//1_000_000
+                                observation["replicas"].append(row)
                         out.write(json.dumps(observation)+"\n")
                         out.flush()
                         stop.wait(0.5)
@@ -175,6 +197,29 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
         sampler = threading.Thread(target=collect)
         sampler.start()
         raw = run_client(args,"client")
+        if progress and workload[0] == "write":
+            # Stock ds-bench discards receipts. Fresh uniform batch=1 streams
+            # permit exact aggregate reconciliation, not per-attempt proof.
+            target = raw["ok_total_all_phases"] * 256
+            started = time.monotonic()
+            def drained():
+                rows = []
+                for node in sorted(lab.nodes):
+                    total = 0
+                    for i in range(workload[1]):
+                        status, headers, _ = lab.request(node,"HEAD",f"/v1/stream/s{i:08}",
+                                                       headers={"stream-consistency":"prefix"})
+                        assert status == 200
+                        total += int(headers["stream-next-offset"].rsplit("_",1)[-1])
+                    rows.append(dict(node=node,committed_bytes=total))
+                with open(lab.output / "drain.jsonl","a") as out:
+                    out.write(json.dumps(dict(unix_ms=time.time_ns()//1_000_000,target=target,replicas=rows))+"\n")
+                if any(r["committed_bytes"] > target for r in rows):
+                    raise ValueError("committed bytes exceed client acknowledgements; unknown outcome or duplicate")
+                return rows if all(r["committed_bytes"] == target for r in rows) else None
+            rows = lab.wait(drained,"all accepted bytes committed and applied on every replica",timeout=30)
+            result["drain"] = dict(observed_ms=(time.monotonic()-started)*1000,target_bytes=target,replicas=rows,
+                                   scope="post-client-exit observation upper bound; every replica, no per-attempt receipts")
         stop.set()
         sampler.join()
         assert "sampling_error" not in result, result.get("sampling_error")
@@ -241,10 +286,10 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
     return result
 
 
-def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False):
+def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    sources = {str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (EXPERIMENT / "engine/src").rglob("*.rs")}
+    sources = source_hashes()
     provenance = dict(native_source="88793e76595d69be300731b9b25c58538923a53b", client_source="93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
         client_unmodified=True, native_unmodified=True, adaptation_sources=sources,
         driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -253,6 +298,10 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         disk="shared orb root filesystem; same 8 MiB WAL segments, no cold tier", workers_per_process=2,
         wal_shards_or_partitions=2, cpu_hz=os.sysconf("SC_CLK_TCK"), page_bytes=os.sysconf("SC_PAGE_SIZE"),
         native_durability="local fsync", raft1_durability="one-member local fsync", raft3_durability="quorum fsync on shared host",
+        raft3_local_durability="local-fsync202 acceptance; all reads committed-only; background durable-quorum replication",
+        pending_commands=1024 if async_writes else 256, pending_bytes=16*1024*1024,
+        progress_sampling="prefix HEAD per replica and group Raft metrics at ~0.5s; adds observation work" if async_writes else "none",
+        client_limits="202 is success; receipt headers discarded; 429 and 503 combined as measured backpressure, not timed; warmup errors not counted",
         read_consistency="replicated default linearizable", tail_cache_bytes=0,
         qualification="short local windows, client not independently calibrated; no cloud capacity headline")
     (output / "provenance.json").write_text(json.dumps(provenance,indent=2)+"\n")
@@ -264,20 +313,22 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         workloads = [("write",1,4)]
     if reads_only:
         workloads = [("reads",), ("mixed",)]
-    if write_diagnostics:
+    if write_diagnostics or async_writes:
         workloads = [("write",1,256)] * 3
     if write_profiles:
         workloads = [("write",1,256)]
     results = []
     for i, workload in enumerate(workloads):
         # Rotate arm order to reduce a systematic page-cache/time-order bias.
-        arms = ["native","raft1"] if write_diagnostics else ["native","raft1","raft3"]
+        arms = ["native","raft1","raft3-local","raft3"] if async_writes else ["native","raft1"] if write_diagnostics else ["native","raft1","raft3"]
         arms = arms[i%len(arms):]+arms[:i%len(arms)]
         for arm in arms:
-            name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics else "")
+            name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics or async_writes else "")
             results.append(cell(output / name, arm, workload, profile=write_profiles,
-                                diagnostics=write_diagnostics or write_profiles))
-    if not smoke and not write_diagnostics and not write_profiles:
+                                diagnostics=write_diagnostics or write_profiles or async_writes,
+                                pending_commands=1024 if async_writes else 256,
+                                duration=30 if async_writes else 8, progress=async_writes))
+    if not smoke and not write_diagnostics and not write_profiles and not async_writes:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
@@ -288,4 +339,5 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
 
 if __name__ == "__main__":
     sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:],
-                     "--write-diagnostics" in sys.argv[2:], "--write-profiles" in sys.argv[2:]) else 1)
+                     "--write-diagnostics" in sys.argv[2:], "--write-profiles" in sys.argv[2:],
+                     "--async-writes" in sys.argv[2:]) else 1)

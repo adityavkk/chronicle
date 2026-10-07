@@ -56,6 +56,7 @@ object_store = { version = "0.11", optional = true, features = ["aws"] }
 
 [dependencies.openraft]
 version = "=0.9.25"
+path = "../vendor/openraft"
 features = ["serde", "storage-v2"]
 optional = true
 

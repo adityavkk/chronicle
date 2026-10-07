@@ -1173,7 +1173,15 @@ where
             RaftMsg::CheckIsLeaderRequest { tx } => {
                 self.handle_check_is_leader_request(tx).await;
             }
-            RaftMsg::ClientWriteRequest { app_data, tx } => {
+            RaftMsg::ClientWriteRequest { app_data, tx, expected_leader } => {
+                // The check and assignment must remain in this one core turn:
+                // an application-side check before enqueue cannot fence an epoch.
+                if let Some(expected) = expected_leader {
+                    if self.engine.state.vote_ref().committed_leader_id().as_ref() != Some(&expected) {
+                        tx.send(Err(ClientWriteError::ForwardToLeader(self.engine.state.forward_to_leader())));
+                        return;
+                    }
+                }
                 self.write_entry(C::Entry::from_app_data(app_data), Some(tx));
             }
             RaftMsg::Initialize { members, tx } => {

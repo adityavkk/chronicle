@@ -1,6 +1,7 @@
 """Real TCP processes, native WAL/disks, retained unknown outcomes. One host only."""
 import concurrent.futures
 import hashlib
+import http.client
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ import sys
 import threading
 import time
 
-from lab import Lab, BINARY, partition
+from lab import Lab, BINARY, partition, source_hashes
 
 
 def run(output):
@@ -21,12 +22,12 @@ def run(output):
         with lock:
             history.write(json.dumps(event) + "\n")
 
-    def append(node, group, value):
+    def append(node, group, value, connection=None):
         event = dict(op="append", node=node, stream=paths[group], value=value, start=time.monotonic_ns())
         try:
             status, headers, body = lab.request(node, "POST", paths[group], (value+"\n").encode(),
                 {"content-type": "application/octet-stream", "producer-id": hashlib.sha256(value.encode()).hexdigest(),
-                 "producer-epoch": "0", "producer-seq": "0"})
+                 "producer-epoch": "0", "producer-seq": "0"}, connection=connection)
             event.update(status=status, headers=headers, error=body.decode(errors="replace"))
         except OSError as exc:
             event.update(status=0, headers={}, error=str(exc))
@@ -51,6 +52,7 @@ def run(output):
 
     try:
         (lab.output / "binary.sha256").write_text(hashlib.sha256(BINARY.read_bytes()).hexdigest()+"\n")
+        (lab.output / "sources.json").write_text(json.dumps(source_hashes(), indent=2)+"\n")
         for node in (1, 2, 3):
             lab.start(node)
         lab.initialize()
@@ -64,8 +66,15 @@ def run(output):
         barrier = threading.Barrier(64)
 
         def burst(i):
-            barrier.wait(timeout=20)
-            return append(leaders[i % 2], i % 2, f"batch-{i:03d}-"+"λ"*(i % 11+1))
+            # Synchronize APPENDS, not socket creation: sequential TCP setup
+            # can otherwise spread a nominal burst into 32 singleton entries.
+            connection = http.client.HTTPConnection("127.0.0.1",lab.port+leaders[i%2],timeout=12)
+            try:
+                connection.connect()
+                barrier.wait(timeout=20)
+                return append(leaders[i % 2], i % 2, f"batch-{i:03d}-"+"λ"*(i % 11+1),connection)
+            finally:
+                connection.close()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
             results = list(executor.map(burst, range(64)))

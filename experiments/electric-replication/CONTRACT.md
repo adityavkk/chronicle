@@ -37,8 +37,11 @@ owns elections, log matching, leader confirmation, learners and joint consensus.
 Its `RaftLogStorage::append` callback must follow native `wait_durable`, not
 enqueue. `save_vote` must also fsync before returning. Storage writes are ordered.
 The alternatives are raft-rs plus manual Ready/HardState/read-index orchestration
-or an OpenRaft prerelease. Neither is needed for this initial integration. We do
-not implement private consensus or assume the previous experiment's proofs apply.
+or an OpenRaft prerelease. The async admission path now uses a narrow backport of
+upstream's expected-leader write condition; [vendor provenance](vendor/README.md)
+records the original crate, licenses and three changed files. Elections, commit
+and storage rules remain pinned 0.9.25. We do not implement private consensus or
+assume the previous experiment's proofs apply.
 
 The apply worker persists a covering `Commit` marker in that same journal and
 waits for fsync **before the first native handler in a committed batch**. This
@@ -71,12 +74,16 @@ Native stream files are the read materialization. Only committed commands reach
 native handlers, so neither writer tail, durable tail, producer state, closure,
 SSE notification nor a newly created stream can expose a speculative entry.
 
-All writes use **quorum-fsync**. A 2xx mutation response means the command was
+By default, writes use **quorum-fsync**. A synchronous 2xx response means the command was
 replicated to a quorum whose WAL durability callbacks completed, committed, and
 applied on the responding leader. A deterministic rejection may also be logged.
 An I/O error applying a committed command is terminal, not a replicated 500 whose
-effects differ across replicas. No successful local-before-quorum mode exists.
-One-member mode is explicitly local-fsync, not replicated durability.
+effects differ across replicas. One-member mode is explicitly local-fsync, not
+replicated durability. The opt-in **local-fsync202** append mode acknowledges only
+local durable acceptance, not semantic success or quorum durability. Its distinct
+receipt, await API, bounded admission, possible invalidation and committed-only
+reads are specified in [ASYNC.md](ASYNC.md). Lifecycle and control mutations stay
+quorum-fsync; no speculative read mode is offered.
 
 Timeout, connection loss, 503, or lost leadership after submission is **unknown
 outcome**, not proof of abort. No ingress automatically replays a mutation.
@@ -100,8 +107,10 @@ state is captured in snapshots and reconstructed from committed replay.
   A token encodes cluster identity, partition, and committed log index. Reject a
   different cluster/partition or malformed token; do not treat it as an offset.
 
-Mutations accept only `Stream-Durability: quorum-fsync` (the default), never
-silently downgrade unknown values. Successful writes return `Stream-Session`.
+`Stream-Durability: quorum-fsync` remains the default. POST appends also accept
+`local-fsync`; an operator can explicitly select that append default in config.
+Unknown values are rejected, never silently downgraded. Synchronous successful
+writes return `Stream-Session`; local acceptance instead returns `Stream-Receipt`.
 Tokens fence the history, not a stream incarnation: a subsequent committed
 delete can legitimately return 404. Clients maintain a token per partition.
 There is no general cross-group transaction or globally consistent snapshot.
