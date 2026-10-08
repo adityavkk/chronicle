@@ -1,0 +1,186 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1828:1
+     |
+1828 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.32s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-b533bf90f3b40820)
+
+running 1 test
+test replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars ... FAILED
+
+failures:
+
+---- replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars stdout ----
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:418:14:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }
+
+thread 'replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars' (3965780) panicked at src/replication/journal.rs:504:5:
+Test failed: called `Result::unwrap()` on an `Err` value: Custom { kind: Other, error: "nonconsecutive Raft log append" }.
+minimal failing input: chunks = [
+    [
+        0,
+    ],
+    [
+        0,
+    ],
+], time = 1001
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+
+failures:
+    replication::journal::tests::snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 142 filtered out; finished in 1.31s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

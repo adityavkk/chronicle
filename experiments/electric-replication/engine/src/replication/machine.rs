@@ -401,6 +401,23 @@ pub fn digest_file(path: &std::path::Path) -> io::Result<String> {
         .collect())
 }
 
+fn pack_entry(
+    out: &mut std::fs::File,
+    path: &std::path::Path,
+    source: impl Read,
+    len: u64,
+) -> io::Result<()> {
+    let name = path.file_name().unwrap().to_str()
+        .ok_or_else(|| io::Error::other("invalid snapshot filename"))?.as_bytes();
+    out.write_all(&(name.len() as u32).to_le_bytes())?;
+    out.write_all(&len.to_le_bytes())?;
+    out.write_all(name)?;
+    if io::copy(&mut source.take(len), out)? != len {
+        return Err(io::Error::other("short snapshot source"));
+    }
+    Ok(())
+}
+
 fn pack(
     store: &Store,
     subscriptions: &subscriptions::State,
@@ -414,11 +431,11 @@ fn pack(
     serde_json::to_writer(&mut writer, &(subscriptions, forks, receipts)).map_err(io::Error::other)?;
     writer.flush()?;
     drop(writer);
+    let mut streams: Vec<_> = store.streams.iter().map(|s| s.value().clone()).collect();
+    streams.sort_by(|a, b| a.file_path.cmp(&b.file_path));
     let mut files = vec![store.data_dir.join("streams/.lanes"), control];
-    for stream in &store.streams {
-        crate::store::write_meta_sync(stream.value(), false)?;
+    for stream in &streams {
         files.push(stream.file_path.clone());
-        files.push(crate::store::meta_path(&stream.file_path));
     }
     // Snapshot only live objects, not sidecars awaiting native asynchronous GC.
     files.sort();
@@ -428,22 +445,22 @@ fn pack(
         .create_new(true)
         .open(path)?;
     out.write_all(b"ERSP0005")?;
-    let header = serde_json::to_vec(&(meta, files.len(), clock::millis(store.clock.now())))
+    let header = serde_json::to_vec(&(meta, files.len() + streams.len(), clock::millis(store.clock.now())))
         .map_err(io::Error::other)?;
     out.write_all(&(header.len() as u64).to_le_bytes())?;
     out.write_all(&header)?;
     for path in files {
-        let name = path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .ok_or_else(|| io::Error::other("invalid snapshot filename"))?
-            .as_bytes();
-        let mut file = std::fs::File::open(&path)?;
-        out.write_all(&(name.len() as u32).to_le_bytes())?;
-        out.write_all(&file.metadata()?.len().to_le_bytes())?;
-        out.write_all(name)?;
-        io::copy(&mut file, &mut out)?;
+        let file = std::fs::File::open(&path)?;
+        let len = file.metadata()?.len();
+        pack_entry(&mut out, &path, file, len)?;
+    }
+    // The exclusive view fixes metadata and payload at the same applied cut.
+    // Capture CURRENT metadata, not stale sidecars. The final archive fsync
+    // covers it; rewriting/fsyncing disposable hot sidecars adds no durability.
+    // Only one metadata record is encoded in memory at a time.
+    for stream in streams {
+        let data = serde_json::to_vec(&crate::store::Meta::capture(&stream)).map_err(io::Error::other)?;
+        pack_entry(&mut out, &crate::store::meta_path(&stream.file_path), data.as_slice(), data.len() as u64)?;
     }
     let len = out.stream_position()?;
     let digest = hash_prefix(&mut out, len)?;

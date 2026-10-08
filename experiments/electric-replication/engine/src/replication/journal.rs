@@ -1032,6 +1032,60 @@ mod tests {
         }
 
         #[test]
+        fn snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars(
+            chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..40), 2..7),
+            time in 1001u64..1999,
+        ) {
+            use openraft_legacy::network_v1::SnapshotReceiverFactory;
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut source = machine::Machine::open(dir.path().join("s/state"),
+                    Journal::open(dir.path().join("s/wal"),4096).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut source,"PUT","/fresh",time,
+                    vec![("stream-ttl","1".into())],vec![91,3]).await.status,201);
+                let sidecar = {
+                    let view = source.view.read().await;
+                    let stream = view.store.streams.get("/fresh").unwrap();
+                    crate::store::meta_path(&stream.file_path)
+                };
+                let stale = std::fs::read(&sidecar).unwrap();
+                let headers = |seq:usize| vec![("content-type","application/octet-stream".into()),
+                    ("producer-id","snapshot-p".into()),("producer-epoch","7".into()),("producer-seq",seq.to_string())];
+                let mut expected = vec![91,3];
+                for (seq,chunk) in chunks.iter().enumerate() {
+                    expected.extend_from_slice(chunk);
+                    assert_eq!(issue(&mut source,"POST","/fresh",time+10*(seq as u64+1),
+                        headers(seq),chunk.clone()).await.status,200);
+                }
+                assert_eq!(std::fs::read(&sidecar).unwrap(),stale,"fixture sidecar must lag current producer/access state");
+                let mut snapshot = source.build_snapshot().await.unwrap();
+                assert_eq!(std::fs::read(&sidecar).unwrap(),stale,"archive creation must not rewrite disposable sidecars");
+                // A new replica has NONE of the source WAL. Replaying that WAL
+                // would hide a snapshot accidentally copying stale metadata.
+                let mut target = machine::Machine::open(dir.path().join("d/state"),
+                    Journal::open(dir.path().join("d/wal"),4096).unwrap()).await.unwrap();
+                let mut receiving = target.begin_receiving_snapshot().await.unwrap();
+                tokio::io::copy(&mut snapshot.snapshot,&mut receiving).await.unwrap();
+                target.install_snapshot(&snapshot.meta,receiving).await.unwrap();
+                // Emulate the consensus engine's install-then-purge sequence:
+                // the snapshot alone does not advance the log store's floor.
+                target.journal.clone().purge(snapshot.meta.last_log_id.unwrap()).await.unwrap();
+                target = reopen(target,false).await;
+                assert_eq!(bytes(&target,"/fresh").await,(200,expected.clone()));
+                let touched = time+10*chunks.len() as u64;
+                assert_eq!(issue(&mut target,"POST","/fresh",touched+5,
+                    headers(chunks.len()-1),chunks.last().unwrap().clone()).await.status,204);
+                assert_eq!(bytes(&target,"/fresh").await,(200,expected));
+                issue(&mut target,"TICK","/fresh",touched+1000,vec![],vec![]).await;
+                assert_eq!(bytes(&target,"/fresh").await.0,200);
+                issue(&mut target,"TICK","/fresh",touched+1001,vec![],vec![]).await;
+                assert_eq!(bytes(&target,"/fresh").await.0,404);
+            });
+        }
+
+        #[test]
         fn native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay(
             a in prop::collection::vec(any::<u8>(), 1..35),
             b in prop::collection::vec(any::<u8>(), 1..27),

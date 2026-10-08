@@ -1458,7 +1458,7 @@ fn unix_secs(t: SystemTime) -> u64 {
 }
 
 impl Meta {
-    fn capture(st: &StreamState) -> Meta {
+    pub(crate) fn capture(st: &StreamState) -> Meta {
         let seg_snapshot: (Vec<MetaSegment>, u64) = {
             let m = st.tier.manifest.lock().unwrap();
             (

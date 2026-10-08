@@ -1,0 +1,273 @@
+{
+  "verdict": "PASS",
+  "traced": true,
+  "streams": 1024,
+  "binary_sha256": "4eea5d8cf8c4ceb958ce047dbf02438f248c9474669681b2011f26ef225e6d76",
+  "completion_observed_ns": 2673467933,
+  "before": {
+    "running_state": {
+      "Ok": null
+    },
+    "id": 1,
+    "current_term": 1,
+    "vote": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "committed": true
+    },
+    "last_log_index": 2049,
+    "local_committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "cluster_committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "last_applied": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "snapshot": null,
+    "purged": null,
+    "state": "Leader",
+    "current_leader": 1,
+    "millis_since_quorum_ack": 0,
+    "last_quorum_acked": 1791491058333716350,
+    "membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 0,
+          "node_id": 1
+        },
+        "index": 0
+      },
+      "membership": {
+        "configs": [
+          [
+            1
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "127.0.0.1:19601"
+          }
+        }
+      }
+    },
+    "committed_membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 0,
+          "node_id": 1
+        },
+        "index": 0
+      },
+      "membership": {
+        "configs": [
+          [
+            1
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "127.0.0.1:19601"
+          }
+        }
+      }
+    },
+    "heartbeat": {
+      "1": 1791491058333716374
+    },
+    "replication": {
+      "1": {
+        "leader_id": {
+          "term": 1,
+          "node_id": 1
+        },
+        "index": 2049
+      }
+    }
+  },
+  "after": {
+    "running_state": {
+      "Ok": null
+    },
+    "id": 1,
+    "current_term": 1,
+    "vote": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "committed": true
+    },
+    "last_log_index": 2049,
+    "local_committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "cluster_committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "committed": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "last_applied": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "snapshot": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 2049
+    },
+    "purged": {
+      "leader_id": {
+        "term": 1,
+        "node_id": 1
+      },
+      "index": 1985
+    },
+    "state": "Leader",
+    "current_leader": 1,
+    "millis_since_quorum_ack": 0,
+    "last_quorum_acked": 1791491058333716355,
+    "membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 0,
+          "node_id": 1
+        },
+        "index": 0
+      },
+      "membership": {
+        "configs": [
+          [
+            1
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "127.0.0.1:19601"
+          }
+        }
+      }
+    },
+    "committed_membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 0,
+          "node_id": 1
+        },
+        "index": 0
+      },
+      "membership": {
+        "configs": [
+          [
+            1
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "127.0.0.1:19601"
+          }
+        }
+      }
+    },
+    "heartbeat": {
+      "1": 1791491058333716367
+    },
+    "replication": {
+      "1": {
+        "leader_id": {
+          "term": 1,
+          "node_id": 1
+        },
+        "index": 2049
+      }
+    }
+  },
+  "fsync_trace": {
+    "started": 1031,
+    "completed": 1031,
+    "incomplete_by_tid": {},
+    "resumed_without_start": 0,
+    "errors": {},
+    "successful": {
+      "count": 1031,
+      "total_us": 711151,
+      "mean_us": 689.7681862269641,
+      "p50_us": 649,
+      "p99_us": 1350,
+      "max_us": 7570,
+      "at_least_100ms": 0
+    },
+    "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+  },
+  "sidecar_sync_calls": 1024,
+  "snapshot_phase": {
+    "buckets": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "bytes": 0,
+    "count": 1,
+    "max_ns": 2666783368,
+    "total_ns": 2666783368
+  },
+  "archive_bytes": 2764364
+}

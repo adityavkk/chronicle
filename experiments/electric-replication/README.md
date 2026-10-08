@@ -89,8 +89,8 @@ not a substitute store or a model-only result.
 
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
-| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 140 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
-| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. Longer envelopes, replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 141 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. A longer 90-second/16-connection envelope fails with count-bound and lease-expiry rejects. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
@@ -105,8 +105,8 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-026` executes **332/332 passing, zero failures/skips/todo**,
-with subscriptions enabled, three processes and two partitions. All 140 Rust
+The candidate's `conformance-028` executes **332/332 passing, zero failures/skips/todo**,
+with subscriptions enabled, three processes and two partitions. All 141 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
 conformance exclusions. `storage-fault-017` checks seven real failing/short
 syscalls and retains three unknown HTTP outcomes. `async-fault-011` checks 310
@@ -163,6 +163,14 @@ complete with no unknown outcomes or term change. The exclusive snapshot view
 and durable publication order are unchanged. Apply in that group still pauses,
 so this is not proof of a zero-rejection async load envelope. The snapshot change
 passes the tests/formal/conformance above and fork/storage process reruns.
+
+Direct metadata capture subsequently removes redundant hot-sidecar fsyncs without
+changing the archive's durability barriers. `snapshot-cost-001` measures three
+untraced 1,024-stream snapshots at **709–1,139 ms before versus 27–35 ms after**;
+separate traces show 1,024 sidecar fsyncs versus zero. All eight cells survive
+restart with exact bytes/offsets and producer retry state. Generated snapshot-only
+restore and conformance/fault reruns pass. This isolated cost reduction does not
+remove the hot-payload copy pause or qualify sustained async capacity.
 
 The first matched stock-0.10 comparison, `openraft010-writes-001`, has three
 30-second repetitions with identical local-fsync contracts, 256-byte payloads and

@@ -759,3 +759,55 @@ a leak or a complete attribution of the untraced RSS difference. Result retentio
 remains the latest 1,024 receipt-bearing batches per partition (up to 65,536
 results). No receipt retention, admission bound or durability guarantee was
 reduced to improve a number.
+
+`openraft010-fsync-many-003` reruns the four perturbed cells after routing Raft
+tracing to stderr's existing lock. All workload and analyzer checks pass: 2,483
+structured records parse while 14 heartbeat warnings remain present. No lines
+were filtered or repaired. `002` is a separately retained four-cell headroom
+refusal before startup; twelve exited native WalSet test directories containing
+only verified empty preallocated segments were reclaimed with a disposal manifest.
+The log change also passes 140 Rust tests, all 47 TLA+ negative mutations plus
+the Lean negative control, and `conformance-027`: 332/332, zero failures/skips/todo.
+Tracing perturbs both throughput and scheduling; these traces do not establish
+the cause of the untraced 100 ms stalls or a performance improvement from logging.
+
+Snapshot inspection found another concrete integration cost: `pack` rewrites and
+fsyncs every live native metadata sidecar, then copies it into an archive which is
+itself checksummed/fsynced before its native-WAL reference. The hot generation is
+discarded on recovery; its sidecars are not independently authoritative. Capturing
+the same current metadata directly into the archive can remove those redundant
+writes without weakening the final archive/directory/reference barriers. Keep the
+exclusive view while measuring that smaller change first. A test must distinguish
+fresh captured metadata from a stale existing sidecar, including producer state
+and millisecond TTL, and restore without the pre-snapshot WAL. This maps to the
+existing `ApplyRecovery`/`JournalReclaim` durable-snapshot assumptions; it is not a
+proof that arbitrary unlocked snapshot copying is safe. Moving the payload copy
+outside apply would additionally require pinned prefix lengths, incarnation-safe
+file handles, serialized build/install/cleanup and new interleaving checks.
+
+The smaller change is qualified by `snapshot-metadata-001`, `conformance-028`,
+`fork-fault-016`, `storage-fault-018` and `snapshot-progress-004`: 141 Rust tests,
+332/332 unchanged conformance (zero failures/skips/todo), 746 fork operations,
+29 storage operations with three unknown outcomes and seven intercepted faults,
+and 38 unrelated-partition operations completing during a two-second snapshot
+fsync delay. The new generated real-WAL test creates stale hot sidecars and
+restores only the snapshot onto another replica, checking dedup and both TTL
+boundaries. Its initial fixture omitted the consensus engine's install-then-purge
+sequence; the failed run is retained, and the journal invariant was not relaxed.
+
+`snapshot-cost-001` compares the qualified pre-change binary with this change on
+1,024 streams, 2,051 payload bytes each, one actual Raft member and four SUT CPUs.
+All eight cells pass exact byte/offset and producer-retry checks after SIGKILL and
+restart. Three untraced before snapshots take **733 / 1,139 / 709 ms**; after they
+take **27 / 35 / 32 ms**. Separate perturbed traces show **1,024 sidecar fsyncs
+before, zero after**; archive/directory/native-WAL durability stays in place.
+These are isolated forced snapshots, not a ds-bench throughput or capacity claim.
+
+The longer pre-change `openraft010-envelope-c16-001` remains **8 PASS / 4 FAIL**:
+three 90-second, zero-warmup repetitions at 16 connections. All async cells
+reject load (2,093 / 2,082 / 2,064 count-bound rejects); quorum repeat 2 has 48
+lease-expiry rejects. Accepted bytes drain exactly and sampled clocks are stable.
+Async leaders build nine or ten snapshots with 750–832 ms maxima. Removing
+per-stream sidecar fsyncs cannot by itself eliminate the hot-stream payload copy
+pause; that still holds the exclusive view. Do not label this a sustainable
+zero-error operating point or infer the sidecar optimization fixes these failures.

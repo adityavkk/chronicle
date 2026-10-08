@@ -203,6 +203,11 @@ committed journal suffix before serving. Never infer commitment from file size.
 Snapshot files stream payloads in bounded windows, include complete native
 metadata (including producer state), applied position and membership, and are
 checksummed. Persist the file and its directory before journaling its reference.
+Capture metadata from the live state at the exclusive applied cut, not from
+lagging hot sidecars. Encoding it directly into the archive avoids separately
+rewriting/fsyncing those disposable sidecars; the archive's durability barriers
+remain mandatory. Snapshot-only restore must preserve dedup and timed state
+without relying on a pre-snapshot journal to repair stale metadata.
 Install into a new materialization generation before atomically changing the
 in-memory view. Raft purge may follow only a durable snapshot. Physical segment
 reclamation additionally requires a journal checkpoint covering vote, membership,
