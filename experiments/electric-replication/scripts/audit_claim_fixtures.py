@@ -1,9 +1,10 @@
-"""Read-only audit of the published subscription-fault Authorization fixtures.
+"""Read-only audit of retained subscription-fault Authorization fixtures.
 
 Requires the retired local lab WALs to independently verify signatures. Never
 prints tokens, key bytes, or decoded claims. Exits nonzero on any failed check.
 This is a specific fixture audit, not a general-purpose secret scanner.
 """
+import argparse
 import base64
 import gzip
 import hashlib
@@ -13,7 +14,6 @@ import json
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 from lab import ROOT, partition
 
@@ -35,14 +35,19 @@ def token_fields(value):
     return payload.encode(), signature, claims
 
 
-def audit(commit):
+def audit(commit, all_runs=False):
     prefix = "experiments/electric-replication/evidence/"
     rows = []
     private_keys = set()
     seen_tokens = set()
     pids = 0
-    for number in range(1, 5):
-        run = f"subscription-fault-{number:03}"
+    reused_pids = 0
+    runs = [f"subscription-fault-{number:03}" for number in range(1, 5)]
+    if all_runs:
+        runs = sorted(name for name in git("ls-tree", "--name-only", commit+":"+prefix.rstrip("/")).decode().splitlines()
+                      if re.fullmatch(r"subscription-fault-\d+", name))
+        assert runs, "no subscription fixture campaigns in revision"
+    for run in runs:
         path = prefix + run + "/"
         history = [json.loads(line) for line in git("show", commit + ":" + path + "history.jsonl").splitlines()]
         deliveries = [json.loads(line) for line in git("show", commit + ":" + path + "deliveries.jsonl").splitlines()]
@@ -55,8 +60,16 @@ def audit(commit):
             data = Path(config["dir"])
             assert data == ROOT / ".tmp/electric-labs" / run / str(node)
             pid = int(git("show", commit + ":" + path + f"node-{node}.pid"))
-            assert not Path(f"/proc/{pid}").exists(), "recorded lab process still exists"
-            pids += 1
+            process = Path(f"/proc/{pid}/cmdline")
+            try:
+                args = process.read_bytes().split(b"\0")
+            except (FileNotFoundError, ProcessLookupError):
+                pids += 1
+            else:
+                # Long benchmark campaigns can wrap Linux's numeric PID space.
+                # A reused PID is not the retired fixture's process identity.
+                assert str(ROOT / (path+f"node-{node}.json")).encode() not in args, "recorded lab process still exists"
+                reused_pids += 1
             # Keys are Action::Keys JSON inside real native WAL command frames.
             # Match complete arrays, then verify with independent HMAC-SHA256.
             for group in (0, 1):
@@ -101,7 +114,7 @@ def audit(commit):
         rows.append(dict(run=run, authorization_matches=valid+tampered, verified_issued=valid,
                          intentionally_tampered_401=tampered, owner_groups_with_distinct_keys=len(keys)))
 
-    assert len(private_keys) == 16, "test runs unexpectedly reused signing/HMAC keys"
+    assert len(private_keys) == 4*len(runs), "test runs unexpectedly reused signing/HMAC keys"
     # Search ALL blobs in the originally unpublished history, not only HEAD.
     # Include raw bytes, hex/base64 and JSON/Rust decimal arrays, including
     # the nested byte-array form of a serde JSON command printed by Debug.
@@ -131,17 +144,21 @@ def audit(commit):
         count += 1
     services = subprocess.check_output(["amp", "orb", "service", "list"], cwd=ROOT, text=True)
     assert "No orb services are running." in services, "check active services before concluding fixtures retired"
-    return dict(verdict="PASS", published_commit=commit, runs=rows,
+    return dict(verdict="PASS", audited_revision=commit, runs=rows,
                 validator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 authorization_matches=sum(r["authorization_matches"] for r in rows),
                 unique_token_values=len(seen_tokens),
-                retired_recorded_pids_absent=pids, distinct_private_lab_keys_checked=len(private_keys),
+                retired_recorded_pids_absent=pids, reused_recorded_pids_unrelated=reused_pids,
+                distinct_private_lab_keys_checked=len(private_keys),
                 historical_blobs_scanned=count, gzip_blobs_decompressed=compressed,
                 private_lab_key_matches=0, token_format="base64url(JSON claims).base64url(HMAC-SHA256)",
                 issuer="per-group getrandom-generated Keys; replicated Action::Keys; persisted only in local lab WAL/snapshots",
                 consumer="loopback lab subscription ack/release/callback; signature plus path/incarnation/generation/wake/lease fencing",
-                limitations="Specific 60-match audit plus finite key-encoding scan; not proof against arbitrary encodings. Retired untracked lab data remains local, not for deployment reuse.")
+                limitations="Specific retained-fixture signature audit plus finite key-encoding scan; not proof against arbitrary encodings. Retired untracked lab data remains local, not for deployment reuse.")
 
 
 if __name__ == "__main__":
-    print(json.dumps(audit(sys.argv[1]), indent=2))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("commit")
+    parser.add_argument("--all-runs", action="store_true")
+    print(json.dumps(audit(**vars(parser.parse_args())), indent=2))
