@@ -1,0 +1,60 @@
+{
+  "audited_revision": "0afb58a28819e9fb4aa0e78467936159aee8e3df",
+  "publication_base": "8c46c9e293b4a5357ba0b55837ef43f17aaa868e",
+  "origin_main_at_review": "dbd7055167e4f5f5ee9d0b87c821ddc91c1195a7",
+  "production_ready": false,
+  "source_binary_matches_conformance030": true,
+  "conformance": {
+    "suite": "@durable-streams/server-conformance-tests@0.3.5",
+    "subscriptions": true,
+    "discovered": 332,
+    "executed": 332,
+    "passed": 332,
+    "failed": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "retained_qualification": {
+    "rust_passed": 142,
+    "rust_failed": 0,
+    "rust_ignored": 2,
+    "rust_ignored_reason": "Unchanged upstream forensic helpers; not conformance skips",
+    "tlc_negative_mutations": 55,
+    "lean_negative_mutations": 1,
+    "sustained_cells_passed": 12,
+    "sustained_cells_failed": 0
+  },
+  "current_checks": {
+    "public_links": 0,
+    "go_lint_initial": 2,
+    "go_lint_initial_reason": "go missing from PATH",
+    "go_lint_pinned_toolchain": 0,
+    "go_lint_output": "0 issues.",
+    "python_tests": 30,
+    "receipt_client_tests": 3,
+    "raw_whitespace_exit": 2,
+    "raw_whitespace_reason": "Only preserved raw evidence and imported vendor source; authored paths independently pass",
+    "fixture_scan_exit": 0,
+    "fixture_scan_commit_argument": "HEAD, held fixed at audited_revision throughout the run",
+    "generic_secret_findings": "Raw gitleaks exits 1 retained; all findings independently verified source hashes. No rule suppressed."
+  },
+  "excluded": "Raw WALs/databases, binaries, DWARF memory captures, unused syscall registers and private lab signing keys remain untracked. No unfinished marker-removal code exists.",
+  "investigation_limit": "The first auxiliary inventory regex was stopped after quadratic matching on a large encoded fixture; the completed scan uses fixed infrastructure markers and covers every blob. This was not a server test or a successful first scan.",
+  "release_scope": "Branch checkpoint only. No PR/main merge/deployment. Remaining performance, cold lifecycle, bounded fences, production security/ops/telemetry and independent-host acceptance gates remain explicit.",
+  "hashes": {
+    "claim-fixtures.json": "e6b29133edb3031bf080858ca98ba73bc3ab5007684f89e8bbcba048ed5dc750",
+    "client-tests.txt": "1baef6238f3d9b0dbf439c9e758abae4900b9ad79b344e2da826a4ad86ca196d",
+    "gitleaks-blobs.json": "fde5f50f600de5ca227b8c6968f4d34685f56c3a96846522d33af12bd06b204f",
+    "gitleaks-blobs.txt": "dfb5e27f18a4cf9e0ba68e49d3c96f56b553f5feeceecd6830eaf5ae5f9cde12",
+    "gitleaks-history.json": "d60b44c0bc67f4e12987ecace55d2633ad8482ad70fd9d1d3df5358ae24166e8",
+    "gitleaks-history.txt": "6567effadc0c412de926a22e96f90f7275433836208e0dc3605b1fd3736b43e4",
+    "inventory.json": "360479d6727074013ec3f84721c12e27a20a3f2bace2bc1d99112121ef381837",
+    "licenses.json": "fb146ddad2491cdb6469b049b634fe4dd30ab4bd4eb44b1fe7a0fecadcc1952c",
+    "lint-installed.txt": "f2f09ad11aa2f8632e7c73b7ab08aca134e823c79cf107c25ade821c0a0c481f",
+    "lint.txt": "31fb28e7196477669dd3aac0c58401b56379b2b69e65ad23851f305d317e4004",
+    "public-links.txt": "11d9a62327928a2a3e9207a1d5daa42ae4b5eea413f2c31117b40afbe02667a4",
+    "python-tests.txt": "be40c62f7fe890694926b791b3c5740d2d26a7318f2aa6f578a3eb30a75dcb72",
+    "raw-whitespace.txt": "086ca55f0bd0e21ab19e14763d3390b72ff61bbce63273ab12dfaa75d48eb815",
+    "secret-scan-review.json": "967a50a1cbe55c5d656833a9d65fdca672a0c8bba7a4b7bbcf3589f1761418ba"
+  }
+}

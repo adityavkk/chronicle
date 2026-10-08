@@ -132,6 +132,7 @@ def audit(commit, all_runs=False):
     objects = git("rev-list", "--objects", "origin/main.." + commit).splitlines()
     count = 0
     compressed = 0
+    zstd_compressed = 0
     for obj in objects:
         sha, _, path = obj.partition(b" ")
         if git("cat-file", "-t", sha.decode()).strip() != b"blob":
@@ -140,6 +141,9 @@ def audit(commit, all_runs=False):
         if path.endswith(b".gz"):
             content = gzip.decompress(content)
             compressed += 1
+        elif path.endswith(b".zst"):
+            content = subprocess.check_output(["zstd", "-dq", "-c"], input=content)
+            zstd_compressed += 1
         assert not any(needle in content for needle in needles), "private lab key representation published in " + path.decode()
         count += 1
     services = subprocess.check_output(["amp", "orb", "service", "list"], cwd=ROOT, text=True)
@@ -151,6 +155,7 @@ def audit(commit, all_runs=False):
                 retired_recorded_pids_absent=pids, reused_recorded_pids_unrelated=reused_pids,
                 distinct_private_lab_keys_checked=len(private_keys),
                 historical_blobs_scanned=count, gzip_blobs_decompressed=compressed,
+                zstd_blobs_decompressed=zstd_compressed,
                 private_lab_key_matches=0, token_format="base64url(JSON claims).base64url(HMAC-SHA256)",
                 issuer="per-group getrandom-generated Keys; replicated Action::Keys; persisted only in local lab WAL/snapshots",
                 consumer="loopback lab subscription ack/release/callback; signature plus path/incarnation/generation/wake/lease fencing",
