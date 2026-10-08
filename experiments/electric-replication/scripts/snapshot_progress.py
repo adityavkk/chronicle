@@ -31,7 +31,7 @@ def check_progress(history, syscalls):
     completed = [e for e in during if start <= e["start"] <= e["end"] <= finish and e["status"] == 200]
     errors = []
     if any(e["status"] != 200 for e in during):
-        errors.append("unrelated partition request failed during snapshot delay")
+        errors.append("probed partition request failed during snapshot delay")
     if sum(e["op"] == "append" for e in completed) < 3 or sum(e["op"] == "read" for e in completed) < 3:
         errors.append("fewer than three complete write/read pairs inside the actual syscall delay")
     before = {(e["node"], e["group"]): e["term"] for e in history if e["op"] == "term" and e["phase"] == "before"}
@@ -45,7 +45,7 @@ def check_progress(history, syscalls):
                 delay_ns=finish-start, errors=errors)
 
 
-def run(output, binary=BINARY, binary_provenance=None):
+def run(output, binary=BINARY, binary_provenance=None, same_group=False):
     lab = Lab(output, port=19600, binary=binary.resolve())
     interposer = ROOT / ".tmp/electric-tools/snapshot_progress.so"
     source = Path(__file__).with_name("storage_faults.c")
@@ -63,7 +63,8 @@ def run(output, binary=BINARY, binary_provenance=None):
         binary=provenance, interposer=hashlib.sha256(interposer.read_bytes()).hexdigest(),
         interposer_source=hashlib.sha256(source.read_bytes()).hexdigest(), compile_command=compile_command,
         driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), workers=1,
-        processes=3, partitions=2, durability="quorum-fsync", consistency="linearizable default"), indent=2)+"\n")
+        processes=3, partitions=2, progress_group=0 if same_group else 1,
+        durability="quorum-fsync", consistency="linearizable default"), indent=2)+"\n")
     paths = [next(f"/snapshot-progress/{i}" for i in range(100) if partition(f"/snapshot-progress/{i}", 2) == g) for g in range(2)]
     history = []
     syscalls = lab.output / "syscalls.jsonl"
@@ -125,8 +126,8 @@ def run(output, binary=BINARY, binary_provenance=None):
                      "actual snapshot fsync intercepted")
             index = 0
             while len(syscalls.read_text().splitlines()) == 1:
-                operation(1, 1, f"during-{index:03}-λ", phase="delayed")
-                operation(1, 1, phase="delayed")
+                operation(1, 0 if same_group else 1, f"during-{index:03}-λ", phase="delayed")
+                operation(1, 0 if same_group else 1, phase="delayed")
                 index += 1
                 time.sleep(0.1)
             assert snapshot.result() == {"Ok":None}
@@ -166,4 +167,5 @@ if __name__ == "__main__":
     parser.add_argument("output")
     parser.add_argument("--binary", type=Path, default=BINARY)
     parser.add_argument("--binary-provenance", type=Path)
+    parser.add_argument("--same-group", action="store_true", help="Probe apply in the snapshotting group, not the other group")
     sys.exit(0 if run(**vars(parser.parse_args())) else 1)

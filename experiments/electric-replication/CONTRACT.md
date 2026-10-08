@@ -234,17 +234,35 @@ after a successful replacement or recovery, not while another builder is active.
 Disposable old hot generations can be removed on restart, before serving; live
 readers may still own an old generation, so it is not deleted speculatively.
 
-Snapshot scheduling must preserve this same exclusive cut through durable
-reference publication and cleanup. Slow copy/hash/fsync may pause that group's
-apply and fill its bounded admission queue, but must not occupy the executor
-needed by Raft heartbeats or unrelated partitions. The server uses Tokio's
-multi-thread runtime, including when configured with one worker; blocking disk
-sections can hand off that worker without dropping the view guard. They remain
-non-cancellable disk operations, not a new atomicity or disk-time guarantee.
-`ApplyRecovery.tla` and `JournalReclaim.tla` still specify the durability/order
-boundaries. A real-process delayed-snapshot-fsync history must additionally
-check heartbeat/other-partition progress, unchanged membership/term, exact
-committed prefixes and restart; the models do not prove executor scheduling.
+The pinned-cut snapshot candidate (`SnapshotCut.tla`, specified before its
+implementation) separates the view cut from the snapshot lifecycle lock. Under
+the exclusive view, capture the applied ID, membership, committed clock, complete
+control metadata and each live stream's metadata, an independently opened inode
+handle and exact file length. Copy only that prefix after releasing the view:
+later appends must not extend it, and deletion/recreation must not replace its
+inode. Replicated hot files are append-only; failed append rollback cannot
+truncate below an earlier applied cut. Native cold compaction remains disabled.
+Opening files by path or reading metadata after releasing the cut is forbidden.
+
+One lifecycle lock serializes build, install, durable reference publication and
+cleanup, in that order, independently of apply. Installation still replaces the
+view exclusively. This prevents an old builder publishing over a newer installed
+snapshot or cleanup deleting another builder's file. Capture may pause apply
+for metadata cloning and file opens; payload copy/hash/fsync must not. Memory is
+one extra metadata cut plus bounded copy buffers, not a payload-sized buffer;
+file descriptors scale with live streams and descriptor exhaustion is a storage
+failure, not permission to produce an incomplete snapshot. Metadata growth itself
+still needs the lifecycle qualification below.
+
+The server uses Tokio's multi-thread runtime, including with one worker; blocking
+capture/copy sections hand that worker off for Raft/network progress. They remain
+non-cancellable disk operations, not a disk-time guarantee. `ApplyRecovery.tla`
+and `JournalReclaim.tla` retain their durability/order assumptions; `SnapshotCut`
+checks prefix/metadata identity, serialized install and durable cleanup. Real-file
+generated tests must cover appends, unlink/recreate and snapshot-only restore;
+delayed-fsync process histories must additionally check same-group apply progress,
+membership/term stability, exact committed prefixes and restart. These models do
+not prove Rust refinement, descriptor behavior or executor scheduling.
 
 Cold-tier support is retained in the upstream source but **disabled in replicated
 mode** until object identities include cluster/group/incarnation/range/checksum,

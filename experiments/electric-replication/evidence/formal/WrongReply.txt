@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 68 and seed 402001842666636743 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3076903] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 93 and seed -7530594105539810702 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 1522650] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Batches.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Batches
-Starting... (2026-10-08 19:35:50)
+Starting... (2026-10-08 20:36:42)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 19:35:50.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 20:36:43.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -143,7 +143,7 @@ State 9: <Resolve line 50, col 15 to line 53, col 99 of module Batches>
 /\ forming = <<>>
 /\ admitted = 1
 
-561 states generated, 212 distinct states found, 70 states left on queue.
+571 states generated, 216 distinct states found, 71 states left on queue.
 The depth of the complete state graph search is 10.
-The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 4).
-Finished in 00s at (2026-10-08 19:35:50)
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 5 and the 95th percentile is 5).
+Finished in 00s at (2026-10-08 20:36:43)

@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 17 and seed -6019627004106851258 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3167340] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 19 and seed -2769269540314804976 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 1523075] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Receipts.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/TLC.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Receipts
-Starting... (2026-10-08 19:35:58)
+Starting... (2026-10-08 20:36:49)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-10-08 19:35:59.
+Finished computing initial states: 2 distinct states generated at 2026-10-08 20:36:49.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -77,7 +77,7 @@ State 4: <Accept line 26, col 11 to line 31, col 72 of module Receipts>
 /\ logID = 1
 /\ appliedID = 0
 
-11 states generated, 11 distinct states found, 2 states left on queue.
+10 states generated, 10 distinct states found, 2 states left on queue.
 The depth of the complete state graph search is 4.
-The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 2 and the 95th percentile is 2).
-Finished in 00s at (2026-10-08 19:35:59)
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-08 20:36:49)

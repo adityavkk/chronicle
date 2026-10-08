@@ -20,7 +20,7 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live snapshot snapshot-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
@@ -28,6 +28,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live fences fence
   [[ "$mode" != links* ]] || model=Links
   [[ "$mode" != apply* ]] || model=ApplyRecovery
   [[ "$mode" != reclaim* ]] || model=JournalReclaim
+  [[ "$mode" != snapshot* ]] || model=SnapshotCut
   [[ "$mode" != reads* ]] || model=ReadCohorts
   [[ "$mode" != batches* ]] || model=Batches
   [[ "$mode" != receipts* ]] || model=Receipts
@@ -37,7 +38,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live fences fence
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UnpinnedPath UnboundedCopy LateMetadata OverlapInstall EarlyReference EarlyCleanup UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -50,6 +51,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     StaleObservation|OldIncarnationAck|DiscoverAtTail) model=Links; config=links ;;
     EarlyApply|ForgetMarker|EarlyServe) model=ApplyRecovery; config=apply ;;
     EarlyUnlink|MissingDirSync|DropRetained|DropVote) model=JournalReclaim; config=reclaim ;;
+    UnpinnedPath|UnboundedCopy|LateMetadata|OverlapInstall|EarlyReference|EarlyCleanup) model=SnapshotCut; config=snapshot ;;
     UseCompletedTicket|ReuseEqual) model=ReadCohorts; config=reads ;;
     Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout|DropForming) model=Batches; config=batches ;;
     EarlyReceipt|PublishAccepted|IndexOnly|InvalidateAbsent|AcceptMeansSuccess|ReceiptSession) model=Receipts; config=receipts ;;
@@ -81,4 +83,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 47 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 53 negative mutations; Lean and one header-projection negative mutation: PASS\n'

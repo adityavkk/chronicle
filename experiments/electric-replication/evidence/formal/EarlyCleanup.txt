@@ -1,0 +1,101 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 30 and seed 1639633832173291560 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 1522366] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/SnapshotCut.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module SnapshotCut
+Starting... (2026-10-08 20:36:38)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-08 20:36:38.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ archives = {[index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]}
+/\ owner = 1
+/\ applied = 0
+/\ phase = "Idle"
+/\ cut = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<>>, <<>>>>
+/\ candidate = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+
+State 2: <ApplyAppend line 21, col 16 to line 23, col 82 of module SnapshotCut>
+/\ archives = {[index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]}
+/\ owner = 1
+/\ applied = 1
+/\ phase = "Idle"
+/\ cut = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+
+State 3: <Capture line 27, col 12 to line 29, col 87 of module SnapshotCut>
+/\ archives = {[index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]}
+/\ owner = 1
+/\ applied = 1
+/\ phase = "Captured"
+/\ cut = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+
+State 4: <Copy line 30, col 9 to line 40, col 78 of module SnapshotCut>
+/\ archives = {[index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]}
+/\ owner = 1
+/\ applied = 1
+/\ phase = "Copied"
+/\ cut = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+
+State 5: <FileSync line 41, col 13 to line 42, col 93 of module SnapshotCut>
+/\ archives = {[index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]}
+/\ owner = 1
+/\ applied = 1
+/\ phase = "FileSynced"
+/\ cut = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+
+State 6: <DirectorySync line 43, col 18 to line 45, col 88 of module SnapshotCut>
+/\ archives = { [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0],
+  [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1] }
+/\ owner = 1
+/\ applied = 1
+/\ phase = "Durable"
+/\ cut = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+
+State 7: <Cleanup line 50, col 12 to line 52, col 82 of module SnapshotCut>
+/\ archives = {[index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]}
+/\ owner = 1
+/\ applied = 1
+/\ phase = "Idle"
+/\ cut = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+/\ reference = [index |-> 0, incarnation |-> 1, data |-> <<>>, meta |-> 0]
+/\ high = 0
+/\ files = <<<<1>>, <<>>>>
+/\ candidate = [index |-> 1, incarnation |-> 1, data |-> <<1>>, meta |-> 1]
+
+229 states generated, 137 distinct states found, 41 states left on queue.
+The depth of the complete state graph search is 8.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 4 and the 95th percentile is 3).
+Finished in 00s at (2026-10-08 20:36:38)
