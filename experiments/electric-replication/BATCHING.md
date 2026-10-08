@@ -929,7 +929,7 @@ unknowns or term changes and exact 312-operation restart history. Full conforman
 remains 332/332, zero skips; 142 Rust tests and the expanded 55-mutation formal
 runner pass. `journal_compact` is an optional fixed-label wall-time phase,
 including serialized wait/capture/fsync/deletion, not an extra per-append probe
-or an additive CPU metric. Sustained-load benefit remains unmeasured.
+or an additive CPU metric. The subsequent sustained-load result is below.
 
 Retained storage-harness failures exposed assumptions invalidated by startup
 maintenance. Old-file deletion does not prove a newly requested snapshot is
@@ -938,3 +938,68 @@ first WAL frame can be an obsolete Vote, not retained authority. Offline
 corruption now targets the final complete frame, at the validated checkpoint
 cut or in later replay, and records the exact rejection path. CRC, zero-hole,
 torn-tail, snapshot corruption and real ENOSPC/fsync fail-stop gates still run.
+
+`reclaim-envelope-c16-001` passes all twelve matched 90-second cells: three
+repetitions, 16 connections, one stream, 256-byte payloads, zero warmup, unchanged
+1,024-command admission bound and the same four SUT CPUs. Sampled clocks remain
+stable; every cell has zero client errors/rejections and exact final bytes on
+every replica. Source/binary/config/client hashes and complete failed earlier
+campaigns remain in the evidence ledger.
+
+| Arm | Successful operations/s | p50 ms | p99 ms | Aggregate CPU cores | Peak sampled RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Native local-fsync | 17,074–17,453 | 0.783–0.826 | 3.629–4.527 | 0.66–0.69 | 3.5 |
+| One-member durable consensus | 9,423–9,705 | 1.482–1.486 | 5.803–6.199 | 0.68–0.72 | 39.2–39.3 |
+| Three-member local-fsync acceptance | 8,259–9,061 | 1.502–1.641 | 6.323–6.755 | 1.62–1.68 | 144.0–147.6 |
+| Three-member durable quorum | 6,086–6,426 | 2.119–2.283 | 7.247–7.555 | 1.59–1.71 | 116.7–117.1 |
+
+The paired one-member/native gap is 1.80–1.84×. Async sampled committed rates are
+2.11–2.32 decimal MB/s per replica; every accepted byte is committed at final
+drain, observed 1.7–2.6 ms after client exit. Those are separate observation
+windows and a post-exit upper bound, not receipt latency. Maximum sampled async
+unapplied gaps are 6–9 entries on the leader and 6–8 on followers; samples can
+miss peaks, and entries are neither command nor byte credits. This is a finite
+zero-error operating point, not an indefinite backlog/capacity guarantee.
+One quorum leader's checkpoint takes 1,066 ms while requests still succeed;
+physical I/O need not block that group's consensus core. The prior rejection
+histories remain relevant to overload; no admission or lease bound was relaxed.
+
+### Keep commit markers; do not trade recovery safety for another fsync reduction
+
+One-member native-WAL counters show 0.342–0.345 fsyncs per acknowledged append,
+versus native's 0.172. Each consensus entry batches about 5.7 commands and still
+needs a separate apply-marker record. Sampled marker waits average 277–280 µs
+per cohort, versus 433–442 µs for entry durability notifications and 31–32 µs
+for native apply. These overlapping wall-time populations cannot be added into
+an exact critical-path or pure-device cost model, but the extra barrier is real.
+
+Stock OpenRaft allows optional commit-index persistence and provides
+[`wait_for_recovery`](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/raft/mod.rs#L1933-L2022).
+That is not by itself a safe substitute for the adapter's marker and private
+replay. Source review identifies this unexecuted counterexample:
+
+1. Publish a locally durable committed prefix beyond the last durable snapshot;
+   retain a later uncommitted conflicting suffix, then crash.
+2. Boot from the snapshot without a commit marker. A conflicting incoming
+   snapshot causes stock consensus to durably truncate after its recovered local
+   committed floor, before replacement snapshot installation becomes durable.
+3. Crash again in that interval. The authoritative local tail has shortened
+   below a previously published prefix. A historical commit advertisement can
+   satisfy the tail-based recovery wait at that shortened boundary.
+4. Opening prefix reads at that point would regress local publication, even
+   though the healthy quorum still retains the data.
+
+The relevant upstream ordering is the
+[snapshot-conflict truncation](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/engine/handler/following_handler/mod.rs#L286-L315)
+and the [commit-advertisement update](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/core/raft_core.rs#L1677-L1689).
+Current markers avoid this sequence by recovering the published committed floor
+before starting consensus. No marker-removal code or alternate startup gate is
+included in this checkpoint. A future candidate would need a fresh boot-time
+leader ReadIndex fence plus local apply, closed application/control/worker paths,
+an existing-entry local-fsync barrier even on followers, version fencing, and a
+model plus real-process tests of repeated crashes during snapshot replacement.
+It may also reduce minority restart availability. That is a separately qualified
+recovery change, not a one-line optimization. Stop this investigation here and
+continue terminal-fence/cold-storage lifecycle qualification; performance remains
+an explicit open acceptance gate rather than an indefinite prerequisite to
+starting all other production work.

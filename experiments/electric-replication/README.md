@@ -90,7 +90,7 @@ not a substitute store or a model-only result.
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
 | 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 142 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
-| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. The pinned-snapshot checkpoint still has 16 lease-expiry rejects in one 90-second/16-connection repetition. Coalesced physical GC passes its delayed-fsync progress/recovery probe; sustained-load comparison is outstanding. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions and 60/60 corrected read/fanout/mixed execution checks are retained below. Coalesced physical GC passes all 12 ninety-second/16-connection cells with zero errors/rejections and exact all-replica drain; one-member/native gap is 1.80–1.84×. Earlier failures remain. Replicated latency/memory, overload envelope and instrumentation overhead still need qualification. Keep commit markers; unsafe recovery-only removal is not a performance candidate. Continue storage lifecycle work without declaring performance acceptance complete. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
@@ -123,7 +123,24 @@ inside the same two-second checkpoint fsync from zero to 38, with no unknowns
 or leadership change and exact restart. The reader/reclamation model checks
 4,910 safety states, 2,047 stable-period liveness states and six mutations.
 Background storage errors still fail-stop; no durability/lease bound changes.
-This is not evidence that the remaining sustained-load lease rejects are fixed.
+The subsequent `reclaim-envelope-c16-001` passes all **12/12 ninety-second cells**
+(three repetitions per arm, zero warmup): native 17.07–17.45k/s, one member
+9.42–9.70k/s, three-member quorum 6.09–6.43k/s, async 8.26–9.06k accepts/s.
+Every cell has zero client errors/rejections, stable sampled clocks and exact
+all-replica byte drain. This establishes that finite operating point, not maximum
+capacity or elimination of lease expiry under every load. Async uses 144–148 MiB
+aggregate sampled RSS versus quorum's 117 MiB; resource costs remain explicit.
+
+The current performance investigation stops at a concrete safety decision:
+**retain per-apply durable commit markers**. One-member WAL fsyncs/ack are about
+0.343 versus native 0.172, and marker waits average 277–280 µs per cohort.
+Stock recovery-wait alone is not a safe replacement across conflicting snapshot
+truncation and repeated crashes. No marker-removal or changed restart contract
+is implemented in this checkpoint; [BATCHING.md](BATCHING.md) records the
+source-derived failure sequence and the extra qualification a future candidate
+would need. Terminal-fence compaction is the next implementation task, followed
+by native cold ownership/recovery/GC. Production security/operations and native
+telemetry integration remain queued, beyond the diagnostic instruments below.
 
 The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
 **51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**
