@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 72 and seed 5585648562414308128 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 1517979] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 5 and seed 5327774780454278014 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3835966] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/FenceCompaction.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module FenceCompaction
-Starting... (2026-10-08 20:36:24)
+Starting... (2026-10-08 21:41:21)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 20:36:24.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 21:41:22.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -67,20 +67,20 @@ State 6: <Certify line 57, col 15 to line 60, col 85 of module FenceCompaction>
 /\ retired = {1}
 /\ fenced = {}
 /\ reserved = {1}
-/\ messages = {1..1}
+/\ messages = {2..2}
 /\ destination = <<"done", "unused", "unused">>
 /\ issued = 2
 
-State 7: <Compact line 61, col 15 to line 64, col 79 of module FenceCompaction>
-/\ source = <<"none", "none", "none">>
+State 7: <Certify line 57, col 15 to line 60, col 85 of module FenceCompaction>
+/\ source = <<"terminal", "none", "none">>
 /\ retired = {1}
-/\ fenced = 1..1
+/\ fenced = {}
 /\ reserved = {1}
-/\ messages = {1..1}
+/\ messages = {1..1, 2..2}
 /\ destination = <<"done", "unused", "unused">>
 /\ issued = 2
 
-State 8: <Certify line 57, col 15 to line 60, col 85 of module FenceCompaction>
+State 8: <Compact line 61, col 15 to line 64, col 79 of module FenceCompaction>
 /\ source = <<"none", "none", "none">>
 /\ retired = {1}
 /\ fenced = 1..1
@@ -98,7 +98,7 @@ State 9: <Compact line 61, col 15 to line 64, col 79 of module FenceCompaction>
 /\ destination = <<"done", "unused", "unused">>
 /\ issued = 2
 
-5512 states generated, 1526 distinct states found, 684 states left on queue.
+5377 states generated, 1504 distinct states found, 682 states left on queue.
 The depth of the complete state graph search is 9.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 7 and the 95th percentile is 5).
-Finished in 00s at (2026-10-08 20:36:25)
+Finished in 00s at (2026-10-08 21:41:22)

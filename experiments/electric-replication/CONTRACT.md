@@ -219,7 +219,16 @@ lock, waits for that frame's native durability barrier, then writes a checksumme
 checkpoint, fsyncs it, atomically renames it and fsyncs the directory. Only then
 may segments older than both the replay cut's segment and every retained entry's
 segment be unlinked. Appends after the cut remain in the original WAL, not a
-second payload log. Readers pin retained locations against unlink while reading.
+second payload log. Indexed readers hold the index mutex from location lookup
+through the physical read. Capturing the cut joins those earlier readers; later
+readers can only select retained locations or frames at/after the cut. Thus unlink
+does not need to hold the index mutex through filesystem I/O. Releasing a reader's
+guard between lookup and I/O is unsafe (`UnpinnedReader` negative mutation).
+Synchronous checkpoint/reclamation I/O must hand off the Tokio worker, without
+dropping maintenance serialization or any durability barrier. The finite model
+checks reader/reclamation safety and stable-period progress, not OS scheduling,
+disk latency or arbitrary cancellation. A delayed real-fsync process history
+must separately qualify scheduling and exact recovery.
 Recovery validates retained frames, then resumes strictly after the recorded
 physical cut; it never substitutes a stale checkpoint for corruption. A crash
 before checkpoint publication retains the old replay path. A crash after it can

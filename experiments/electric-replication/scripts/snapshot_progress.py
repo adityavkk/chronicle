@@ -1,8 +1,9 @@
-"""Independent history check with a real, delayed native snapshot fsync.
+"""Independent history check with a real, delayed native maintenance fsync.
 
 One supported Tokio worker per process makes executor starvation reproducible.
-The test-only interposer blocks one snapshot descriptor, not all node I/O. This
-is a single-host scheduling/recovery check, not independent-disk durability.
+The test-only interposer blocks one snapshot or journal checkpoint descriptor,
+not all node I/O. This is a single-host scheduling/recovery check, not
+independent-disk durability.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -18,12 +19,13 @@ from check_history import check
 from lab import BINARY, ROOT, Lab, partition, source_hashes
 
 
-def check_progress(history, syscalls):
+def check_progress(history, syscalls, checkpoint=False):
     consistency = check(history)
     begin, end = syscalls
     assert begin["fault"] == end["fault"] == "delay-sync"
     assert begin["operation"] == "fsync" and end["operation"] == "delay-end"
-    assert begin["path"] == end["path"] and "/0/state/snapshot-" in begin["path"]
+    target = "/0/wal/journal-checkpoint-next" if checkpoint else "/0/state/snapshot-"
+    assert begin["path"] == end["path"] and target in begin["path"]
     start = begin["seconds"] * 10**9 + begin["nanoseconds"]
     finish = end["seconds"] * 10**9 + end["nanoseconds"]
     assert finish - start >= 1_900_000_000, "storage delay was not exercised"
@@ -31,21 +33,21 @@ def check_progress(history, syscalls):
     completed = [e for e in during if start <= e["start"] <= e["end"] <= finish and e["status"] == 200]
     errors = []
     if any(e["status"] != 200 for e in during):
-        errors.append("probed partition request failed during snapshot delay")
+        errors.append("probed partition request failed during maintenance delay")
     if sum(e["op"] == "append" for e in completed) < 3 or sum(e["op"] == "read" for e in completed) < 3:
         errors.append("fewer than three complete write/read pairs inside the actual syscall delay")
     before = {(e["node"], e["group"]): e["term"] for e in history if e["op"] == "term" and e["phase"] == "before"}
     after = [e for e in history if e["op"] == "term" and e["phase"] == "after"]
     assert len(before) == len(after) == 6
     if any(e["term"] != before[e["node"], e["group"]] or e["leader"] != 1 for e in after):
-        errors.append("snapshot disk delay disturbed leadership")
+        errors.append("maintenance disk delay disturbed leadership")
     return dict(verdict="FAIL" if errors else "PASS", consistency=consistency,
                 delayed_requests=len(during), completed_inside_delay=len(completed),
                 unknowns=sum(e.get("status") == 0 for e in history),
                 delay_ns=finish-start, errors=errors)
 
 
-def run(output, binary=BINARY, binary_provenance=None, same_group=False):
+def run(output, binary=BINARY, binary_provenance=None, same_group=False, checkpoint=False):
     lab = Lab(output, port=19600, binary=binary.resolve())
     interposer = ROOT / ".tmp/electric-tools/snapshot_progress.so"
     source = Path(__file__).with_name("storage_faults.c")
@@ -64,6 +66,7 @@ def run(output, binary=BINARY, binary_provenance=None, same_group=False):
         interposer_source=hashlib.sha256(source.read_bytes()).hexdigest(), compile_command=compile_command,
         driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), workers=1,
         processes=3, partitions=2, progress_group=0 if same_group else 1,
+        delayed_target="journal-checkpoint" if checkpoint else "snapshot",
         durability="quorum-fsync", consistency="linearizable default"), indent=2)+"\n")
     paths = [next(f"/snapshot-progress/{i}" for i in range(100) if partition(f"/snapshot-progress/{i}", 2) == g) for g in range(2)]
     history = []
@@ -118,12 +121,18 @@ def run(output, binary=BINARY, binary_provenance=None, same_group=False):
             lab.wait(lambda: lab.leader(group) == 1, "co-located initial leaders")
             assert lab.request(1, "PUT", paths[group])[0] == 201
             assert operation(1, group, f"before-{group}-λ")["status"] == 200
+        if checkpoint:
+            # A forced snapshot must cover enough logs to trigger Raft purge
+            # and its native checkpoint, rather than only snapshot creation.
+            for index in range(260):
+                assert operation(1, 0, f"seed-{index:03}-λ", phase="seed")["status"] == 200
         terms("before")
-        flag.write_text("delay-sync /0/state/snapshot-\n")
+        target = "/0/wal/journal-checkpoint-next" if checkpoint else "/0/state/snapshot-"
+        flag.write_text(f"delay-sync {target}\n")
         with ThreadPoolExecutor(max_workers=1) as pool:
             snapshot = pool.submit(lab.admin, 1, 0, "snapshot")
             lab.wait(lambda: syscalls.exists() and len(syscalls.read_text().splitlines()) >= 1,
-                     "actual snapshot fsync intercepted")
+                     "actual maintenance fsync intercepted")
             index = 0
             while len(syscalls.read_text().splitlines()) == 1:
                 operation(1, 0 if same_group else 1, f"during-{index:03}-λ", phase="delayed")
@@ -151,7 +160,7 @@ def run(output, binary=BINARY, binary_provenance=None, same_group=False):
             for node in (1, 2, 3):
                 lab.wait(lambda: operation(node, group, mode="prefix").get("records") == final["records"],
                          "exact committed prefix on every restarted replica")
-        result = check_progress(history, [json.loads(line) for line in syscalls.read_text().splitlines()])
+        result = check_progress(history, [json.loads(line) for line in syscalls.read_text().splitlines()], checkpoint)
     except BaseException as error:
         result["error"] = repr(error)
         (lab.output / "failure.txt").write_text(traceback.format_exc())
@@ -168,4 +177,5 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, default=BINARY)
     parser.add_argument("--binary-provenance", type=Path)
     parser.add_argument("--same-group", action="store_true", help="Probe apply in the snapshotting group, not the other group")
+    parser.add_argument("--checkpoint", action="store_true", help="Delay journal checkpoint fsync instead of snapshot fsync")
     sys.exit(0 if run(**vars(parser.parse_args())) else 1)
