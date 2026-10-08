@@ -245,11 +245,39 @@ Cold-tier support is retained in the upstream source but **disabled in replicate
 mode** until object identities include cluster/group/incarnation/range/checksum,
 manifest publication crosses consensus, and reference-safe GC is implemented.
 Otherwise a follower or old leader could delete another replica's objects.
+
+Review of the pinned native engine identifies additional integration boundaries,
+not permission to enable its standalone offloader unchanged:
+
+* `tier::offload_one` uploads, size-verifies and durably updates a **local**
+  manifest before unlinking its chunk. That is not a replicated ownership or
+  publication decision. Native object keys include the stream file/incarnation
+  and offset, but not our cluster/group identity or content checksum.
+* `handlers::stream_resolved_body` retains remote keys for lazy range GETs.
+  Keeping an `Arc<StreamState>` does not pin those objects against
+  `gc_remote_segments`. Native local file descriptors survive unlink; an object
+  key does not provide that guarantee. Old snapshot metadata also needs its
+  remote references protected until restore/transfer no longer needs them.
+* Native GC waits at most 1,000 × 2 ms for an uploader, then ignores remote
+  delete errors. A slow or indeterminate PUT can finish after that deletion;
+  process death is not proof that an external request never completes. Durable
+  retry/reconciliation and explicit retired-owner fencing are required.
+* `LocalFsBlobStore::put` fsyncs the temporary file and renames it, but does not
+  fsync the parent directory. It is not yet an honest crash-durable object-store
+  fixture for dropping the last local copy.
+
+The native wire/range and bounded streaming paths remain the intended reuse
+boundary. Object publication, read/snapshot pins, delayed uploads, ownership
+transfer and reclamation need a formal contract and actual file/object fault
+tests before any replicated cold-tier flag is accepted. No cold durability or GC
+qualification is claimed by the hot-only conformance and benchmark results.
+
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
-journal and snapshot as stream data. Experimental node identity 7 binds the
-command-count ceiling as well as node/cluster/partition ownership. It rejects
-earlier data, including the version-6 experiment that allowed 128-command batches:
+journal and snapshot as stream data. Experimental node identity 8 retains the
+command-count ceiling and node/cluster/partition binding introduced in identity 7,
+and fences the 0.10 consensus representation. It rejects earlier data, including
+the version-6 experiment that allowed 128-command batches:
 restoring the 64-command ceiling must not silently invalidate its receipt
 ordinals. Snapshot envelope format remains 5 with bounded receipt outcomes (see
 `ASYNC.md`). No data migration or mixed-version operation is supplied; editing

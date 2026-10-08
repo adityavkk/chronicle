@@ -20,10 +20,11 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live links links-live apply apply-live reclaim reclaim-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
+  [[ "$mode" != fences* ]] || model=FenceCompaction
   [[ "$mode" != links* ]] || model=Links
   [[ "$mode" != apply* ]] || model=ApplyRecovery
   [[ "$mode" != reclaim* ]] || model=JournalReclaim
@@ -36,7 +37,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live links links-
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -45,6 +46,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
   fi
   case "$mutation" in
     PartialPublish|EarlyRelease|FalseAbsence|ForgetGrant) model=Forks; config=forks ;;
+    UnsafeRange|ReplaceFence|ForgetFence) model=FenceCompaction; config=fences ;;
     StaleObservation|OldIncarnationAck|DiscoverAtTail) model=Links; config=links ;;
     EarlyApply|ForgetMarker|EarlyServe) model=ApplyRecovery; config=apply ;;
     EarlyUnlink|MissingDirSync|DropRetained|DropVote) model=JournalReclaim; config=reclaim ;;
@@ -79,4 +81,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 44 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 47 negative mutations; Lean and one header-projection negative mutation: PASS\n'

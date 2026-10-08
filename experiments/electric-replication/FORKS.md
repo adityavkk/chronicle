@@ -80,3 +80,49 @@ neither model proves Rust refinement, network authentication or physical disks.
 Cross-group fault histories must independently check byte identity and deletion
 retention through retries, source/destination leader loss, snapshots, pending-name
 races and descendant deletion. Single-partition conformance is insufficient.
+
+## Terminal-fence compaction contract (not implemented yet)
+
+The current source `decisions` and destination `destinations` maps retain terminal
+transactions indefinitely. Simply deleting those entries would let a delayed
+Grant reacquire a source reference, possibly on a recreated stream. A timeout is
+not a retirement certificate. One scalar high-water mark also stalls behind a
+single long-lived fork; replaying an older sparse frontier must not reopen IDs
+that a newer frontier already retired.
+
+Use source-owned, monotonic **retired ID intervals**, scoped to the destination
+group and existing cluster identity. A destination captures its applied log cut
+and the complement of its active transaction IDs below that cut. A bounded range
+certificate may cover only that complement: pending import, live descendants,
+and release awaiting source confirmation remain holes. IDs below the captured
+cut cannot be allocated again. Gaps from unrelated log commands need no individual
+tombstone. A source orders each certificate with Grant/Release, unions it with
+its existing retired ranges, and removes covered terminal decisions atomically.
+Grant must consult the retired ranges before it can create a new decision.
+Duplicated, delayed or reordered certificates can only add fences, never erase
+one; overlapping/adjacent intervals coalesce.
+
+Destination terminal-result retention is separate from source ownership. It must
+be bounded without deleting a pending or live transaction. Foreground workers
+holding a retired transaction ID must handle expiration without panicking or
+reporting an abort for an unknown result. Ordinary idempotent PUT retries still
+resolve against the native stream/configuration, not an indefinitely retained
+transaction reply. A recovery sweep can reconstruct certificates from the durable
+applied cut and active transactions; no network call holds the apply lock. Failed
+delivery does not authorize source collection. Admission must bound unswept
+terminal records during peer failure rather than growing them without limit.
+
+`FenceCompaction.tla` specifies this retirement protocol before Rust changes. It
+includes unrelated log positions, active holes, delayed old Grants, reordered
+range certificates, terminal collection and recovery. Its negative switches
+cover a certificate that includes active work, replacing rather than unioning
+fences, and losing fences on restart. It assumes unique monotonic IDs and atomic
+quorum-durable metadata apply; it does not prove interval encoding, authentication,
+Rust recovery or bounded sweeper cost. TLC passes 12,526 distinct safety states
+at three ID positions, and stable-period liveness over 349 states at two positions.
+All three deliberately unsafe mutations violate the invariant. Exact model/config
+hashes and counterexamples are retained under `evidence/formal/fences*` and the
+three mutation names. Native implementation and generated/fault tests remain
+required before claiming this gate. Old snapshot readers must not silently
+discard the new fences; storage/RPC identity compatibility must be qualified with
+the implementation.
