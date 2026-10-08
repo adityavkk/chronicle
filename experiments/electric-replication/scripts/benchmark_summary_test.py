@@ -1,6 +1,12 @@
+import contextlib
+import gzip
+import io
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from benchmark_summary import summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+from benchmark_summary import summarize, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
 
 
 class ProgressSummary(unittest.TestCase):
@@ -35,6 +41,42 @@ class ProgressSummary(unittest.TestCase):
         self.assertEqual(result["nodes"]["4"]["samples"], 1)
         self.assertNotIn("committed_bytes_per_second", result["nodes"]["4"])
         self.assertEqual(result["groups"], {})
+
+    def test_stable_indices_cannot_hide_changed_stream_names(self):
+        rows = [dict(node=1, unix_ms=10, end_unix_ms=11, head_status=200,
+                     sampled_stream_indices=[0], total_streams=1, sampled_stream_names=[name])
+                for name in ("fanout", "s00000000")]
+        with self.assertRaisesRegex(AssertionError, "stream names changed"):
+            summarize_progress([dict(replicas=rows)], 0, 20)
+
+
+class NonWriteDiagnostics(unittest.TestCase):
+    def test_mixed_keeps_counters_without_fabricating_all_phase_counts_or_windows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cell = root / "mixed"
+            cell.mkdir()
+            (root / "provenance.json").write_text("{}")
+            (cell / "result.json").write_text(json.dumps(dict(arm="raft3-local", workload=["mixed"],
+                profile=False, diagnostics=True, verdict="PASS", diagnostic_tail_captured=True,
+                client_window=dict(start_unix_ms=100, end_unix_ms=300))))
+            (cell / "client.json").write_text(json.dumps(dict(write_counts=dict(ok=100), drive_secs=1)))
+            with gzip.open(cell / "node-1.log.gz", "wt") as log:
+                log.write('WAL_CONT staged/s=17 fsync/s=9\n')
+                log.write('RAFT_WRITE_OUTCOMES '+json.dumps(dict(schema_version=1, unix_ms=120,
+                    cumulative=dict(applied_commands=71, lease_expired=4)))+'\n')
+            with contextlib.redirect_stdout(io.StringIO()):
+                summarize(root)
+            row = json.loads((root / "summary.json").read_text())["rows"][0]
+            self.assertEqual(row["wal_diagnostics"]["fsyncs"], 9)
+            self.assertEqual(row["wal_diagnostics"]["staged_records"], 17)
+            self.assertIsNone(row["wal_diagnostics"]["client_acks_all_phases"])
+            self.assertIsNone(row["wal_diagnostics"]["fsyncs_per_ack"])
+            self.assertIsNone(row["wal_diagnostics"]["records_per_ack"])
+            self.assertEqual(row["write_outcomes"]["nodes"]["node-1.log.gz"]["whole_invocation"],
+                             dict(applied_commands=71, lease_expired=4))
+            self.assertEqual(row["sample_window"], dict(start_unix_ms=100, end_unix_ms=300,
+                             scope="outer client invocation; includes non-measure work"))
 
 
 class WriteOutcomeSummary(unittest.TestCase):

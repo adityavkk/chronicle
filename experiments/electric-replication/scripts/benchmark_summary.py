@@ -78,6 +78,8 @@ def summarize_progress(samples, begin, end):
             if "sampled_stream_indices" in observation:
                 for key in ("sampled_stream_indices", "total_streams"):
                     assert row.setdefault(key, observation[key]) == observation[key], "HEAD sample domain changed"
+            if "sampled_stream_names" in observation:
+                assert row.setdefault("sampled_stream_names", observation["sampled_stream_names"]) == observation["sampled_stream_names"], "HEAD stream names changed"
             row["errors"] += int("error" in observation or observation.get("head_status") != 200)
             if "committed_bytes" in observation:
                 row["heads"].append(dict(unix_ms=when, bytes=observation["committed_bytes"],
@@ -177,7 +179,7 @@ def summarize(directory):
             row["final_storage_bytes"] = dict(total=sum(storage.values()),
                 wal=sum(v for k,v in storage.items() if k.endswith(".wal")),
                 snapshots=sum(v for k,v in storage.items() if Path(k).name.startswith("snapshot-")))
-        if result.get("diagnostics") and raw.get("ok_total_all_phases"):
+        if result.get("diagnostics"):
             # Both pinned engines print WAL deltas divided by the CONFIGURED
             # interval (exactly 1s here), so these sums recover counter totals.
             # SRV_STATS uses actual elapsed time instead: do not sum its rates
@@ -224,12 +226,14 @@ def summarize(directory):
                           "A loop can sync multiple segments. Wall time includes OS descheduling, not pure disk or CPU time. "
                           "Cumulative whole-invocation totals include setup/warmup; sampled windows are first/last observations "
                           "inside client bounds. The unmodified upstream binary has no such probe; missing is not zero.")
-            acknowledgements = raw["ok_total_all_phases"]
+            acknowledgements = raw.get("ok_total_all_phases")
             row["wal_diagnostics"] = dict(staged_records=staged, fsyncs=syncs,
                 client_acks_all_phases=acknowledgements,
-                fsyncs_per_ack=syncs/acknowledgements, records_per_ack=staged/acknowledgements,
+                fsyncs_per_ack=syncs/acknowledgements if acknowledgements else None,
+                records_per_ack=staged/acknowledgements if acknowledgements else None,
                 final_counter_interval_captured=result.get("diagnostic_tail_captured", result["verdict"] == "PASS"),
                 scope="aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs. "
+                      "Ratios omitted when the pinned client does not report all-phase append counts (including seed). "
                       "If final_counter_interval_captured is false, counters and ratios are lower bounds only.")
         rows.append(row)
     output = dict(provenance_sha256=hashlib.sha256((root/"provenance.json").read_bytes()).hexdigest(),
