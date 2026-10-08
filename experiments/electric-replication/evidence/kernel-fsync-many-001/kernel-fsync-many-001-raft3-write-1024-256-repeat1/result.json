@@ -1,0 +1,552 @@
+{
+  "arm": "raft3",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": true,
+  "profiler": "kernel-fsync",
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "ed7249b392f2704d14c120d964ad595564bd645b1982c6e7204ee1969fc65824",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "profiler_version": "perf version 6.1.187",
+  "disk_preflight": {
+    "free_bytes": 14826688512,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    360425,
+    360725,
+    360995
+  ],
+  "affinity": {
+    "360425": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "360725": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "360995": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 361450,
+  "process_sample_gaps": [
+    {
+      "pid": 361450,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791494773762,
+    "end_unix_ms": 1791494805971,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 674.0376450034091,
+    "target_bytes": 141685504,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 141685504
+      },
+      {
+        "node": 2,
+        "committed_bytes": 141685504
+      },
+      {
+        "node": 3,
+        "committed_bytes": 141685504
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "kernel_trace_stopped_early": false,
+  "kernel_fsync_summary": {
+    "started": 94389,
+    "matched": 94389,
+    "unmatched_exits": 0,
+    "incomplete": [],
+    "errors": {},
+    "first_64_slow_calls": [
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189315561043,
+        "elapsed_ns": 101233084
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189314748430,
+        "elapsed_ns": 102073536
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189315082731,
+        "elapsed_ns": 101741375
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189314976888,
+        "elapsed_ns": 101861707
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189315116021,
+        "elapsed_ns": 101741106
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189315969258,
+        "elapsed_ns": 101276955
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189678832562,
+        "elapsed_ns": 102102268
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189679038553,
+        "elapsed_ns": 101980968
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189678484676,
+        "elapsed_ns": 102780563
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88189679596342,
+        "elapsed_ns": 102506838
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190080696605,
+        "elapsed_ns": 102073595
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190081270322,
+        "elapsed_ns": 101540888
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190082027384,
+        "elapsed_ns": 101226188
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190081751327,
+        "elapsed_ns": 101504542
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190082174838,
+        "elapsed_ns": 101084218
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190081586072,
+        "elapsed_ns": 101699497
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190390970410,
+        "elapsed_ns": 100250762
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190391167426,
+        "elapsed_ns": 100077257
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190390349883,
+        "elapsed_ns": 101121933
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190390301203,
+        "elapsed_ns": 101217660
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190390632592,
+        "elapsed_ns": 101536930
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190390900823,
+        "elapsed_ns": 101313388
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190713538699,
+        "elapsed_ns": 100140258
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190712556632,
+        "elapsed_ns": 101400938
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190714112363,
+        "elapsed_ns": 101004483
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190713481842,
+        "elapsed_ns": 101639118
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190713642525,
+        "elapsed_ns": 101479155
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88190713900284,
+        "elapsed_ns": 101231496
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191090606475,
+        "elapsed_ns": 101350720
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191090318100,
+        "elapsed_ns": 101640010
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191090999533,
+        "elapsed_ns": 102108922
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191369071573,
+        "elapsed_ns": 100267776
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191367935021,
+        "elapsed_ns": 101715212
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191368423042,
+        "elapsed_ns": 102188676
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191369420060,
+        "elapsed_ns": 101246346
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191628392359,
+        "elapsed_ns": 102003608
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191628586310,
+        "elapsed_ns": 101854994
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191629558469,
+        "elapsed_ns": 101363309
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191629294501,
+        "elapsed_ns": 101627654
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191629359569,
+        "elapsed_ns": 101579644
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191629638099,
+        "elapsed_ns": 101318811
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191925079087,
+        "elapsed_ns": 101660142
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191925131226,
+        "elapsed_ns": 101618541
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191925804962,
+        "elapsed_ns": 101983986
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88191925585508,
+        "elapsed_ns": 102298503
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192205599193,
+        "elapsed_ns": 101799841
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192207113879,
+        "elapsed_ns": 101627205
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192207156606,
+        "elapsed_ns": 101587310
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192206475129,
+        "elapsed_ns": 102310310
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192206880020,
+        "elapsed_ns": 101912679
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192478579494,
+        "elapsed_ns": 100085418
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192477181835,
+        "elapsed_ns": 101738453
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192478455378,
+        "elapsed_ns": 101999205
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192478412555,
+        "elapsed_ns": 102051492
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192479167618,
+        "elapsed_ns": 101312492
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192755543195,
+        "elapsed_ns": 100064144
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192754209719,
+        "elapsed_ns": 101655769
+      },
+      {
+        "pid": 360725,
+        "tid": 360745,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192754860555,
+        "elapsed_ns": 101894244
+      },
+      {
+        "pid": 360425,
+        "tid": 360483,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192755860003,
+        "elapsed_ns": 100896099
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88192756352353,
+        "elapsed_ns": 100439052
+      },
+      {
+        "pid": 360995,
+        "tid": 361032,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88193164992105,
+        "elapsed_ns": 102139495
+      },
+      {
+        "pid": 360725,
+        "tid": 360763,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88193164681167,
+        "elapsed_ns": 102453711
+      },
+      {
+        "pid": 360425,
+        "tid": 360462,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88193164885723,
+        "elapsed_ns": 102268351
+      },
+      {
+        "pid": 360995,
+        "tid": 361019,
+        "syscall": "fdatasync",
+        "start_monotonic_ns": 88193166463337,
+        "elapsed_ns": 101784967
+      }
+    ],
+    "successful": {
+      "count": 94389,
+      "total_ns": 121701489415,
+      "p50_ns": 601339,
+      "p99_ns": 3205696,
+      "max_ns": 103613363,
+      "at_least_100ms": 460
+    },
+    "scope": "Matched per-thread kernel fsync/fdatasync tracepoints in the whole capture, including setup/drain. Incomplete boundaries are not durations. Wall time includes kernel work, blocking and descheduling, not pure device latency; tracing still perturbs execution. Raw arguments are not retained."
+  },
+  "profile_script_exit_code": 0,
+  "verify_pid": 368459,
+  "verify_window": {
+    "start_unix_ms": 1791494810041,
+    "end_unix_ms": 1791494810075,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

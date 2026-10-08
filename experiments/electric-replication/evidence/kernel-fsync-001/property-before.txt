@@ -1,0 +1,18 @@
+E
+======================================================================
+ERROR: benchmark_summary_test (unittest.loader._FailedTest.benchmark_summary_test)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: benchmark_summary_test
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/unittest/loader.py", line 162, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark_summary_test.py", line 10, in <module>
+    from benchmark_summary import check_clock, kernel_fsync_event, summarize, summarize_fsync_trace, summarize_kernel_fsync, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+ImportError: cannot import name 'kernel_fsync_event' from 'benchmark_summary' (/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark_summary.py)
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

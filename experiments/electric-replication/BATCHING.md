@@ -872,3 +872,36 @@ sampled unapplied-entry maximum is 5–10 and followers' maximum is 40, not an
 instantaneous command/byte backlog bound. One closing-client `/proc` permission
 gap in async repeat 2 is retained. Further profiling must separate disk/executor
 stalls from the now-removed snapshot lock hold.
+
+### Kernel tracepoints reproduce the long synchronous syscall tail
+
+`kernel-fsync-many-001` passes all four 30-second workload/export checks, with
+1,024 streams, 256 connections, zero warmup and exact all-replica drain. Unlike
+ptrace, `perf` tracepoints do not stop the process at each syscall. This remains
+a perturbed diagnostic, not an unprofiled capacity or pure-device-latency result.
+
+| Arm | Paired successful sync calls | Calls ≥100 ms | Maximum ms | Append p99 ms |
+| --- | ---: | ---: | ---: | ---: |
+| Native | 58,465 | 32 | 105.24 | 13.303 |
+| One member | 66,923 | 1 | 444.82 | 11.175 |
+| Three replicas, async | 68,061 | 109 | 216.11 | 63.295 |
+| Three replicas, quorum | 94,389 | 460 | 103.61 | 112.703 |
+
+These fsync/fdatasync counts include setup/drain, not only the client drive
+window. There are no recorded lost, unmatched, unfinished or failed sync calls
+and no early recorder stops. The synchronous three-replica run reproduces the
+111–113 ms tail with 460 calls spending at least 100 ms **inside the kernel
+syscall interval**. Native also exhibits that interval. It is not a 100 ms timer
+in the adapter, but the measurements do not distinguish disk waiting, kernel
+work and descheduling or prove every slow append's critical path. They do not
+resolve the separate occasional lease-expiry rejection.
+
+The optional profiler is PID-scoped, limited to a 60-second drive and a 128 MiB
+raw capture (actual captures 12.1–19.5 MiB), uses monotonic timestamps, and exports
+only identity, fd, result and timing. Unused syscall argument registers stay in
+root-readable local captures under `.tmp/electric-profiles/`, not Git. The first
+unprivileged export failure is retained; the working export uses the required
+local privilege without changing system access controls. Thirty Python checks
+pass, including 48 generated interleaving/error/boundary cases and redaction,
+partial-capture and lost-event rejection. One closing-client sampling gap in the
+one-member cell is retained. Raw captures are not included in publication.

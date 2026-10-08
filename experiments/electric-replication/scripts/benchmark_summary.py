@@ -34,6 +34,73 @@ def check_clock(samples):
     return result
 
 
+def kernel_fsync_event(line):
+    """Linux x86-64 raw tracepoint export. Discard unused argument registers.
+
+    perf script --ns --show-lost-events -F trace:pid,tid,time,event,trace
+    Unknown/lost records invalidate the capture; never echo their raw contents.
+    """
+    match = re.fullmatch(r"\s*(\d+)/(\d+)\s+(\d+)\.(\d{9}):\s+raw_syscalls:sys_(enter|exit): NR (74|75) (.+)\s*", line.rstrip())
+    if match is None:
+        raise ValueError("invalid kernel fsync event")
+    pid, tid, seconds, nanos, phase, call, detail = match.groups()
+    row = dict(pid=int(pid), tid=int(tid), monotonic_ns=int(seconds)*1_000_000_000+int(nanos),
+               phase=phase, syscall="fsync" if call == "74" else "fdatasync")
+    if phase == "enter":
+        fields = re.fullmatch(r"\(([0-9a-f]+),[^\n]*\)", detail)
+        if fields is None:
+            raise ValueError("invalid kernel fsync event")
+        row["fd"] = int(fields[1], 16)
+    else:
+        fields = re.fullmatch(r"= (-?\d+)", detail)
+        if fields is None:
+            raise ValueError("invalid kernel fsync event")
+        row["result"] = int(fields[1])
+    return row
+
+
+def summarize_kernel_fsync(events):
+    pending, successful, errors, slow = {}, [], {}, []
+    started = matched = unmatched = 0
+    for row in events:
+        thread = (row["pid"], row["tid"])
+        if row["phase"] == "enter":
+            if thread in pending:
+                raise ValueError("overlapping kernel fsync calls")
+            pending[thread] = row
+            started += 1
+            continue
+        if row["phase"] != "exit":
+            raise ValueError("invalid kernel fsync phase")
+        entry = pending.pop(thread, None)
+        if entry is None:
+            unmatched += 1
+            continue
+        if row["syscall"] != entry["syscall"] or row["monotonic_ns"] < entry["monotonic_ns"]:
+            raise ValueError("kernel fsync pairing/clock mismatch")
+        matched += 1
+        ns = row["monotonic_ns"]-entry["monotonic_ns"]
+        if row["result"]:
+            label = str(row["result"])
+            errors[label] = errors.get(label, 0)+1
+        else:
+            successful.append(ns)
+            if ns >= 100_000_000 and len(slow) < 64:
+                slow.append(dict(pid=row["pid"], tid=row["tid"], syscall=row["syscall"],
+                    start_monotonic_ns=entry["monotonic_ns"], elapsed_ns=ns))
+    successful.sort()
+    n = len(successful)
+    return dict(started=started, matched=matched, unmatched_exits=unmatched, incomplete=list(pending.values()),
+        errors=errors, first_64_slow_calls=slow,
+        successful=dict(count=n, total_ns=sum(successful), p50_ns=successful[(n+1)//2-1],
+            p99_ns=successful[(n*99+99)//100-1], max_ns=successful[-1],
+            at_least_100ms=sum(ns >= 100_000_000 for ns in successful)) if n else None,
+        scope="Matched per-thread kernel fsync/fdatasync tracepoints in the whole capture, including setup/drain. "
+              "Incomplete boundaries are not durations. Wall time includes kernel work, blocking and descheduling, "
+              "not pure device latency; tracing still perturbs execution. Unused argument registers are omitted "
+              "from the exported events; the raw capture remains local-only.")
+
+
 def summarize_fsync_trace(lines):
     """strace -f -qq -ttt -T, filtered to fsync/fdatasync; failures stay explicit."""
     pending, successful, failures = {}, [], {}

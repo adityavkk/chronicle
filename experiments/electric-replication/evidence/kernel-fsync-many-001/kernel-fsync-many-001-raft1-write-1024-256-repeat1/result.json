@@ -1,0 +1,89 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": true,
+  "profiler": "kernel-fsync",
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "ed7249b392f2704d14c120d964ad595564bd645b1982c6e7204ee1969fc65824",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "profiler_version": "perf version 6.1.187",
+  "disk_preflight": {
+    "free_bytes": 14854582272,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    48021
+  ],
+  "affinity": {
+    "48021": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 48444,
+  "process_sample_gaps": [
+    {
+      "pid": 48444,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791494692298,
+    "end_unix_ms": 1791494724126,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 599.6849860093789,
+    "target_bytes": 362489600,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 362489600
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "kernel_trace_stopped_early": false,
+  "kernel_fsync_summary": {
+    "started": 66923,
+    "matched": 66923,
+    "unmatched_exits": 0,
+    "incomplete": [],
+    "errors": {},
+    "first_64_slow_calls": [
+      {
+        "pid": 48021,
+        "tid": 48040,
+        "syscall": "fsync",
+        "start_monotonic_ns": 88115574147861,
+        "elapsed_ns": 444815409
+      }
+    ],
+    "successful": {
+      "count": 66923,
+      "total_ns": 38728827035,
+      "p50_ns": 345486,
+      "p99_ns": 1919785,
+      "max_ns": 444815409,
+      "at_least_100ms": 1
+    },
+    "scope": "Matched per-thread kernel fsync/fdatasync tracepoints in the whole capture, including setup/drain. Incomplete boundaries are not durations. Wall time includes kernel work, blocking and descheduling, not pure device latency; tracing still perturbs execution. Raw arguments are not retained."
+  },
+  "profile_script_exit_code": 0,
+  "verify_pid": 73640,
+  "verify_window": {
+    "start_unix_ms": 1791494726931,
+    "end_unix_ms": 1791494726996,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

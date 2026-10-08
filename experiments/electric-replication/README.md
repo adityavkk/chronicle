@@ -144,6 +144,15 @@ an analyzer failure caused by interleaved diagnostic logs; it does not resolve
 the untraced p99. Allocation profiles implicate bounded receipt results in the
 extra async heap, without changing retention or establishing a leak.
 
+The later PID-scoped kernel tracepoint campaign (`kernel-fsync-many-001`) passes
+all four workload/export checks and reproduces the quorum tail: 112.7 ms append
+p99 with 460 fsync/fdatasync calls taking at least 100 ms. Native also has 32 such
+calls. These are whole-capture syscall intervals including setup/drain, not pure
+device latency or unperturbed capacity. The bounded profiler exports no unused
+register arguments; raw captures stay local-only. [BATCHING.md](BATCHING.md) has
+the counts and generated parser/redaction checks. Disk versus descheduling and
+the separate occasional lease rejection remain unresolved.
+
 Opt-in `RAFT_WRITE_OUTCOMES` schema-1 counters distinguish count/byte backlog
 limits, epoch/lease/forward rejection, locally durable/applied command stages,
 and unknown post-assignment outcomes. They contain fixed labels, not request

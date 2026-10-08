@@ -167,26 +167,27 @@ class BaselineComparison(unittest.TestCase):
             self.assertNotEqual([call.args[1] for call in calls[:4]], [call.args[1] for call in calls[20:24]])
 
     def test_fsync_profile_is_perturbed_four_arm_diagnostic_not_capacity_repetitions(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            binary = root / "binary"
-            binary.write_bytes(b"not-executable")
-            with patch("benchmark.ROOT", root), patch("benchmark.NATIVE", binary), \
-                 patch("benchmark.CLIENT", binary), patch("benchmark.BINARY", binary), \
-                 patch("benchmark.source_hashes", return_value={}), \
-                 patch("benchmark.cell", return_value={"verdict": "PASS"}) as execute:
-                self.assertTrue(run(root / "fsync", fsync_profiles=True, async_writes=True,
-                    duration_secs=19, write_streams=1024, write_warmup_secs=0))
-            self.assertEqual([call.args[1] for call in execute.call_args_list],
-                             ["native", "raft1", "raft3-local", "raft3"])
-            for call in execute.call_args_list:
-                self.assertEqual(call.args[2], ("write", 1024, 256))
-                self.assertTrue(call.kwargs["profile"])
-                self.assertTrue(call.kwargs["diagnostics"])
-                self.assertEqual(call.kwargs["profiler"], "fsync")
-                self.assertEqual(call.kwargs["duration"], 19)
-                self.assertEqual(call.kwargs["write_warmup_secs"], 0)
-                self.assertEqual(call.kwargs["pending_commands"], 1024)
+        for backend, label in (("strace", "fsync"), ("kernel", "kernel-fsync")):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "binary"
+                binary.write_bytes(b"not-executable")
+                with patch("benchmark.ROOT", root), patch("benchmark.NATIVE", binary), \
+                     patch("benchmark.CLIENT", binary), patch("benchmark.BINARY", binary), \
+                     patch("benchmark.source_hashes", return_value={}), \
+                     patch("benchmark.cell", return_value={"verdict": "PASS"}) as execute:
+                    self.assertTrue(run(root / "fsync", fsync_profiles=True, async_writes=True,
+                        fsync_profiler=backend, duration_secs=19, write_streams=1024, write_warmup_secs=0))
+                self.assertEqual([call.args[1] for call in execute.call_args_list],
+                                 ["native", "raft1", "raft3-local", "raft3"])
+                for call in execute.call_args_list:
+                    self.assertEqual(call.args[2], ("write", 1024, 256))
+                    self.assertTrue(call.kwargs["profile"])
+                    self.assertTrue(call.kwargs["diagnostics"])
+                    self.assertEqual(call.kwargs["profiler"], label)
+                    self.assertEqual(call.kwargs["duration"], 19)
+                    self.assertEqual(call.kwargs["write_warmup_secs"], 0)
+                    self.assertEqual(call.kwargs["pending_commands"], 1024)
 
     def test_optional_stats_do_not_change_workloads_bounds_or_external_observations(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -225,6 +226,9 @@ class BaselineComparison(unittest.TestCase):
                               dict(read_diagnostics=True, fsync_profiles=True),
                               dict(cpu_profiles=True, fsync_profiles=True),
                               dict(heap_profiles=True, fsync_profiles=True),
+                              dict(fsync_profiles=True, fsync_profiler="kernel", duration_secs=61),
+                              dict(fsync_profiler="kernel"),
+                              dict(fsync_profiles=True, fsync_profiler="other"),
                               dict(read_diagnostics=True, write_connections=17)):
                 with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                     run(output, **arguments)

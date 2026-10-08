@@ -22,7 +22,7 @@ import threading
 import time
 import traceback
 
-from benchmark_summary import summarize_fsync_trace
+from benchmark_summary import kernel_fsync_event, summarize_fsync_trace, summarize_kernel_fsync
 from lab import Lab, BINARY, EXPERIMENT, ROOT, matching_pids, source_hashes
 
 CLIENT = ROOT / ".tmp/electric-tools/bench-target/release/ds-bench"
@@ -76,6 +76,37 @@ def export_cpu_profile(output):
               "Raw DWARF process-memory captures are deliberately not version-controlled; symbolized samples are retained."), indent=2)+"\n")
     source.unlink()
     return result
+
+
+def export_kernel_fsync(output, source, pids):
+    # Raw tracepoints include unused syscall argument registers. Keep the root-
+    # readable capture local-only; publish only fd/result/identity/timestamp.
+    raw_hash = subprocess.check_output(["sudo", "-n", "sha256sum", str(source)], text=True).split()[0]
+    (output / "kernel-profile-provenance.json").write_text(json.dumps(dict(
+        raw_local_path=str(source.relative_to(ROOT)), raw_sha256=raw_hash, raw_bytes=source.stat().st_size,
+        clock="CLOCK_MONOTONIC", node_pids=pids, max_capture_bytes=128*1024**2,
+        scope="Linux x86-64, PID-scoped fsync/fdatasync raw tracepoints. No stacks or memory samples. "
+              "Unused argument registers stay in root-readable local capture, never exported."), indent=2)+"\n")
+    target = output / "kernel-fsync-events.jsonl.gz"
+    with open(output / "kernel-script.log", "w") as errors, gzip.open(target, "wt") as out:
+        process = subprocess.Popen(["sudo", "-n", "perf", "script", "--ns", "--show-lost-events",
+            "-F", "trace:pid,tid,time,event,trace", "-i", str(source)], stdout=subprocess.PIPE,
+            stderr=errors, text=True)
+        try:
+            for line in process.stdout:
+                if not line.strip():
+                    continue
+                row = kernel_fsync_event(line)
+                if row["pid"] not in pids:
+                    raise ValueError("kernel trace includes a process outside this cell")
+                out.write(json.dumps(row)+"\n")
+        finally:
+            process.stdout.close()
+            code = process.wait(timeout=10)
+        if code:
+            raise ValueError("kernel trace export failed; raw capture retained")
+    with gzip.open(target, "rt") as events:
+        return summarize_kernel_fsync(json.loads(line) for line in events)
 
 
 def preserve_incomplete_heap_profiles(output):
@@ -144,19 +175,32 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
     env["DS_BENCH_HDR_OUT"] = str(lab.output / "hdr")
     (lab.output / "hdr").mkdir()
     heap_profile = profile and profiler == "heaptrack"
+    kernel_profile = profile and profiler == "kernel-fsync"
+    kernel_capture = ROOT / ".tmp/electric-profiles" / f"{output.name}.kernel.perf.data"
     if profile:
-        result["profiler_version"] = subprocess.check_output(["strace" if profiler == "fsync" else profiler, "--version"], text=True).strip()
+        result["profiler_version"] = subprocess.check_output([
+            "perf" if kernel_profile else "strace" if profiler == "fsync" else profiler, "--version"], text=True).strip()
 
     def stop_profile():
         nonlocal trace
         if trace is None:
             return
+        stopped_early = trace.poll() is not None
         if trace.poll() is None:
             trace.send_signal(signal.SIGINT)
         trace.wait(timeout=10)
         trace_log.close()
         trace = None
-        if profiler == "perf":
+        if kernel_profile:
+            result["kernel_trace_stopped_early"] = stopped_early
+            try:
+                stats = export_kernel_fsync(lab.output, kernel_capture, node_pids)
+                result["kernel_fsync_summary"] = stats
+                result["profile_script_exit_code"] = int(stopped_early or not stats["successful"] or bool(stats["errors"]))
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                result["profile_script_exit_code"] = 1
+                result["profile_error"] = str(error)
+        elif profiler == "perf":
             with open(lab.output / "cpu-profile.txt", "w") as report:
                 result["profile_report_exit_code"] = subprocess.run(
                     ["perf", "report", "--stdio", "--no-children", "--percent-limit", "0.2",
@@ -266,7 +310,16 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         # writer barrier. It must outlive the drive window plus setup/drain.
         args += ["--request-timeout-secs", str(duration + 30 if workload[0] == "fanout" else 30)]
         if profile and not heap_profile:
-            if profiler == "perf":
+            if kernel_profile:
+                if os.uname().machine != "x86_64" or duration > 60:
+                    raise ValueError("kernel fsync profiler requires x86-64 and at most 60 seconds")
+                kernel_capture.parent.mkdir(parents=True, exist_ok=True)
+                assert not kernel_capture.exists(), "never replace an earlier kernel capture"
+                command = ["sudo", "-n", "perf", "record", "--clockid", "mono", "--max-size", "128M",
+                    "-e", "raw_syscalls:sys_enter", "--filter", "id == 74 || id == 75",
+                    "-e", "raw_syscalls:sys_exit", "--filter", "id == 74 || id == 75",
+                    "-o", str(kernel_capture), "-p", ",".join(map(str, node_pids))]
+            elif profiler == "perf":
                 command = ["perf", "record", "-F", "99", "-e", "cpu-clock:u", "--call-graph", "dwarf,16384",
                            "-o", str(lab.output / "perf.data"), "-p", ",".join(map(str, node_pids))]
             else:
@@ -452,11 +505,14 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
 def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False,
         cpu_profiles=False, heap_profiles=False, baseline_binary=None, baseline_provenance=None, duration_secs=None,
         write_streams=1, write_connections=256, write_warmup_secs=3, read_diagnostics=False, fsync_profiles=False,
-        no_stats=False):
+        no_stats=False, fsync_profiler="strace"):
     if read_diagnostics and any((smoke, reads_only, write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles, fsync_profiles)):
         raise ValueError("read diagnostics is a separate repeated four-arm matrix")
     if sum((write_profiles, cpu_profiles, heap_profiles, fsync_profiles)) > 1:
         raise ValueError("select one profiler per campaign")
+    if fsync_profiler not in ("strace", "kernel") or (fsync_profiler == "kernel" and (
+            not fsync_profiles or os.uname().machine != "x86_64" or (duration_secs or 0) > 60)):
+        raise ValueError("kernel fsync profiler requires fsync profiles on x86-64, at most 60 seconds")
     if (baseline_binary is None) != (baseline_provenance is None):
         raise ValueError("baseline comparison requires both binary and conformance provenance")
     baseline = None
@@ -537,7 +593,8 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
                                 duration=duration_secs if duration_secs is not None else 30 if progress else 8, progress=progress,
                                 binary=baseline_binary if arm.endswith("-baseline") else BINARY,
                                 write_warmup_secs=write_warmup_secs,
-                                profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "fsync" if fsync_profiles else "strace"))
+                                profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else
+                                    ("kernel-fsync" if fsync_profiler == "kernel" else "fsync") if fsync_profiles else "strace"))
     if not smoke and not write_diagnostics and not write_profiles and not progress and not cpu_profiles and not heap_profiles and not fsync_profiles:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
@@ -560,6 +617,8 @@ if __name__ == "__main__":
     parser.add_argument("--write-connections", type=int, default=256)
     parser.add_argument("--write-warmup-secs", type=int, default=3,
                         help="Use 0 for the reject-free envelope: the pinned client does not count warmup errors")
+    parser.add_argument("--fsync-profiler", choices=("strace", "kernel"), default="strace",
+                        help="Kernel tracepoints require local sudo/perf; at most 60s and 128MiB, raw registers stay local-only")
     parser.add_argument("--no-stats", action="store_true",
                         help="Disable optional server/WAL probes; keep identical workload, bounds and external observations")
     sys.exit(0 if run(**vars(parser.parse_args())) else 1)

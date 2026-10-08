@@ -3,10 +3,67 @@ import gzip
 import io
 import json
 from pathlib import Path
+import random
 import tempfile
 import unittest
 
-from benchmark_summary import check_clock, summarize, summarize_fsync_trace, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+from benchmark_summary import check_clock, kernel_fsync_event, summarize, summarize_fsync_trace, summarize_kernel_fsync, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+
+
+class KernelFsyncTrace(unittest.TestCase):
+    def test_redaction_keeps_only_fd_not_unused_syscall_registers(self):
+        enter = kernel_fsync_event("21/37 80.123456789: raw_syscalls:sys_enter: NR 74 (a, deadbeef, 1234, 5678, 0, 0)")
+        self.assertEqual(enter, dict(pid=21, tid=37, monotonic_ns=80_123_456_789,
+                                    phase="enter", syscall="fsync", fd=10))
+        self.assertEqual(kernel_fsync_event("21/37 81.000000001: raw_syscalls:sys_exit: NR 75 = -5"),
+                         dict(pid=21, tid=37, monotonic_ns=81_000_000_001,
+                              phase="exit", syscall="fdatasync", result=-5))
+        for line in ("LOST 17 events", "21/37 1.000000001: raw_syscalls:sys_enter: NR 1 (a, 0)",
+                     "21/37 1.0001: raw_syscalls:sys_exit: NR 74 = 0", "sensitive unexpected line"):
+            with self.assertRaisesRegex(ValueError, "invalid kernel fsync event") as raised:
+                kernel_fsync_event(line)
+            self.assertNotIn(line, str(raised.exception))
+
+    def test_generated_interleavings_match_per_thread_not_neighbouring_events(self):
+        for seed in range(48):
+            rng = random.Random(seed)
+            events, durations, errors = [], [], {}
+            for tid in range(6):
+                start = rng.randrange(1_000_000)
+                for _ in range(30):
+                    duration = rng.choice([0, 99_999_999, 100_000_000, rng.randrange(200_000_000)])
+                    code = rng.choice([0, 0, 0, -5, -28])
+                    syscall = rng.choice(["fsync", "fdatasync"])
+                    base = dict(pid=tid//2+1, tid=tid+10, syscall=syscall)
+                    events.append(dict(base, monotonic_ns=start, phase="enter", fd=3))
+                    events.append(dict(base, monotonic_ns=start+duration, phase="exit", result=code))
+                    start += duration+rng.randrange(1, 1_000_000)
+                    if code: errors[str(code)] = errors.get(str(code), 0)+1
+                    else: durations.append(duration)
+            events.sort(key=lambda row: row["monotonic_ns"])
+            summary = summarize_kernel_fsync(events)
+            ordered = sorted(durations)
+            self.assertEqual(summary["started"], 180)
+            self.assertEqual(summary["matched"], 180)
+            self.assertEqual(summary["incomplete"], [])
+            self.assertEqual(summary["unmatched_exits"], 0)
+            self.assertEqual(summary["errors"], errors)
+            self.assertEqual(summary["successful"], dict(count=len(durations), total_ns=sum(durations),
+                p50_ns=ordered[(len(ordered)+1)//2-1], p99_ns=ordered[(len(ordered)*99+99)//100-1],
+                max_ns=max(durations), at_least_100ms=sum(n >= 100_000_000 for n in durations)))
+
+    def test_partial_capture_is_not_invented_duration_and_conflicts_fail(self):
+        base = dict(pid=7, tid=11, syscall="fsync")
+        enter = dict(base, phase="enter", monotonic_ns=50, fd=8)
+        end = dict(base, phase="exit", monotonic_ns=60, result=0)
+        partial = summarize_kernel_fsync([end, dict(enter, monotonic_ns=70)])
+        self.assertEqual(partial["unmatched_exits"], 1)
+        self.assertEqual(partial["incomplete"], [dict(enter, monotonic_ns=70)])
+        self.assertIsNone(partial["successful"])
+        for rows in ([enter, enter], [enter, dict(end, syscall="fdatasync")],
+                     [enter, dict(end, monotonic_ns=49)]):
+            with self.assertRaises(ValueError):
+                summarize_kernel_fsync(rows)
 
 
 class FsyncTrace(unittest.TestCase):
