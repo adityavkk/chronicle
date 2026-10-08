@@ -124,17 +124,10 @@ impl Machine {
         if removed { crate::store::fsync_parent_dir(&self.dir.join("snapshot"))?; }
         Ok(())
     }
-}
 
-impl RaftStateMachine<Types> for Arc<Machine> {
-    type SnapshotBuilder = Self;
-    async fn applied_state(
-        &mut self,
-    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>> {
-        let view = self.view.read().await;
-        Ok((view.applied, view.membership.clone()))
-    }
-    async fn apply<I>(&mut self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
+    /// Materialize one ordered committed cohort. The durable publication marker
+    /// precedes every native handler and all client responses to this cohort.
+    pub(super) async fn apply_committed<I>(&self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
     where
         I: IntoIterator<Item = Entry> + Send,
         I::IntoIter: Send,
@@ -236,6 +229,23 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         drop(view);
         self.journal.changed.notify_waiters();
         Ok(replies)
+    }
+}
+
+impl RaftStateMachine<Types> for Arc<Machine> {
+    type SnapshotBuilder = Self;
+    async fn applied_state(
+        &mut self,
+    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>> {
+        let view = self.view.read().await;
+        Ok((view.applied, view.membership.clone()))
+    }
+    async fn apply<I>(&mut self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry> + Send,
+        I::IntoIter: Send,
+    {
+        self.apply_committed(entries).await
     }
     async fn get_snapshot_builder(&mut self) -> Self {
         self.clone()
