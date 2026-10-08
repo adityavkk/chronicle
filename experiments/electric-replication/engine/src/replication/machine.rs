@@ -269,35 +269,37 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         snapshot.sync_all().await.map_err(storage_error)?;
         drop(snapshot);
         let mut view = self.view.write().await;
-        let incoming = self.dir.join("receiving");
-        let generation = self.dir.join(format!("hot-{}", nonce()));
-        let (time, subscriptions, forks, receipts) =
-            unpack(&incoming, &generation, meta).map_err(storage_error)?;
-        let store = Arc::new(
-            Store::new_with_tier(generation, crate::tier::TierConfig::default())
-                .map_err(storage_error)?,
-        );
-        store.clock.advance(time);
-        let file = format!("snapshot-{}", nonce());
-        std::fs::rename(&incoming, self.dir.join(&file)).map_err(storage_error)?;
-        crate::store::fsync_parent_dir(&self.dir.join(&file)).map_err(storage_error)?;
-        self.journal
-            .save_snapshot(journal::SnapshotRef {
+        // Retain the exclusive view through durable reference publication, but
+        // hand the executor's worker to Raft/network tasks during blocking I/O.
+        let (reference, restored) = tokio::task::block_in_place(|| -> io::Result<_> {
+            let incoming = self.dir.join("receiving");
+            let generation = self.dir.join(format!("hot-{}", nonce()));
+            let (time, subscriptions, forks, receipts) = unpack(&incoming, &generation, meta)?;
+            let store = Arc::new(Store::new_with_tier(generation, crate::tier::TierConfig::default())?);
+            store.clock.advance(time);
+            let file = format!("snapshot-{}", nonce());
+            std::fs::rename(&incoming, self.dir.join(&file))?;
+            crate::store::fsync_parent_dir(&self.dir.join(&file))?;
+            let reference = journal::SnapshotRef {
                 meta: meta.clone(),
-                sha256: digest_file(&self.dir.join(&file)).map_err(storage_error)?,
+                sha256: digest_file(&self.dir.join(&file))?,
                 file,
-            })
+            };
+            Ok((reference, View {
+                store,
+                applied: meta.last_log_id,
+                membership: meta.last_membership.clone(),
+                subscriptions,
+                forks,
+                receipts,
+            }))
+        }).map_err(storage_error)?;
+        self.journal
+            .save_snapshot(reference)
             .await
             .map_err(storage_error)?;
-        self.cleanup_snapshots().map_err(storage_error)?;
-        *view = View {
-            store,
-            applied: meta.last_log_id,
-            membership: meta.last_membership.clone(),
-            subscriptions,
-            forks,
-            receipts,
-        };
+        tokio::task::block_in_place(|| self.cleanup_snapshots()).map_err(storage_error)?;
+        *view = restored;
         drop(view);
         self.journal.changed.notify_waiters();
         Ok(())
@@ -340,24 +342,28 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         };
         let file = format!("snapshot-{}", nonce());
         let target = self.dir.join(&file);
-        pack(
-            &view.store,
-            &view.subscriptions,
-            &view.forks,
-            &view.receipts,
-            &target,
-            &meta,
-        )
-        .map_err(storage_error)?;
+        // This server always uses a multi-thread Tokio runtime. Do not hold its
+        // worker hostage to copy/hash/fsync; keep the view guard, not the worker.
+        let sha256 = tokio::task::block_in_place(|| {
+            pack(
+                &view.store,
+                &view.subscriptions,
+                &view.forks,
+                &view.receipts,
+                &target,
+                &meta,
+            )?;
+            digest_file(&target)
+        }).map_err(storage_error)?;
         self.journal
             .save_snapshot(journal::SnapshotRef {
                 meta: meta.clone(),
                 file,
-                sha256: digest_file(&target).map_err(storage_error)?,
+                sha256,
             })
             .await
             .map_err(storage_error)?;
-        self.cleanup_snapshots().map_err(storage_error)?;
+        tokio::task::block_in_place(|| self.cleanup_snapshots()).map_err(storage_error)?;
         Ok(Snapshot {
             meta,
             snapshot: tokio::fs::File::open(target).await.map_err(storage_error)?,

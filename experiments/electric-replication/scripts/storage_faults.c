@@ -1,7 +1,8 @@
 /* Test-only LD_PRELOAD interposer. Never linked into the server or benchmark.
- * Fault file: '<eio-sync|eio-dir-sync|enospc-write|short-write> <path substring>'.
+ * Fault file: '<eio-sync|eio-dir-sync|enospc-write|short-write|delay-sync> <path substring>'.
  * Only descriptors below DS_TEST_DATA_ROOT are eligible. Short writes fire
- * once; persistent sync/write errors remain armed until the harness disarms.
+ * once; delay-sync sleeps two seconds once, without holding the interposer lock.
+ * Persistent sync/write errors remain armed until the harness disarms.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -33,7 +34,19 @@ static void resolve(void) {
     if (!real_fsync || !real_fdatasync || !real_write || !real_pwrite || !real_pwrite64) _exit(126);
 }
 
-/* 0 = normal, 1 = one short write, -1 = injected errno. */
+static void record_fault(const char *log, const char *operation, const char *mode, const char *path, int code) {
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    char record[PATH_MAX+256];
+    int size = snprintf(record, sizeof(record),
+        "{\"operation\":\"%s\",\"fault\":\"%s\",\"path\":\"%s\",\"errno\":%d,\"seconds\":%ld,\"nanoseconds\":%ld}\n",
+        operation, mode, path, code, time.tv_sec, time.tv_nsec);
+    int file = open(log, O_CREAT|O_WRONLY|O_APPEND, 0600);
+    if (file < 0 || real_write(file, record, size) != size) _exit(125);
+    close(file);
+}
+
+/* 0 = normal, 1 = one short write, 2 = delay, -1 = injected errno. */
 static int fault(int fd, const char *operation, int writing, size_t count) {
     const char *root = getenv("DS_TEST_DATA_ROOT");
     const char *flag = getenv("DS_TEST_FAULT_FILE");
@@ -60,20 +73,17 @@ static int fault(int fd, const char *operation, int writing, size_t count) {
             }
             if (writing && !strcmp(mode,"enospc-write")) code = ENOSPC;
             if (writing && count > 1 && !strcmp(mode,"short-write") && unlink(flag) == 0) result = 1;
+            if (!writing && !strcmp(mode,"delay-sync") && unlink(flag) == 0) result = 2;
         }
     }
-    if (code || result) {
-        struct timespec time;
-        clock_gettime(CLOCK_MONOTONIC, &time);
-        char record[PATH_MAX+256];
-        int size = snprintf(record, sizeof(record),
-            "{\"operation\":\"%s\",\"fault\":\"%s\",\"path\":\"%s\",\"errno\":%d,\"seconds\":%ld,\"nanoseconds\":%ld}\n",
-            operation, mode, path, code, time.tv_sec, time.tv_nsec);
-        file = open(log, O_CREAT|O_WRONLY|O_APPEND, 0600);
-        if (file < 0 || real_write(file, record, size) != size) _exit(125);
-        close(file);
-    }
+    if (code || result) record_fault(log, operation, mode, path, code);
     pthread_mutex_unlock(&fault_lock);
+    if (result == 2) {
+        struct timespec pause = {.tv_sec = 2, .tv_nsec = 0};
+        while (nanosleep(&pause, &pause) && errno == EINTR) {}
+        record_fault(log, "delay-end", mode, path, 0);
+        return 0;
+    }
     if (code) { errno = code; return -1; }
     return result;
 }

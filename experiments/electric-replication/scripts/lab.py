@@ -40,10 +40,10 @@ class Lab:
 
     def start(self, node, environment=None, cpus=None, fault_testing=True, stats_secs=0,
               pending_commands=256, pending_bytes=16 * 1024 * 1024, append_durability="quorum-fsync",
-              heap_profile=False):
+              heap_profile=False, workers=2):
         config = dict(cluster=self.cluster, node=node, listen=f"127.0.0.1:{self.port+node}",
                       dir=str(self.data / str(node)), partitions=self.partitions,
-                      workers=2, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis,
+                      workers=workers, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis,
                       stats_secs=stats_secs, pending_commands=pending_commands, pending_bytes=pending_bytes,
                       append_durability=append_durability)
         path = self.output / f"node-{node}.json"

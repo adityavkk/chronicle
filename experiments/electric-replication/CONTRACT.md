@@ -229,6 +229,18 @@ after a successful replacement or recovery, not while another builder is active.
 Disposable old hot generations can be removed on restart, before serving; live
 readers may still own an old generation, so it is not deleted speculatively.
 
+Snapshot scheduling must preserve this same exclusive cut through durable
+reference publication and cleanup. Slow copy/hash/fsync may pause that group's
+apply and fill its bounded admission queue, but must not occupy the executor
+needed by Raft heartbeats or unrelated partitions. The server uses Tokio's
+multi-thread runtime, including when configured with one worker; blocking disk
+sections can hand off that worker without dropping the view guard. They remain
+non-cancellable disk operations, not a new atomicity or disk-time guarantee.
+`ApplyRecovery.tla` and `JournalReclaim.tla` still specify the durability/order
+boundaries. A real-process delayed-snapshot-fsync history must additionally
+check heartbeat/other-partition progress, unchanged membership/term, exact
+committed prefixes and restart; the models do not prove executor scheduling.
+
 Cold-tier support is retained in the upstream source but **disabled in replicated
 mode** until object identities include cluster/group/incarnation/range/checksum,
 manifest publication crosses consensus, and reference-safe GC is implemented.

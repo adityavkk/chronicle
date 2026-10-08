@@ -55,6 +55,7 @@ python3 experiments/electric-replication/scripts/subscription_faults.py experime
 python3 experiments/electric-replication/scripts/storage_faults.py experiments/electric-replication/evidence/storage-fault-new
 python3 experiments/electric-replication/scripts/reclaim_faults.py experiments/electric-replication/evidence/reclaim-fault-new
 python3 experiments/electric-replication/scripts/async_faults.py experiments/electric-replication/evidence/async-fault-new
+python3 experiments/electric-replication/scripts/snapshot_progress.py experiments/electric-replication/evidence/snapshot-progress-new
 node --test experiments/electric-replication/client/receipts.test.mjs
 ```
 
@@ -104,16 +105,24 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-024` executes **332/332 passing, zero failures/skips/todo**,
+The candidate's `conformance-025` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 140 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-016` checks seven real failing/short
+conformance exclusions. `storage-fault-017` checks seven real failing/short
 syscalls and retains three unknown HTTP outcomes. `async-fault-010` checks 307
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
 releasing unresolved credit. These are single-host qualifications, not
 independent-disk/AZ or power-loss evidence.
+
+`snapshot-progress-002/003` isolates a scheduling bug and its fix with an actual
+two-second snapshot fsync delay. Before worker handoff, no unrelated-partition
+operations complete during the delay and leadership changes; afterwards, 38
+complete with no unknown outcomes or term change. The exclusive snapshot view
+and durable publication order are unchanged. Apply in that group still pauses,
+so this is not proof of a zero-rejection async load envelope. The snapshot change
+passes the tests/formal/conformance above and fork/storage process reruns.
 
 The first matched stock-0.10 comparison, `openraft010-writes-001`, has three
 30-second repetitions with identical local-fsync contracts, 256-byte payloads and

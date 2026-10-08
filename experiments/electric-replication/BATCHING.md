@@ -571,3 +571,19 @@ causal attribution. All six async cells reject load despite exact accepted-byte
 drain on every replica. Neither lower rejection counts nor accepted throughput
 establish the sustainable zero-error envelope. The driver exits nonzero and
 keeps all failures and one baseline closing-client resource sampling gap.
+
+### Snapshot worker handoff
+
+`snapshot-progress-002` reproduces executor starvation with a real two-second
+snapshot fsync delay and one supported Tokio worker. The unrelated partition
+completes no operations during the delay; six HTTP outcomes are unknown and
+leadership changes. After `block_in_place` around synchronous snapshot disk work,
+`snapshot-progress-003` completes 38 unrelated-partition operations during the
+same delay without an unknown outcome or term change. Both histories pass the
+independent consistency checker after restart. The first driver's mistaken
+provenance-key lookup is separately retained as `snapshot-progress-001`, before
+any server starts. The view guard still spans durable reference publication and
+cleanup; the change affects scheduling, not snapshot atomicity. The affected
+group's apply still pauses. Load rejection and sustained async progress remain
+separate gates. Qualification includes 140 Rust tests, the full formal negative
+controls, `conformance-025` (332/332, zero skips), and fork/storage fault reruns.
