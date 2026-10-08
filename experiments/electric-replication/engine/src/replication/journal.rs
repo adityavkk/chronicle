@@ -135,35 +135,40 @@ impl Journal {
     async fn compact(&self) -> io::Result<()> {
         // Serialize captures as well as publication; otherwise an older capture
         // could overwrite a newer checkpoint after its segments were reclaimed.
+        let _timer = timing::JOURNAL_COMPACT.start();
         let _maintenance = self.maintenance.lock().await;
         let captured = self.index.lock().unwrap().clone();
         let Some(cut) = captured.last_record else { return Ok(()) };
         self.shard.wait_durable(cut.lsn).await;
-        let data = bincode::serialize(&captured).map_err(io::Error::other)?;
-        let temporary = self.dir.join("journal-checkpoint-next");
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(b"ERJC0001")?;
-        file.write_all(&Sha256::digest(&data))?;
-        file.write_all(&data)?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, self.dir.join("journal-checkpoint"))?;
-        crate::store::fsync_parent_dir(&temporary)?;
+        // Keep maintenance serialization and all durability barriers while
+        // handing off the worker that drives Raft RPCs, timers and publication.
+        tokio::task::block_in_place(|| {
+            let data = bincode::serialize(&captured).map_err(io::Error::other)?;
+            let temporary = self.dir.join("journal-checkpoint-next");
+            let mut file = std::fs::File::create(&temporary)?;
+            file.write_all(b"ERJC0001")?;
+            file.write_all(&Sha256::digest(&data))?;
+            file.write_all(&data)?;
+            file.sync_all()?;
+            std::fs::rename(&temporary, self.dir.join("journal-checkpoint"))?;
+            crate::store::fsync_parent_dir(&temporary)?;
 
-        let floor = captured.entries.values()
-            .map(|(_, p)| p.segment).min().unwrap_or(cut.segment).min(cut.segment);
-        // Log readers hold this guard through their indexed reads. All entries
-        // staged after the capture refer to the cut's segment or later segments.
-        let _readers = self.index.lock().unwrap();
-        for entry in std::fs::read_dir(&self.dir)? {
-            let path = entry?.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("wal") {
-                let start = path.file_stem().unwrap().to_str().unwrap()
-                    .parse::<u64>().map_err(io::Error::other)?;
-                if start < floor { std::fs::remove_file(path)?; }
+            let floor = captured.entries.values()
+                .map(|(_, p)| p.segment).min().unwrap_or(cut.segment).min(cut.segment);
+            // Capture joined earlier indexed readers. Later readers need only
+            // retained entries or frames at/after the cut, so filesystem I/O
+            // need not hold the index mutex against new reads and appends.
+            for entry in std::fs::read_dir(&self.dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("wal") {
+                    let start = path.file_stem().unwrap().to_str().unwrap()
+                        .parse::<u64>().map_err(io::Error::other)?;
+                    if start < floor { std::fs::remove_file(path)?; }
+                }
             }
-        }
-        crate::store::fsync_parent_dir(&temporary)?;
-        Ok(())
+            crate::store::fsync_parent_dir(&temporary)?;
+            Ok(())
+        })
     }
 
     fn stage(&self, event: Event) -> io::Result<u64> {
@@ -751,7 +756,26 @@ mod tests {
                     .filter(|p|p.extension().is_some_and(|e|e=="wal")).collect();
                 let purged = id(retained_from-1);
                 let mut journal = machine.journal.clone();
+                let mut reader = journal.clone();
+                let reading = tokio::spawn(async move {
+                    for _ in 0..32 {
+                        let entries = reader.try_get_log_entries(0..=count+3).await.unwrap();
+                        let first = entries.first().unwrap().log_id.index;
+                        assert!(first == 0 || first == retained_from);
+                        assert_eq!(entries.len() as u64,count+4-first);
+                        for (index, entry) in (first..=count+3).zip(entries) {
+                            assert_eq!(entry.log_id,id(index));
+                            let EntryPayload::Normal(batch) = entry.payload else {panic!("lost command")};
+                            let body = if index == 0 {vec![]} else {
+                                vec![if index <= count {index as u8} else {0xEE};payload]
+                            };
+                            assert_eq!(batch.commands[0].body,body);
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                });
                 journal.purge(purged).await.unwrap();
+                reading.await.unwrap();
                 assert!(old_files.iter().any(|p|!p.exists()),"must physically reclaim segments");
                 journal.persist(Event::Entry(Entry {log_id:id(count+4),payload:EntryPayload::Normal(vec![Command {
                     method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xCD;payload],time:1002,
