@@ -93,7 +93,7 @@ impl Cluster {
         let g = &self.groups[group];
         match tokio::time::timeout(
             Duration::from_secs(3),
-            g.reads.confirm(async { g.raft.ensure_linearizable().await.is_ok() }),
+            g.reads.confirm(async { g.raft.ensure_linearizable(openraft::ReadPolicy::ReadIndex).await.is_ok() }),
         )
         .await
         {
@@ -212,7 +212,7 @@ impl Cluster {
         {
             return error(400, "INVALID_DURABILITY", "only quorum-fsync is supported");
         }
-        if self.groups[group].raft.metrics().borrow().current_leader != Some(self.config.node) {
+        if self.groups[group].raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
             return self.unavailable(
                 group,
                 "subscription owner is not this leader; mutation not forwarded",
@@ -431,7 +431,7 @@ impl Cluster {
     }
 
     fn candidates(&self, group: usize) -> Vec<String> {
-        let metrics = self.groups[group].raft.metrics().borrow().clone();
+        let metrics = self.groups[group].raft.metrics().borrow_watched().clone();
         let members = metrics.membership_config.membership();
         let mut nodes: Vec<_> = members
             .nodes()
@@ -505,7 +505,7 @@ impl Cluster {
         let mut cursor = String::new();
         loop {
             tokio::time::sleep(Duration::from_millis(150)).await;
-            if self.groups[group].raft.metrics().borrow().current_leader != Some(self.config.node) {
+            if self.groups[group].raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
                 continue;
             }
             let batch: Vec<_> = {

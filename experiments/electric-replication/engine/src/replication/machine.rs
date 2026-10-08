@@ -1,14 +1,16 @@
 use super::*;
-use openraft::storage::RaftStateMachine;
-use openraft::{RaftLogReader, RaftSnapshotBuilder, Snapshot};
+use futures_util::{Stream, StreamExt};
+use openraft::storage::{EntryResponder, RaftStateMachine};
+use openraft::{RaftLogReader, RaftSnapshotBuilder};
+use openraft_legacy::network_v1::SnapshotReceiverFactory;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom, Write};
 use tokio::sync::RwLock;
 
 pub struct View {
     pub store: Arc<Store>,
-    pub applied: Option<LogId<u64>>,
-    pub membership: StoredMembership<u64, BasicNode>,
+    pub applied: Option<LogId>,
+    pub membership: StoredMembership,
     pub subscriptions: subscriptions::State,
     pub forks: forks::State,
     pub(super) receipts: receipts::State,
@@ -66,7 +68,7 @@ impl Machine {
             crate::tier::TierConfig::default(),
         )?);
         store.clock.advance(time);
-        let mut machine = Arc::new(Self {
+        let machine = Arc::new(Self {
             view: RwLock::new(View {
                 store,
                 applied,
@@ -91,7 +93,7 @@ impl Machine {
                 if entries.len() as u64 != end - from {
                     return Err(io::Error::other("committed recovery log gap"));
                 }
-                machine.apply(entries).await.map_err(io::Error::other)?;
+                machine.apply_committed(entries).await?;
                 from = end;
             }
         }
@@ -101,7 +103,7 @@ impl Machine {
 
     /// Credit recovery is about a retained suffix, not terminal receipt proof.
     /// A truncated entry frees storage admission even if its outcome is unknown.
-    pub async fn unresolved(&self, ids: &[LogId<u64>]) -> bool {
+    pub async fn unresolved(&self, ids: &[LogId]) -> bool {
         let view = self.view.read().await;
         ids.iter().any(|id| view.applied.is_none_or(|a| a.index < id.index)
             && self.journal.id_at(id.index) == Some(*id))
@@ -127,7 +129,7 @@ impl Machine {
 
     /// Materialize one ordered committed cohort. The durable publication marker
     /// precedes every native handler and all client responses to this cohort.
-    pub(super) async fn apply_committed<I>(&self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
+    pub(super) async fn apply_committed<I>(&self, entries: I) -> io::Result<Vec<Vec<Reply>>>
     where
         I: IntoIterator<Item = Entry> + Send,
         I::IntoIter: Send,
@@ -233,42 +235,37 @@ impl Machine {
 }
 
 impl RaftStateMachine<Types> for Arc<Machine> {
+    type SnapshotData = tokio::fs::File;
     type SnapshotBuilder = Self;
     async fn applied_state(
         &mut self,
-    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>> {
+    ) -> io::Result<(Option<LogId>, StoredMembership)> {
         let view = self.view.read().await;
         Ok((view.applied, view.membership.clone()))
     }
-    async fn apply<I>(&mut self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
-    where
-        I: IntoIterator<Item = Entry> + Send,
-        I::IntoIter: Send,
-    {
-        self.apply_committed(entries).await
+    async fn apply<S>(&mut self, entries: S) -> io::Result<()>
+    where S: Stream<Item = io::Result<EntryResponder<Types>>> + Unpin + Send {
+        // Bound replay memory and amortize publication fsync over ready entries.
+        // No responder is completed until the durable marker AND native apply.
+        let mut cohorts = entries.ready_chunks(64);
+        while let Some(cohort) = cohorts.next().await {
+            let (entries, responders): (Vec<_>, Vec<_>) = cohort.into_iter()
+                .collect::<io::Result<Vec<_>>>()?.into_iter().unzip();
+            let replies = self.apply_committed(entries).await?;
+            for (responder, reply) in responders.into_iter().zip(replies) {
+                if let Some(responder) = responder { responder.send(reply); }
+            }
+        }
+        Ok(())
     }
     async fn get_snapshot_builder(&mut self) -> Self {
         self.clone()
     }
-    async fn begin_receiving_snapshot(
-        &mut self,
-    ) -> Result<Box<tokio::fs::File>, StorageError<u64>> {
-        Ok(Box::new(
-            tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(self.dir.join("receiving"))
-                .await
-                .map_err(storage_error)?,
-        ))
-    }
     async fn install_snapshot(
         &mut self,
-        meta: &SnapshotMeta<u64, BasicNode>,
-        snapshot: Box<tokio::fs::File>,
-    ) -> Result<(), StorageError<u64>> {
+        meta: &SnapshotMeta,
+        snapshot: tokio::fs::File,
+    ) -> io::Result<()> {
         snapshot.sync_all().await.map_err(storage_error)?;
         drop(snapshot);
         let mut view = self.view.write().await;
@@ -305,23 +302,33 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         self.journal.changed.notify_waiters();
         Ok(())
     }
-    async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot<Types>>, StorageError<u64>> {
+    async fn get_current_snapshot(&mut self) -> io::Result<Option<Snapshot>> {
         // Open while pinned against cleanup; Linux descriptors survive unlink.
         let index = self.journal.index.lock().unwrap();
         match &index.snapshot {
             Some(snapshot) => Ok(Some(Snapshot {
                 meta: snapshot.meta.clone(),
-                snapshot: Box::new(tokio::fs::File::from_std(
+                snapshot: tokio::fs::File::from_std(
                     std::fs::File::open(self.dir.join(&snapshot.file)).map_err(storage_error)?,
-                )),
+                ),
             })),
             None => Ok(None),
         }
     }
 }
 
+impl SnapshotReceiverFactory<Types> for Arc<Machine> {
+    type SnapshotReceiver = tokio::fs::File;
+    async fn begin_receiving_snapshot(&mut self) -> io::Result<tokio::fs::File> {
+        tokio::fs::OpenOptions::new()
+            .read(true).write(true).create(true).truncate(true)
+            .open(self.dir.join("receiving")).await.map_err(storage_error)
+    }
+}
+
 impl RaftSnapshotBuilder<Types> for Arc<Machine> {
-    async fn build_snapshot(&mut self) -> Result<Snapshot<Types>, StorageError<u64>> {
+    type SnapshotData = tokio::fs::File;
+    async fn build_snapshot(&mut self) -> io::Result<Snapshot> {
         // Serialize with apply. Payload is copied file->file in bounded buffers,
         // not collected in an in-memory JSON snapshot. This can stall group
         // writes for disk time: measure it, do not claim zero-copy snapshots.
@@ -330,11 +337,6 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         let meta = SnapshotMeta {
             last_log_id: view.applied,
             last_membership: view.membership.clone(),
-            snapshot_id: format!(
-                "{}-{}",
-                view.applied.map(|id| id.index).unwrap_or(0),
-                nonce()
-            ),
         };
         let file = format!("snapshot-{}", nonce());
         let target = self.dir.join(&file);
@@ -358,7 +360,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         self.cleanup_snapshots().map_err(storage_error)?;
         Ok(Snapshot {
             meta,
-            snapshot: Box::new(tokio::fs::File::open(target).await.map_err(storage_error)?),
+            snapshot: tokio::fs::File::open(target).await.map_err(storage_error)?,
         })
     }
 }
@@ -399,7 +401,7 @@ fn pack(
     forks: &forks::State,
     receipts: &receipts::State,
     path: &std::path::Path,
-    meta: &SnapshotMeta<u64, BasicNode>,
+    meta: &SnapshotMeta,
 ) -> io::Result<()> {
     let control = store.data_dir.join("streams/.control");
     let mut writer = io::BufWriter::new(std::fs::File::create(&control)?);
@@ -448,7 +450,7 @@ fn pack(
 fn unpack(
     path: &std::path::Path,
     target: &std::path::Path,
-    expected: &SnapshotMeta<u64, BasicNode>,
+    expected: &SnapshotMeta,
 ) -> io::Result<(u64, subscriptions::State, forks::State, receipts::State)> {
     let mut input = std::fs::File::open(path)?;
     let len = input.metadata()?.len();
@@ -475,7 +477,7 @@ fn unpack(
     }
     let mut header = vec![0; n as usize];
     input.read_exact(&mut header)?;
-    let (meta, count, time): (SnapshotMeta<u64, BasicNode>, usize, u64) =
+    let (meta, count, time): (SnapshotMeta, usize, u64) =
         serde_json::from_slice(&header).map_err(io::Error::other)?;
     if &meta != expected {
         return Err(io::Error::other("snapshot metadata mismatch"));

@@ -7,7 +7,9 @@ It does not alter Chronicle's Go/Redis default, and it is not the SQLite-backed
 The imported source is Electric npm 0.1.5 at
 [`88793e7`](https://github.com/electric-sql/electric/commit/88793e76595d69be300731b9b25c58538923a53b),
 Apache-2.0. `UPSTREAM-TREE.txt` pins original blobs; `engine/LICENSE` retains the
-license. OpenRaft 0.9.25 provides consensus over Electric's WAL/group-fsync path.
+license. The isolated stock OpenRaft 0.10.0-alpha.36 candidate provides consensus
+over Electric's WAL/group-fsync path; qualified 0.9.25 remains its comparison
+baseline. **The initial 0.10 candidate regresses write performance.**
 Committed commands materialize the native wire files; native file-range/sendfile
 and epoll SSE paths serve reads. No SQLite, RocksDB or Redis payload dependency.
 
@@ -85,7 +87,7 @@ not a substitute store or a model-only result.
 
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
-| 1 | Stock OpenRaft 0.10 isolation and lease admission | In progress: formalize assignment-time lease rejection, outstanding durable callbacks and retained receipt debt before changing code. Require real WAL/recovery/snapshot/identity checks, fault histories and unchanged subscription-enabled 332/332. An alpha upgrade is a candidate, not an improvement by definition. |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 140 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
 | 2 | Single-node overhead and replicated sync/async performance | Open: repeated matched native/0.9/candidate measurements, hot/many streams, replay/fanout/mixed sustained loads. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles. Find the zero-error sustainable envelope separately from overload; retain unsuccessful candidates. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
@@ -101,15 +103,29 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The latest `conformance-022` executes **332/332 passing, zero failures/skips/todo**,
-with subscriptions enabled, three processes and two partitions. All 139 Rust
+The candidate's `conformance-023` executes **332/332 passing, zero failures/skips/todo**,
+with subscriptions enabled, three processes and two partitions. All 140 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-014` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-007` checks 271
-operations and 39 receipts: 21 committed, one rejected and 17 invalidated, with
-five unknown requests retained. These are single-host qualifications, not
-independent-disk/AZ or power-loss evidence. Node identity 7 now binds the command
-ceiling and rejects incompatible experimental data before mutating stored bytes.
+conformance exclusions. `storage-fault-015` checks seven real failing/short
+syscalls and retains three unknown HTTP outcomes. `async-fault-009` checks 308
+operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
+six unknown requests retained. Its isolated leader rejects new assignment on
+lease expiry despite spare backlog capacity, without changing WAL bytes or
+releasing unresolved credit. These are single-host qualifications, not
+independent-disk/AZ or power-loss evidence. The rebuilt release binary after the
+new streamed-replay property matches `conformance-023` exactly.
+
+The first matched stock-0.10 comparison, `openraft010-writes-001`, has three
+30-second repetitions with identical local-fsync contracts, 256-byte payloads and
+256 connections. Native measures **91.6–100.4k/s**, qualified 0.9 one member
+**34.4–40.0k/s**, and initial 0.10 one member **3.4–10.5k/s**. All nine workload
+checks pass; the performance gate fails. WAL fsyncs/ack rise from about **0.049**
+on 0.9 to **0.46 / 0.82 / 1.68** on 0.10 as command batches collapse. Candidate
+CPU is only 0.80–0.84 cores. Separate `openraft010-cpu-001` profiles are retained;
+they do not establish the cause of blocked time. The 0.10 builder await is
+enqueue-only, verified against pinned upstream; no performance improvement is
+inferred from its nonblocking storage API. Dispatch/apply interaction remains
+under investigation. The experiment has not switched its accepted baseline.
 
 The matched `async-writes-006` matrix has complete resource samples: native
 **77–84k/s**, one member **39–46k/s** (**1.84–1.96× slower**), and quorum-three
@@ -128,8 +144,8 @@ Allocation projection saves measured allocations but does not establish a
 throughput gain. Raising the command ceiling and inlining the durability waiter
 likewise showed no established benefit and were reverted. A 100 µs fsync
 collection interval improved grouping but measured only 32–33k/s one-member;
-it too was rejected. The restored engine/vendor source hashes and release binary
-match `conformance-021` exactly, and the full suite was rerun as 022. Raw CPU memory captures
+it too was rejected. The preserved 0.9 engine/vendor source hashes and release binary
+match `conformance-021` exactly, and its full suite was rerun as 022. Raw CPU memory captures
 stay local-only; symbolized profiles, allocation traces, failed histories and
 exact source/binary/config hashes remain in the evidence ledger.
 

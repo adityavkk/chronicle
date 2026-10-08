@@ -1,5 +1,10 @@
 # Pinned OpenRaft admission backport
 
+This directory belongs to the qualified **0.9 comparison baseline**, not the
+current stock-0.10 candidate's dependency graph. It is retained for reproduction
+and rollback comparison. The candidate uses exact registry pins recorded in
+[`CONTRACT.md`](../CONTRACT.md); it does not apply this backport to 0.10.
+
 `openraft/` is the packaged **0.9.25** crate, source
 [`8815cdb`](https://github.com/databendlabs/openraft/commit/8815cdba2826f74e848acef361ad03f93bb1c3f8),
 crate SHA-256 `a97014fb78acb77be3a40ac2da305f6dd3a6b243f3a908ace87d29b3972eaafd`.

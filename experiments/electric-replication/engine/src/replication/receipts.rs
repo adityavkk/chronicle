@@ -8,7 +8,7 @@ const RESULT_BATCHES: usize = 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Position {
-    pub log_id: LogId<u64>,
+    pub log_id: LogId,
     pub ordinal: usize,
 }
 
@@ -45,7 +45,7 @@ pub(super) struct State {
 }
 #[derive(Serialize, Deserialize)]
 struct Results {
-    log_id: LogId<u64>,
+    log_id: LogId,
     replies: BTreeMap<usize, Reply>,
 }
 impl State {
@@ -72,8 +72,8 @@ impl State {
     pub fn lookup(
         &self,
         position: Position,
-        applied: Option<LogId<u64>>,
-        retained: Option<LogId<u64>>,
+        applied: Option<LogId>,
+        retained: Option<LogId>,
     ) -> (&'static str, Option<&Reply>) {
         let cached = self.batches.get(&position.log_id.index);
         if let Some(batch) = cached.filter(|b| b.log_id == position.log_id) {
@@ -156,7 +156,7 @@ impl Cluster {
                     .receipts
                     .lookup(receipt.position, view.applied, retained);
                 if state != "pending" || tokio::time::Instant::now() >= deadline {
-                    let progress = group.raft.metrics().borrow().clone();
+                    let progress = group.raft.metrics().borrow_watched().clone();
                     let session = (state == "committed")
                         .then(|| self.token(receipt.group, receipt.position.log_id.index));
                     let mut resp = json(&json!({"state":state,"response":reply,"session":session,
@@ -194,6 +194,7 @@ impl Cluster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openraft::vote::RaftLeaderId;
     use proptest::prelude::*;
 
     proptest! {
@@ -202,7 +203,7 @@ mod tests {
             term in 1u64..99, leader in 1u64..99, index in 2u64..999,
             ordinal in 0usize..64, rejected in any::<bool>(),
         ) {
-            let id = |term, leader| LogId::new(openraft::CommittedLeaderId::new(term,leader),index);
+            let id = |term, leader| LogId::new(CommittedLeaderId::new(term,leader),index);
             let pos = Position { log_id:id(term,leader), ordinal };
             let receipt = Receipt { cluster:"test-cluster".into(),group:1,position:pos };
             assert_eq!(Receipt::decode(&receipt.encode(),"test-cluster",2).unwrap().position,pos);
@@ -211,7 +212,7 @@ mod tests {
             let outside = Receipt {position:Position {ordinal:64,..pos},..receipt};
             assert!(Receipt::decode(&outside.encode(),"test-cluster",2).is_none());
             let mut state = State::default();
-            let prior = Some(LogId::new(openraft::CommittedLeaderId::new(term,leader),index-1));
+            let prior = Some(LogId::new(CommittedLeaderId::new(term,leader),index-1));
             assert_eq!(state.lookup(pos,prior,Some(pos.log_id)).0,"pending");
             assert_eq!(state.lookup(pos,prior,None).0,"unknown");
             for replacement in [id(term+1,leader),id(term,leader+1)] {
@@ -226,7 +227,7 @@ mod tests {
             assert_eq!(reply.unwrap().body,vec![37,99]);
             assert_eq!(state.lookup(Position {ordinal:ordinal+1,..pos},Some(pos.log_id),None).0,"unknown");
             for n in index+1..=index+RESULT_BATCHES as u64 {
-                state.record(Position {log_id:LogId::new(openraft::CommittedLeaderId::new(term,leader),n),ordinal:0},Reply::default());
+                state.record(Position {log_id:LogId::new(CommittedLeaderId::new(term,leader),n),ordinal:0},Reply::default());
             }
             assert_eq!(state.batches.len(),RESULT_BATCHES);
             // Eviction is not loss, even with a retained exact committed log.

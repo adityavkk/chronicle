@@ -5,6 +5,7 @@ aggregate SUT CPU affinities, four separate client CPUs, raw windows/results,
 exact write/seed byte probes, and per-process samples. Shared disk/page cache and
 host memory are NOT isolated; no independent-disk or production performance claim.
 """
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 import gzip
 import hashlib
@@ -97,18 +98,19 @@ def sample(pids, ports, node_pids):
 
 
 def cell(output, arm, workload, profile=False, diagnostics=False, pending_commands=256, duration=8, progress=False,
-         profiler="strace"):
+         profiler="strace", binary=BINARY):
     replicas = 3 if arm.startswith("raft3") else 1
-    lab = Lab(output, replicas=replicas, partitions=2, port=19800)
+    lab = Lab(output, replicas=replicas, partitions=2, port=19800, binary=binary)
     lab.cluster = "bench-"+hashlib.sha256(str(lab.output).encode()).hexdigest()[:16]
     native = arm == "native"
-    local_ack = arm == "raft3-local"
+    local_ack = arm.removesuffix("-baseline") == "raft3-local"
     node_pids = []
     trace = None
     sampler = None
     stop = threading.Event()
     result = dict(arm=arm, workload=workload, profile=profile, profiler=profiler if profile else None,
                   diagnostics=diagnostics, verdict="FAIL",
+                  binary_sha256=hashlib.sha256((NATIVE if native else binary).read_bytes()).hexdigest(),
                   ack_contract="local-fsync acceptance, not commitment" if local_ack else "applied after durable quorum" if not native else "native local-fsync",
                   pending_commands=pending_commands, progress_sampling=progress)
     env = {k:v for k,v in os.environ.items() if not k.startswith("DS_BENCH_") and k != "LD_PRELOAD"}
@@ -353,7 +355,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                     if heap.exists():
                         heap.rename(lab.output / f"heap-node-{node}-{pid}{suffix}")
                 cmdline = Path(f"/proc/{pid}/cmdline")
-                if cmdline.exists() and cmdline.read_bytes().split(b"\0")[0] in (str(NATIVE).encode(), str(BINARY).encode()):
+                if cmdline.exists() and cmdline.read_bytes().split(b"\0")[0] in (str(NATIVE).encode(), str(binary).encode()):
                     os.kill(pid, signal.SIGTERM)
             time.sleep(2)
         lab.close()
@@ -391,7 +393,18 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
 
 
 def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False,
-        cpu_profiles=False, heap_profiles=False):
+        cpu_profiles=False, heap_profiles=False, baseline_binary=None, baseline_provenance=None, duration_secs=None):
+    if (baseline_binary is None) != (baseline_provenance is None):
+        raise ValueError("baseline comparison requires both binary and conformance provenance")
+    baseline = None
+    if baseline_binary is not None:
+        baseline_binary = Path(baseline_binary).resolve()
+        baseline_provenance = Path(baseline_provenance).resolve()
+        baseline = json.loads(baseline_provenance.read_text())
+        if hashlib.sha256(baseline_binary.read_bytes()).hexdigest() != baseline["hashes"]["binary"]:
+            raise ValueError("baseline binary does not match its retained conformance provenance")
+    if duration_secs is not None and duration_secs <= 0:
+        raise ValueError("duration must be positive")
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = source_hashes()
@@ -410,6 +423,12 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         client_limits="202 is success; receipt headers discarded; 429 and 503 combined as measured backpressure, not timed; warmup errors not counted",
         read_consistency="replicated default linearizable", tail_cache_bytes=0,
         qualification="short local windows, client not independently calibrated; no cloud capacity headline")
+    if baseline is not None:
+        provenance["baseline"] = dict(binary=str(baseline_binary.relative_to(ROOT)),
+            conformance_provenance=str(baseline_provenance.relative_to(ROOT)),
+            conformance_provenance_sha256=hashlib.sha256(baseline_provenance.read_bytes()).hexdigest(),
+            **baseline)
+        provenance["binaries"][str(baseline_binary.relative_to(ROOT))] = baseline["hashes"]["binary"]
     (output / "provenance.json").write_text(json.dumps(provenance,indent=2)+"\n")
     (output / "host.txt").write_text(subprocess.run(["uname","-a"],capture_output=True,text=True,check=True).stdout+
                                      Path("/proc/cpuinfo").read_text()+Path("/proc/meminfo").read_text())
@@ -427,13 +446,16 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
     for i, workload in enumerate(workloads):
         # Rotate arm order to reduce a systematic page-cache/time-order bias.
         arms = ["native","raft1","raft3-local","raft3"] if async_writes else ["native","raft1"] if write_diagnostics else ["native","raft1","raft3"]
+        if baseline is not None:
+            arms = [candidate for arm in arms for candidate in ([arm] if arm == "native" else [arm+"-baseline",arm])]
         arms = arms[i%len(arms):]+arms[:i%len(arms)]
         for arm in arms:
             name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics or async_writes else "")
             results.append(cell(output / name, arm, workload, profile=write_profiles or cpu_profiles or heap_profiles,
                                 diagnostics=write_diagnostics or write_profiles or async_writes or cpu_profiles or heap_profiles,
                                 pending_commands=1024 if async_writes else 256,
-                                duration=30 if async_writes else 8, progress=async_writes,
+                                duration=duration_secs if duration_secs is not None else 30 if async_writes else 8, progress=async_writes,
+                                binary=baseline_binary if arm.endswith("-baseline") else BINARY,
                                 profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "strace"))
     if not smoke and not write_diagnostics and not write_profiles and not async_writes and not cpu_profiles and not heap_profiles:
         for arm in ("native","raft1","raft3"):
@@ -445,7 +467,11 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
 
 
 if __name__ == "__main__":
-    sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:],
-                     "--write-diagnostics" in sys.argv[2:], "--write-profiles" in sys.argv[2:],
-                     "--async-writes" in sys.argv[2:], "--cpu-profiles" in sys.argv[2:],
-                     "--heap-profiles" in sys.argv[2:]) else 1)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output")
+    for name in ("smoke", "reads-only", "write-diagnostics", "write-profiles", "async-writes", "cpu-profiles", "heap-profiles"):
+        parser.add_argument("--"+name, action="store_true")
+    parser.add_argument("--baseline-binary", type=Path)
+    parser.add_argument("--baseline-provenance", type=Path)
+    parser.add_argument("--duration-secs", type=int)
+    sys.exit(0 if run(**vars(parser.parse_args())) else 1)

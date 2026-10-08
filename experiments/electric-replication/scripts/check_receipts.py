@@ -50,6 +50,18 @@ def check(history):
         elif op == "live":
             assert event["status"] == 200
             assert "event:data" not in event["wire"].replace(" ", ""), "uncommitted SSE wake/data"
+        elif op == "lease":
+            assert event["waited_ns"] > 700_000_000
+            assert event["before"]["current_leader"] == event["node"]
+            denied = event["denied"]
+            assert denied["status"] == 503 and "stream-receipt" not in denied["headers"]
+            assert event["before"]["last_log_index"] == event["after"]["last_log_index"], "expired lease assigned an index"
+            assert event["wal_before"] and event["wal_before"] == event["wal_after"], "expired lease changed native WAL"
+            before, after = event["occupancy_before"], event["occupancy_after"]
+            assert 0 < before["pending_commands"] < before["max_pending_commands"]
+            assert before["pending_bytes"] < before["max_pending_bytes"]
+            assert after["pending_commands"] == before["pending_commands"], "expiry freed unresolved credit"
+            assert after["pending_bytes"] == before["pending_bytes"], "expiry freed unresolved bytes"
         elif op == "receipt":
             token = event["token"]
             assert token in accepted, "unissued fixture receipt"
@@ -87,6 +99,7 @@ def check(history):
     assert accepted and all(token in observed for token in accepted), "fixture must account for every 202"
     return dict(verdict="PASS", operations=len(history), accepted=len(accepted),
                 terminal_receipts=dict(Counter(observed.values())), observations=dict(states),
+                lease_expirations_checked=sum(e["op"] == "lease" for e in history),
                 unknown_requests=sum(e["op"] in ("append", "reject") and e["status"] in (0,503) for e in history),
                 append_checker=verdict, scope="directed receipt fixture plus independent byte-prefix/real-time graph; one host")
 

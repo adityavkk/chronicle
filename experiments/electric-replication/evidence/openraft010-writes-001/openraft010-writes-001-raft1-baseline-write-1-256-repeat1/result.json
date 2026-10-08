@@ -1,0 +1,45 @@
+{
+  "arm": "raft1-baseline",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "253ad722f8623f9db9a1b0f39e2490a27de3292036c93f68a02bd13db0919abf",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "disk_preflight": {
+    "free_bytes": 8868687872,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    3656188
+  ],
+  "affinity": {
+    "3656188": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 3656197,
+  "process_sample_gaps": [],
+  "client_window": {
+    "start_unix_ms": 1791470243575,
+    "end_unix_ms": 1791470277654,
+    "exit_code": 0
+  },
+  "verify_pid": 3773244,
+  "verify_window": {
+    "start_unix_ms": 1791470277655,
+    "end_unix_ms": 1791470277664,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

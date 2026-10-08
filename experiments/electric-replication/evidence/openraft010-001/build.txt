@@ -1,0 +1,70 @@
+   Compiling futures-util v0.3.32
+   Compiling siphasher v1.0.4
+   Compiling tokio v1.52.3
+   Compiling rand_core v0.6.4
+   Compiling regex-syntax v0.8.11
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling num-traits v0.2.19
+   Compiling phf_shared v0.11.3
+   Compiling rand v0.8.6
+   Compiling getrandom v0.2.17
+   Compiling phf v0.11.3
+   Compiling cpufeatures v0.3.1
+   Compiling ring v0.17.14
+   Compiling chacha20 v0.10.2
+   Compiling syn v3.0.6
+   Compiling phf_generator v0.11.3
+   Compiling phf_codegen v0.11.3
+   Compiling unicode-segmentation v1.13.3
+   Compiling rand v0.10.3
+   Compiling chrono v0.4.45
+   Compiling convert_case v0.10.0
+   Compiling regex-automata v0.4.14
+   Compiling thiserror v2.0.18
+   Compiling rustls-webpki v0.103.13
+   Compiling derive_more-impl v2.1.1
+   Compiling regex v1.13.0
+   Compiling rustls v0.23.41
+   Compiling parse-zoneinfo v0.3.1
+   Compiling thiserror-impl v2.0.18
+   Compiling chrono-tz-build v0.2.1
+   Compiling either v1.16.0
+   Compiling derive_more v2.1.1
+   Compiling quorum-set v0.2.0
+   Compiling chrono-tz v0.8.6
+   Compiling itertools v0.15.0
+   Compiling futures-executor v0.3.32
+   Compiling base2histogram v0.2.3
+   Compiling backoff-series v0.1.1
+   Compiling peel-off v0.1.1
+   Compiling futures v0.3.32
+   Compiling openraft-macros v0.10.0-alpha.36
+   Compiling hyper v1.10.1
+   Compiling tower v0.5.3
+   Compiling tower-http v0.6.11
+   Compiling hyper-util v0.1.20
+   Compiling openraft-rt v0.10.0-alpha.36
+   Compiling openraft-rt-tokio v0.10.0-alpha.36
+   Compiling display-more v0.2.6
+   Compiling tokio-rustls v0.26.4
+   Compiling openraft v0.10.0-alpha.36
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.12.28
+   Compiling openraft-legacy v0.10.0-alpha.36
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1828:1
+     |
+1828 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 59s

@@ -1,0 +1,1068 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cpu-clock:u'
+# Event count (approx.): 22252525030
+#
+# Overhead  Command          Shared Object           Symbol                                                                                                                                                                                                                                                                                     
+# ........  ...............  ......................  ...........................................................................................................................................................................................................................................................................................
+#
+     9.12%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::handle_append_inner::{{closure}}
+            |
+            ---durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               |          
+               |--8.90%--0xffffffffffffffff
+               |          
+                --0.23%--tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f67bf583043
+                          0x7f67bf60361b
+
+     8.53%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::conn_loop::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     4.72%  tokio-rt-worker  libc.so.6               [.] 0x00000000000976d0
+            |
+            ---0x7f67bf5916d0
+               malloc
+               |          
+               |--2.77%--durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f67bf583043
+               |          0x7f67bf60361b
+               |          
+               |--1.59%--bytes::bytes::shallow_clone_vec
+               |          bytes::bytes::promotable_even_clone
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.36%--durable_streams_server::handlers::wait_durable_lsn::{{closure}}
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     3.99%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000a7b
+            |
+            ---0x7ffce99dda7b
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+               |          
+               |--1.63%--durable_streams_server::handlers::stage_for_durability
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--1.63%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.32%--durable_streams_server::handlers::write_wire
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.27%--durable_streams_server::store::Store::get
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     3.99%  tokio-rt-worker  libc.so.6               [.] cfree
+            |
+            ---__libc_free (inlined)
+               |          
+               |--1.41%--core::ptr::drop_in_place<durable_streams_server::api::Req>
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          |          
+               |           --1.36%--durable_streams_server::handlers::dispatch::{{closure}}
+               |                     durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |                     durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |                     tokio::runtime::task::raw::poll
+               |                     0xffffffffffffffff
+               |          
+               |--0.82%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.73%--durable_streams_server::engine_raw::write_response::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f67bf583043
+               |          0x7f67bf60361b
+               |          
+                --0.59%--durable_streams_server::handlers::stage_for_durability
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     3.86%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::wait_durable_lsn::{{closure}}
+            |
+            ---durable_streams_server::handlers::wait_durable_lsn::{{closure}}
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     2.95%  tokio-rt-worker  libc.so.6               [.] malloc
+            |
+            ---malloc
+               |          
+                --2.41%--durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f67bf583043
+                          0x7f67bf60361b
+
+     2.77%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::raw::poll
+            |
+            ---tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     2.63%  tokio-rt-worker  libc.so.6               [.] 0x00000000000963b5
+            |
+            ---0x7f67bf5903b5
+               |          
+                --2.45%--__libc_free (inlined)
+                          |          
+                          |--1.63%--core::ptr::drop_in_place<durable_streams_server::api::Req>
+                          |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          |          durable_streams_server::handlers::dispatch::{{closure}}
+                          |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          |          tokio::runtime::task::raw::poll
+                          |          0xffffffffffffffff
+                          |          
+                          |--0.36%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          |          durable_streams_server::handlers::dispatch::{{closure}}
+                          |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          |          tokio::runtime::task::raw::poll
+                          |          0xffffffffffffffff
+                          |          
+                          |--0.23%--durable_streams_server::handlers::wait_durable_lsn::{{closure}}
+                          |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          |          durable_streams_server::handlers::dispatch::{{closure}}
+                          |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          |          tokio::runtime::task::raw::poll
+                          |          0xffffffffffffffff
+                          |          
+                           --0.23%--durable_streams_server::engine_raw::write_response::{{closure}}
+                                     durable_streams_server::engine_raw::conn_loop::{{closure}}
+                                     durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                                     tokio::runtime::task::raw::poll
+                                     tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                                     tokio::runtime::task::raw::poll
+                                     std::sys::backtrace::__rust_begin_short_backtrace
+                                     core::ops::function::FnOnce::call_once{{vtable.shim}}
+                                     <std::sys::thread::unix::Thread>::new::thread_start
+                                     0x7f67bf583043
+                                     0x7f67bf60361b
+
+     2.22%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::stage_for_durability
+            |
+            ---durable_streams_server::handlers::stage_for_durability
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     2.18%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::raw::poll
+            |
+            ---tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     2.04%  tokio-rt-worker  durable-streams-server  [.] <tokio::sync::batch_semaphore::Acquire as core::future::future::Future>::poll
+            |
+            ---<tokio::sync::batch_semaphore::Acquire as core::future::future::Future>::poll
+               tokio::sync::mutex::Mutex<T>::lock::{{closure}}
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.91%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::dispatch::{{closure}}
+            |
+            ---durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     1.91%  wal-committer    durable-streams-server  [.] durable_streams_server::wal::shard::Shard::commit_once
+            |
+            ---durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     1.72%  tokio-rt-worker  libc.so.6               [.] 0x00000000000976b3
+            |
+            ---0x7f67bf5916b3
+               malloc
+               |          
+               |--0.86%--durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f67bf583043
+               |          0x7f67bf60361b
+               |          
+                --0.68%--bytes::bytes::shallow_clone_vec
+                          bytes::bytes::promotable_even_clone
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     1.54%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::write_wire
+            |
+            ---durable_streams_server::handlers::write_wire
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.41%  tokio-rt-worker  libc.so.6               [.] write
+            |
+            ---__write (inlined)
+               durable_streams_server::handlers::write_wire
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.32%  tokio-rt-worker  libc.so.6               [.] realloc
+            |
+            ---realloc
+               <alloc::raw_vec::RawVecInner>::finish_grow
+               <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+               |          
+               |--0.91%--<alloc::string::String as core::fmt::Write>::write_str
+               |          |          
+               |          |--0.50%--core::fmt::write
+               |          |          alloc::fmt::format::format_inner
+               |          |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          |          tokio::runtime::task::raw::poll
+               |          |          0xffffffffffffffff
+               |          |          
+               |           --0.41%--<core::fmt::Formatter>::pad_integral
+               |                     <u64 as core::fmt::Display>::fmt
+               |                     core::fmt::write
+               |                     alloc::fmt::format::format_inner
+               |                     durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |                     durable_streams_server::handlers::dispatch::{{closure}}
+               |                     durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |                     durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |                     tokio::runtime::task::raw::poll
+               |                     0xffffffffffffffff
+               |          
+                --0.41%--<alloc::string::String as core::fmt::Write>::write_char
+                          <core::fmt::Formatter>::pad_integral
+                          <u64 as core::fmt::Display>::fmt
+                          core::fmt::write
+                          alloc::fmt::format::format_inner
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     1.27%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     1.27%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::batch_semaphore::Semaphore::add_permits_locked
+            |
+            ---tokio::sync::batch_semaphore::Semaphore::add_permits_locked
+               |          
+                --1.09%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     1.27%  wal-committer    durable-streams-server  [.] tokio::runtime::task::waker::wake_by_ref
+            |
+            ---tokio::runtime::task::waker::wake_by_ref
+               durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     1.09%  tokio-rt-worker  durable-streams-server  [.] <alloc::string::String as core::fmt::Write>::write_char
+            |
+            ---<alloc::string::String as core::fmt::Write>::write_char
+               <core::fmt::Formatter>::pad_integral
+               <u64 as core::fmt::Display>::fmt
+               core::fmt::write
+               alloc::fmt::format::format_inner
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.04%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::notify::NotifyGuard::notify_waiters
+            |
+            ---tokio::sync::notify::NotifyGuard::notify_waiters
+               tokio::sync::watch::big_notify::BigNotify::notify_waiters
+               durable_streams_server::handlers::publish_durable_tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.04%  tokio-rt-worker  libc.so.6               [.] 0x00000000000856d5
+            |
+            ---0x7f67bf57f6d5
+               |          
+               |--0.45%--__write (inlined)
+               |          durable_streams_server::handlers::write_wire
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.41%--pwrite (inlined)
+                          durable_streams_server::handlers::stage_for_durability
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     1.00%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::store::Store::get
+            |
+            ---durable_streams_server::store::Store::get
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.00%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::registration::Registration::poll_ready
+            |
+            ---tokio::runtime::io::registration::Registration::poll_ready
+               |          
+               |--0.59%--<tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f67bf583043
+               |          0x7f67bf60361b
+               |          
+                --0.41%--<tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+                          durable_streams_server::engine_raw::write_response::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f67bf583043
+                          0x7f67bf60361b
+
+     0.95%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::publish_durable_tail
+            |
+            ---durable_streams_server::handlers::publish_durable_tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.82%  tokio-rt-worker  durable-streams-server  [.] httparse::parse_headers_iter_uninit
+            |
+            ---httparse::parse_headers_iter_uninit
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.77%  tokio-rt-worker  durable-streams-server  [.] <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+            |
+            ---<tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.77%  tokio-rt-worker  libc.so.6               [.] 0x0000000000085761
+            |
+            ---0x7f67bf57f761
+               |          
+                --0.32%--pwrite (inlined)
+                          durable_streams_server::handlers::stage_for_durability
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.73%  tokio-rt-worker  libc.so.6               [.] syscall
+            |
+            ---syscall
+               |          
+                --0.64%--durable_streams_server::handlers::stage_for_durability
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.73%  wal-committer    durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::push_remote_task
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::push_remote_task
+               tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+               tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task
+               durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.64%  tokio-rt-worker  durable-streams-server  [.] <tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+            |
+            ---<tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.64%  tokio-rt-worker  durable-streams-server  [.] crc32c::hw_x86_64::crc32c
+            |
+            ---crc32c::hw_x86_64::crc32c
+               durable_streams_server::handlers::stage_for_durability
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.59%  tokio-rt-worker  libc.so.6               [.] 0x00000000000964d2
+            |
+            ---0x7f67bf5904d2
+               __libc_free (inlined)
+               |          
+                --0.45%--bytes::bytes::promotable_even_drop
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.59%  tokio-rt-worker  libc.so.6               [.] 0x000000000016349a
+            |
+            ---0x7f67bf65d49a
+               |          
+               |--0.36%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::engine_raw::conn_loop::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--<dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+                          durable_streams_server::store::Store::get
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] <dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+            |
+            ---<dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+               durable_streams_server::store::Store::get
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] bytes::bytes::shallow_clone_vec
+            |
+            ---bytes::bytes::shallow_clone_vec
+               bytes::bytes::promotable_even_clone
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.54%  tokio-rt-worker  libc.so.6               [.] __send
+            |
+            ---send (inlined)
+               <tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.54%  tokio-rt-worker  libc.so.6               [.] 0x00000000000972ea
+            |
+            ---0x7f67bf5912ea
+               malloc
+               |          
+                --0.41%--durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f67bf583043
+                          0x7f67bf60361b
+
+     0.50%  tokio-rt-worker  durable-streams-server  [.] <core::str::lossy::Utf8Chunks as core::iter::traits::iterator::Iterator>::next
+            |
+            ---<core::str::lossy::Utf8Chunks as core::iter::traits::iterator::Iterator>::next
+               <alloc::string::String>::from_utf8_lossy
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.50%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::wake_by_val
+            |
+            ---tokio::runtime::task::waker::wake_by_val
+               |          
+               |--0.27%--tokio::runtime::io::scheduled_io::ScheduledIo::wake
+               |          tokio::runtime::io::driver::Driver::turn
+               |          tokio::runtime::time::Driver::park_internal
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f67bf583043
+               |          0x7f67bf60361b
+               |          
+                --0.23%--tokio::sync::batch_semaphore::Semaphore::add_permits_locked
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.50%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::mutex::Mutex<T>::lock::{{closure}}
+            |
+            ---tokio::sync::mutex::Mutex<T>::lock::{{closure}}
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.50%  tokio-rt-worker  libc.so.6               [.] 0x000000000009607d
+            |
+            ---0x7f67bf59007d
+               __libc_free (inlined)
+
+     0.50%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097350
+            |
+            ---0x7f67bf591350
+               |          
+                --0.41%--malloc
+                          |          
+                           --0.23%--durable_streams_server::engine_raw::conn_loop::{{closure}}
+                                     durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                                     tokio::runtime::task::raw::poll
+                                     tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                                     tokio::runtime::task::raw::poll
+                                     std::sys::backtrace::__rust_begin_short_backtrace
+                                     core::ops::function::FnOnce::call_once{{vtable.shim}}
+                                     <std::sys::thread::unix::Thread>::new::thread_start
+                                     0x7f67bf583043
+                                     0x7f67bf60361b
+
+     0.45%  tokio-rt-worker  durable-streams-server  [.] <core::str::pattern::CharSearcher as core::str::pattern::Searcher>::next_match
+            |
+            ---<core::str::pattern::CharSearcher as core::str::pattern::Searcher>::next_match
+               |          
+                --0.36%--durable_streams_server::store::media_type
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.45%  tokio-rt-worker  durable-streams-server  [.] <std::sys::pal::unix::time::Timespec>::sub_timespec
+            |
+            ---<std::sys::pal::unix::time::Timespec>::sub_timespec
+               |          
+                --0.32%--durable_streams_server::handlers::stage_for_durability
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.41%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::http1::write_head
+            |
+            ---durable_streams_server::http1::write_head
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] <core::fmt::Formatter>::pad_integral
+            |
+            ---<core::fmt::Formatter>::pad_integral
+               <u64 as core::fmt::Display>::fmt
+               core::fmt::write
+               alloc::fmt::format::format_inner
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] <std::sys::pal::unix::time::Timespec>::now
+            |
+            ---<std::sys::pal::unix::time::Timespec>::now
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] crc32c::hw_x86_64::crc_u64_append
+            |
+            ---crc32c::hw_x86_64::crc_u64_append
+               crc32c::hw_x86_64::crc32c
+               durable_streams_server::handlers::stage_for_durability
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::write_response::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::wal_stream_offset
+            |
+            ---durable_streams_server::handlers::wal_stream_offset
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::scheduled_io::ScheduledIo::wake
+            |
+            ---tokio::runtime::io::scheduled_io::ScheduledIo::wake
+               tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.36%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::clone_waker
+            |
+            ---tokio::runtime::task::waker::clone_waker
+               |          
+                --0.23%--tokio::runtime::io::registration::Registration::poll_ready
+                          <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f67bf583043
+                          0x7f67bf60361b
+
+     0.36%  tokio-rt-worker  libc.so.6               [.] __libc_pwrite
+            |
+            ---pwrite (inlined)
+               durable_streams_server::handlers::stage_for_durability
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.36%  tokio-rt-worker  libc.so.6               [.] recv
+            |
+            ---recv
+               <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.32%  tokio-rt-worker  [vdso]                  [.] __vdso_clock_gettime
+            |
+            ---__vdso_clock_gettime
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.32%  tokio-rt-worker  durable-streams-server  [.] bytes::bytes::shared_clone
+            |
+            ---bytes::bytes::shared_clone
+
+     0.32%  tokio-rt-worker  durable-streams-server  [.] bytes::bytes::shared_drop
+            |
+            ---bytes::bytes::shared_drop
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.32%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::store::media_type
+            |
+            ---durable_streams_server::store::media_type
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.32%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097333
+            |
+            ---0x7f67bf591333
+
+     0.27%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000aba
+            |
+            ---0x7ffce99ddaba
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+               |          
+                --0.23%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::engine_raw::conn_loop::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.27%  tokio-rt-worker  durable-streams-server  [.] <std::sys::sync::mutex::futex::Mutex>::lock_contended
+            |
+            ---<std::sys::sync::mutex::futex::Mutex>::lock_contended
+               durable_streams_server::handlers::wait_durable_lsn::{{closure}}
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.27%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::store::StreamState::tail
+            |
+            ---durable_streams_server::store::StreamState::tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.27%  tokio-rt-worker  durable-streams-server  [.] httparse::simd::avx2::match_header_value_vectored
+            |
+            ---httparse::simd::avx2::match_header_value_vectored
+               httparse::parse_headers_iter_uninit
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.27%  tokio-rt-worker  libc.so.6               [.] clock_gettime
+            |
+            ---clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.27%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097462
+            |
+            ---0x7f67bf591462
+               malloc
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.23%  tokio-rt-worker  [vdso]                  [.] 0x00000000000009d0
+            |
+            ---0x7ffce99dd9d0
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] <u64 as core::fmt::Display>::fmt
+            |
+            ---<u64 as core::fmt::Display>::fmt
+               core::fmt::write
+               alloc::fmt::format::format_inner
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::engine_raw::conn_loop::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::driver::Driver::turn
+            |
+            ---tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+               tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task
+               tokio::runtime::task::waker::wake_by_val
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x000000000009600f
+            |
+            ---0x7f67bf59000f
+               __libc_free (inlined)
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097210
+            |
+            ---0x7f67bf591210
+
+     0.23%  wal-committer    durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+               tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task
+               durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f67bf583043
+               0x7f67bf60361b
+
+
+
+#
+# (Tip: To record callchains for each sample: perf record -g)
+#

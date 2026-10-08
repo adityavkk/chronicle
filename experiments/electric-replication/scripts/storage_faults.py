@@ -159,13 +159,14 @@ def run(output):
         original_hot = hot.read_bytes()
         identity = lab.data / str(leader) / "IDENTITY"
         stored = json.loads(identity.read_bytes())
-        assert len(stored) == 6 and stored[0] == 7 and stored[-1] == 64
+        assert len(stored) == 6 and stored[0] == 8 and stored[-1] == 64
         # The old 128-command candidate used version 6 without a ceiling field.
-        # Reject it, and a current-version ceiling mismatch, before recovery can
-        # reinterpret persisted receipt ordinals or mutate native storage.
+        # Version 7 was the qualified 0.9 baseline. Reject both and a current
+        # ceiling mismatch before reinterpreting receipts or mutating storage.
         before_identity = {str(p):hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in (lab.data / str(leader)).rglob("*") if p.is_file()}
         for label, value in [("identity-v6", [6, *stored[1:-1]]),
+                             ("identity-v7", [7, *stored[1:]]),
                              ("identity-batch128", [*stored[:-1], 128])]:
             corrupt_probe(leader, identity, json.dumps(value, separators=(",", ":")).encode(),
                           label, "node/cluster/partition identity mismatch")

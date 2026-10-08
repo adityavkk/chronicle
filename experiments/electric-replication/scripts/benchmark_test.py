@@ -1,12 +1,14 @@
 import contextlib
+import hashlib
 import io
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from benchmark import cell
+from benchmark import cell, run
 
 
 class DiskPreflight(unittest.TestCase):
@@ -15,7 +17,10 @@ class DiskPreflight(unittest.TestCase):
         for free in (minimum - 1, minimum):
             with self.subTest(free=free), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / Path(directory).name
-                with patch("benchmark.shutil.disk_usage", return_value=SimpleNamespace(free=free)), \
+                binary = Path(directory) / "native"
+                binary.write_bytes(b"fixture-not-executable")
+                with patch("benchmark.NATIVE", binary), \
+                     patch("benchmark.shutil.disk_usage", return_value=SimpleNamespace(free=free)), \
                      patch("benchmark.subprocess.run", side_effect=RuntimeError("SUT startup intercepted")) as start, \
                      contextlib.redirect_stdout(io.StringIO()):
                     result = cell(output, "native", ("write", 1, 4))
@@ -30,6 +35,37 @@ class DiskPreflight(unittest.TestCase):
                     start.assert_called_once()
                     self.assertIn("SUT startup intercepted", result["error"])
                     self.assertTrue((output / "native-argv.json").exists())
+
+
+class BaselineComparison(unittest.TestCase):
+    def test_hash_fence_and_exact_binary_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = {name: root / name for name in ("native", "client", "current", "baseline")}
+            for name, path in binaries.items():
+                path.write_bytes(name.encode())
+            provenance = root / "baseline.json"
+            provenance.write_text(json.dumps({"hashes": {"binary": hashlib.sha256(b"current").hexdigest()}}))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                run(root / "bad", baseline_binary=binaries["baseline"], baseline_provenance=provenance)
+            self.assertFalse((root / "bad").exists())
+            provenance.write_text(json.dumps({"hashes": {"binary": hashlib.sha256(b"baseline").hexdigest()}}))
+            with patch("benchmark.ROOT", root), patch("benchmark.NATIVE", binaries["native"]), \
+                 patch("benchmark.CLIENT", binaries["client"]), patch("benchmark.BINARY", binaries["current"]), \
+                 patch("benchmark.source_hashes", return_value={}), \
+                 patch("benchmark.cell", return_value={"verdict": "PASS"}) as execute:
+                self.assertTrue(run(root / "good", write_diagnostics=True, duration_secs=17,
+                    baseline_binary=binaries["baseline"], baseline_provenance=provenance))
+            arms = [call.args[1] for call in execute.call_args_list]
+            self.assertEqual(arms, ["native", "raft1-baseline", "raft1", "raft1-baseline", "raft1", "native",
+                                    "raft1", "native", "raft1-baseline"])
+            for call in execute.call_args_list:
+                expected = binaries["baseline"] if call.args[1].endswith("-baseline") else binaries["current"]
+                self.assertEqual(call.kwargs["binary"], expected)
+                self.assertEqual(call.kwargs["duration"], 17)
+            recorded = json.loads((root / "good/provenance.json").read_text())
+            self.assertEqual(recorded["baseline"]["hashes"]["binary"], hashlib.sha256(b"baseline").hexdigest())
+            self.assertEqual(recorded["binaries"]["current"], hashlib.sha256(b"current").hexdigest())
 
 
 if __name__ == "__main__":

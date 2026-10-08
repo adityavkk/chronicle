@@ -55,9 +55,18 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 object_store = { version = "0.11", optional = true, features = ["aws"] }
 
 [dependencies.openraft]
-version = "=0.9.25"
-path = "../vendor/openraft"
-features = ["serde", "storage-v2"]
+version = "=0.10.0-alpha.36"
+default-features = false
+features = ["serde", "tokio-rt"]
+optional = true
+
+[dependencies.openraft-legacy]
+version = "=0.10.0-alpha.36"
+features = ["serde"]
+optional = true
+
+[dependencies.futures-util]
+version = "0.3"
 optional = true
 
 [dependencies.reqwest]
@@ -96,7 +105,7 @@ tempfile = "3"
 
 [features]
 default = []
-replication = ["dep:openraft", "dep:reqwest", "dep:bincode", "dep:sha2",
+replication = ["dep:openraft", "dep:openraft-legacy", "dep:futures-util", "dep:reqwest", "dep:bincode", "dep:sha2",
     "dep:ed25519-dalek", "dep:hmac", "dep:base64", "dep:getrandom"]
 # Enable OTLP span + metric export over gRPC (tonic). Endpoint/protocol/timeout
 # and sampling are configured entirely via the standard OTEL_* env vars.

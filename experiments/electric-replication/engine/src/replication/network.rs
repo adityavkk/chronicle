@@ -1,12 +1,13 @@
 use super::*;
-use openraft::error::{
-    Infallible, InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError, Unreachable,
+use openraft::errors::{
+    Infallible, NetworkError, RPCError, RaftError, RemoteError, Unreachable,
 };
-use openraft::network::{RPCOption, RaftNetwork, RaftNetworkFactory};
+use openraft::network::{RPCOption, RaftNetworkFactory};
 use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    AppendEntriesRequest, AppendEntriesResponse,
     VoteRequest, VoteResponse,
 };
+use openraft_legacy::network_v1::{Adapter, RaftNetwork, InstallSnapshotRequest, InstallSnapshotResponse, InstallSnapshotError};
 use serde::de::DeserializeOwned;
 use std::sync::RwLock;
 
@@ -30,7 +31,7 @@ pub struct Connection {
     target: u64,
     node: BasicNode,
 }
-type RpcError<E = Infallible> = RPCError<u64, BasicNode, RaftError<u64, E>>;
+type RpcError<E = Infallible> = RPCError<Types, RaftError<Types, E>>;
 
 impl Network {
     async fn send<Q: Serialize, R: DeserializeOwned, E: std::error::Error + DeserializeOwned>(
@@ -39,7 +40,7 @@ impl Network {
         node: &BasicNode,
         rpc: &str,
         request: Q,
-    ) -> Result<R, RPCError<u64, BasicNode, E>> {
+    ) -> Result<R, RPCError<Types, E>> {
         let faults = self.faults.read().unwrap().clone();
         if faults.blocked.contains(&target) {
             return Err(RPCError::Unreachable(Unreachable::new(&io::Error::other(
@@ -53,7 +54,7 @@ impl Network {
             bincode::serialize(&request).map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
         let response = self
             .client
-            .post(format!("http://{}/_raft/{}/{rpc}", node.addr, self.group))
+            .post(format!("http://{}/_raft8/{}/{rpc}", node.addr, self.group))
             .header("x-electric-cluster", &self.cluster)
             .body(body)
             .send()
@@ -78,13 +79,13 @@ impl Network {
     }
 }
 impl RaftNetworkFactory<Types> for Network {
-    type Network = Connection;
-    async fn new_client(&mut self, target: u64, node: &BasicNode) -> Connection {
+    type Network = Adapter<Types, Connection, tokio::fs::File>;
+    async fn new_client(&mut self, target: u64, node: &BasicNode) -> Self::Network {
         Connection {
             network: self.clone(),
             target,
             node: node.clone(),
-        }
+        }.into_v2()
     }
 }
 impl RaftNetwork<Types> for Connection {
@@ -92,16 +93,16 @@ impl RaftNetwork<Types> for Connection {
         &mut self,
         req: AppendEntriesRequest<Types>,
         _: RPCOption,
-    ) -> Result<AppendEntriesResponse<u64>, RpcError> {
+    ) -> Result<AppendEntriesResponse<Types>, RpcError> {
         self.network
             .send(self.target, &self.node, "append", req)
             .await
     }
     async fn vote(
         &mut self,
-        req: VoteRequest<u64>,
+        req: VoteRequest<Types>,
         _: RPCOption,
-    ) -> Result<VoteResponse<u64>, RpcError> {
+    ) -> Result<VoteResponse<Types>, RpcError> {
         self.network
             .send(self.target, &self.node, "vote", req)
             .await
@@ -110,7 +111,7 @@ impl RaftNetwork<Types> for Connection {
         &mut self,
         req: InstallSnapshotRequest<Types>,
         _: RPCOption,
-    ) -> Result<InstallSnapshotResponse<u64>, RpcError<InstallSnapshotError>> {
+    ) -> Result<InstallSnapshotResponse<Types>, RpcError<InstallSnapshotError>> {
         self.network
             .send(self.target, &self.node, "snapshot", req)
             .await

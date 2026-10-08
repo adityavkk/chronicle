@@ -1,6 +1,6 @@
 //! Ordered admission and native-fsync amortization; see BATCHING.md.
-use super::{machine::Machine, receipts::Position, Command, LogId, Raft, Reply};
-use openraft::CommittedLeaderId;
+use super::{machine::Machine, receipts::Position, Command, CommittedLeaderId, LogId, Raft, Reply};
+use openraft::{async_runtime::WatchReceiver, impls::ProgressResponder, vote::RaftLeaderId, ReadPolicy};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ pub struct Batch {
     pub commands: Vec<Command>,
     /// Never serialized into the WAL or replicated to another process.
     #[serde(skip)]
-    pub durable: Option<Arc<Mutex<Option<oneshot::Sender<LogId<u64>>>>>>,
+    pub durable: Option<Arc<Mutex<Option<oneshot::Sender<LogId>>>>>,
 }
 impl From<Vec<Command>> for Batch {
     fn from(commands: Vec<Command>) -> Self {
@@ -25,8 +25,15 @@ impl From<Vec<Command>> for Batch {
     }
 }
 
+impl std::fmt::Display for Batch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Consensus diagnostics must not expose payloads, headers or credentials.
+        write!(f, "batch(commands={})", self.commands.len())
+    }
+}
+
 pub(super) struct Committed {
-    pub log_id: LogId<u64>,
+    pub log_id: LogId,
     pub data: Reply,
 }
 pub(super) enum Outcome {
@@ -102,21 +109,21 @@ async fn take_ready(
     (commands, completions)
 }
 
-async fn prepare_epoch(raft: &Raft, machine: &Machine, admitted_term: &AtomicU64) -> Result<CommittedLeaderId<u64>, u16> {
-    let metrics = raft.metrics().borrow().clone();
+async fn prepare_epoch(raft: &Raft, machine: &Machine, admitted_term: &AtomicU64) -> Result<CommittedLeaderId, u16> {
+    let metrics = raft.metrics().borrow_watched().clone();
     if metrics.current_leader != Some(metrics.id) { return Err(503); }
     let expected = CommittedLeaderId::new(metrics.current_term, metrics.id);
     if admitted_term.load(Ordering::Acquire) != metrics.current_term {
         let prepare = async {
             // Once per leadership epoch, not once per append. The election
             // entry must be applied before newly owned admission can proceed.
-            raft.ensure_linearizable().await.map_err(|_| 503u16)?;
+            raft.ensure_linearizable(ReadPolicy::ReadIndex).await.map_err(|_| 503u16)?;
             let inherited = machine.journal.uncommitted();
             loop {
                 let changed = machine.journal.changed.notified();
                 tokio::pin!(changed);
                 changed.as_mut().enable();
-                let now = raft.metrics().borrow().clone();
+                let now = raft.metrics().borrow_watched().clone();
                 if now.current_term != expected.term || now.current_leader != Some(now.id) {
                     return Err(503u16);
                 }
@@ -164,7 +171,9 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
             // Enqueue from this single dispatcher BEFORE spawning a waiter.
             // Concurrent client_write tasks would reorder FIFO submissions.
             // The epoch is also checked atomically inside RaftCore at assignment.
-            let receive_commit = raft.client_write_ff_with_leader(batch, expected).await;
+            let (responder, completed) = ProgressResponder::complete_only();
+            let receive_commit = raft.write(batch).with_leader(expected).responder(responder)
+                .await.map(|()| completed);
             let machine = machine.clone();
             tokio::spawn(async move {
                 let _resolve_probe = resolve_probe;
@@ -223,7 +232,7 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
 mod tests {
     use super::*;
     use super::super::{journal::Journal, network, BasicNode};
-    use openraft::error::ClientWriteError;
+    use openraft::errors::ClientWriteError;
     use std::future::Future;
     use proptest::prelude::*;
     use std::sync::Arc;
@@ -290,39 +299,45 @@ mod tests {
         let mut leader = prepare_epoch(&raft, &machine, &prepared).await.unwrap();
         let command = |n: u64| Command {method: "PUT".into(), path: format!("/epoch/{n}"),
             headers: vec![], body: vec![], time: 1000+n};
-        let mut prior = raft.client_write_ff_with_leader(vec![command(0)].into(), leader)
-            .await.unwrap().await.unwrap().unwrap().log_id;
+        let (responder, completed) = ProgressResponder::complete_only();
+        raft.write(vec![command(0)].into()).with_leader(leader).responder(responder).await.unwrap();
+        let mut prior = completed.await.unwrap().unwrap().log_id;
 
         // Matching numeric index cannot excuse a stale term or a different node.
         for wrong in [CommittedLeaderId::new(leader.term-1,7), CommittedLeaderId::new(leader.term,8)] {
             let before = journal.shard.tail_lsn();
             let (send, flushed) = oneshot::channel();
-            let rejected = raft.client_write_ff_with_leader(Batch {commands:vec![command(99)],
-                durable:Some(Arc::new(Mutex::new(Some(send))))},wrong).await.unwrap().await.unwrap();
+            let (responder, completed) = ProgressResponder::complete_only();
+            raft.write(Batch {commands:vec![command(99)],
+                durable:Some(Arc::new(Mutex::new(Some(send))))}).with_leader(wrong).responder(responder).await.unwrap();
+            let rejected = completed.await.unwrap();
             assert!(matches!(rejected, Err(ClientWriteError::ForwardToLeader(_))));
             assert!(flushed.await.is_err(), "no local-durable receipt for a rejected proposal");
             assert_eq!(journal.shard.tail_lsn(), before, "no native WAL frame for epoch rejection");
         }
 
         for n in 1..=3 {
-            // Tick is disabled; let the previous vote lease expire, then hold
-            // the actual core while enqueuing a higher vote, election and
-            // old-ticket write. No timing race decides the API queue order.
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            // A one-voter 0.10 leader always supplies its own quorum lease.
+            // Use the authorized-transfer vote flag to establish a real term
+            // change, then queue election and the old ticket behind it. This
+            // tests assignment fencing, not expiry of a one-voter quorum.
             let (entered, reached) = oneshot::channel();
             let (resume, blocked) = std::sync::mpsc::channel();
-            raft.external_request(move |_| {let _=entered.send(()); let _=blocked.recv();});
+            raft.external_request(move |_| {let _=entered.send(()); let _=blocked.recv();}).await.unwrap();
             reached.await.unwrap();
-            let vote = raft.vote(openraft::raft::VoteRequest::new(openraft::Vote::new(leader.term+1,8),Some(prior)));
+            let mut request = openraft::raft::VoteRequest::new(openraft::Vote::new(leader.term+1,8),Some(prior));
+            request.leadership_transfer = true;
+            let vote = raft.vote(request);
             tokio::pin!(vote);
             std::future::poll_fn(|cx| {
                 assert!(vote.as_mut().poll(cx).is_pending());
                 std::task::Poll::Ready(())
             }).await;
-            raft.trigger().elect().await.unwrap();
+            raft.trigger().elect(false).await.unwrap();
             let (send, flushed) = oneshot::channel();
-            let stale = raft.client_write_ff_with_leader(Batch {commands:vec![command(99)],
-                durable:Some(Arc::new(Mutex::new(Some(send))))},leader).await.unwrap();
+            let (responder, stale) = ProgressResponder::complete_only();
+            raft.write(Batch {commands:vec![command(99)],
+                durable:Some(Arc::new(Mutex::new(Some(send))))}).with_leader(leader).responder(responder).await.unwrap();
             resume.send(()).unwrap();
             assert!(vote.await.unwrap().vote_granted);
             assert!(matches!(stale.await.unwrap(), Err(ClientWriteError::ForwardToLeader(_))));
@@ -333,8 +348,9 @@ mod tests {
             let next = prepare_epoch(&raft, &machine, &prepared).await.unwrap();
             assert!(next.term > leader.term);
             assert_eq!(prepared.load(Ordering::Acquire),next.term);
-            let committed = raft.client_write_ff_with_leader(vec![command(n)].into(),next)
-                .await.unwrap().await.unwrap().unwrap();
+            let (responder, completed) = ProgressResponder::complete_only();
+            raft.write(vec![command(n)].into()).with_leader(next).responder(responder).await.unwrap();
+            let committed = completed.await.unwrap().unwrap();
             assert_eq!(committed.log_id.index,prior.index+2,"only election blank plus good write, no stale index");
             assert_eq!(committed.data[0].status,201);
             prior=committed.log_id;
@@ -384,7 +400,7 @@ mod tests {
                     for (ordinal, completion) in completions.iter_mut().enumerate() {
                         if completion.local {
                             let _ = completion.result.take().unwrap().send(Ok(Outcome::Accepted(Position {
-                                log_id:LogId::new(openraft::CommittedLeaderId::new(7,2),offset as u64),ordinal,
+                                log_id:LogId::new(CommittedLeaderId::new(7,2),offset as u64),ordinal,
                             })));
                         }
                     }

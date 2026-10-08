@@ -31,7 +31,7 @@ merely compatible file formats. Original local-WAL mode remains separately
 buildable. The replicated apply path uses native buffered wire-file writes
 without a second WAL. There is no SQLite or RocksDB payload engine.
 
-OpenRaft **0.9.25**, MIT OR Apache-2.0, source
+The qualified comparison baseline uses OpenRaft **0.9.25**, MIT OR Apache-2.0, source
 https://github.com/databendlabs/openraft/commit/8815cdba2826f74e848acef361ad03f93bb1c3f8
 owns elections, log matching, leader confirmation, learners and joint consensus.
 Its `RaftLogStorage::append` callback must follow native `wait_durable`, not
@@ -42,6 +42,36 @@ upstream's expected-leader write condition; [vendor provenance](vendor/README.md
 records the original crate, licenses and three changed files. Elections, commit
 and storage rules remain pinned 0.9.25. We do not implement private consensus or
 assume the previous experiment's proofs apply.
+
+The current isolated candidate uses stock **0.10.0-alpha.36**, not the vendored
+backport, from
+https://github.com/databendlabs/openraft/commit/0acd6b8d547ad4468f66708b05bc03baaf04c7c8.
+Both `openraft` and `openraft-legacy` are exact registry pins under MIT OR
+Apache-2.0. Their crate SHA-256 hashes are respectively
+`858ce506e827306c40820757d94bcf086b5ad54f7c8b9c47578362e4c048e842`
+and `ed7cd03a9781c02e11be6fe50f9a4b57ab5daa909f0eeb3c8963e365637b62b7`;
+both packaged `.cargo_vcs_info.json` files identify that upstream commit.
+`Cargo.lock` pins the complete dependency graph. No registry source was modified.
+The candidate's qualification results must be kept distinct from 0.9 results;
+being newer or compiling does not establish either safety or performance.
+
+0.10 submits native append IO without awaiting its durable callback on the core
+loop. The callback still follows actual native fsync. Its exclusive
+`truncate_after` maps to the journal's inclusive first-removed event, including
+the empty-prefix boundary. The state-machine stream reads/applies at most 64 log
+entries per cohort; it does not materialize an entire recovery range in RAM.
+Replication reads are likewise capped at 64 entries. `ReadPolicy::ReadIndex`
+remains explicit; the new admission lease is **not** a switch to lease reads.
+The upstream legacy network adapter preserves 64 KiB file-backed snapshot chunks.
+
+Candidate data identity is **8** and consensus RPC paths start `/_raft8/`.
+Identity-7 directories are rejected before native recovery; old `/_raft/` RPCs
+are rejected before decoding or assigning a log entry. A 0.9 receiver does not
+recognize the new consensus path. There is **no mixed-version rolling upgrade,
+automatic data migration or 0.9 snapshot import**. The 0.9 checkout/binary and
+its directories remain the rollback baseline; candidate qualification uses fresh
+directories. The separately approved lease-admission difference is specified in
+[ASYNC.md](ASYNC.md). Supported production migration remains an open gate.
 
 The apply worker persists a covering `Commit` marker in that same journal and
 waits for fsync **before the first native handler in a committed batch**. This

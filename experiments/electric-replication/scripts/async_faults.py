@@ -141,37 +141,63 @@ def run(output):
         for method, path in [("PUT", paths[0]), ("DELETE", paths[0]), ("POST", "/r/__ds/subscriptions/new/claim")]:
             assert lab.request(lab.leader(0), method, path, headers={"stream-durability":"local-fsync"})[0] == 400
 
-        # Count and byte admission limits are distinct. Retain every 202 and
-        # unknown strong write across a minority, replacement and restart.
+        # Count/byte bounds and quorum-lease expiry are distinct admission gates.
+        # Preserve all accepted and unknown operations across replacement.
         lost = []
-        for byte_bound in (False, True):
+        for bound in ("count", "bytes", "lease"):
+            byte_bound = bound == "bytes"
             old = lab.leader(0)
             others = lab.nodes - {old}
+            # Healing the prior partition can elect a third node. A read alone
+            # does not prepare that node's write-admission epoch. Establish it
+            # with a durable quorum write BEFORE deliberately removing quorum.
+            assert append(old, f"prepared-{bound}", False)["status"] == 200
             before = read(old)
             tail = before["headers"]["stream-next-offset"]
             lab.faults(old, others)
             for node in others: lab.faults(node, [old])
-            emit(dict(op="fault", kind="partition", isolated=old, byte_bound=byte_bound, start=time.monotonic_ns()))
+            emit(dict(op="fault", kind="partition", isolated=old, bound=bound, start=time.monotonic_ns()))
             ready = threading.Event()
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                 watcher = pool.submit(live, old, tail, ready)
                 assert ready.wait(5)
                 # Two strong requests must not hold the dispatch window on
                 # quorum and starve following local-fsync appends.
-                strong = [] if byte_bound else [pool.submit(append, old, f"strong-unknown-{i}", False) for i in (0, 1)]
+                strong = [pool.submit(append, old, f"strong-unknown-{i}", False) for i in (0, 1)] if bound == "count" else []
                 round_accepts = []
                 for i in range(20):
-                    value = f"lost-{int(byte_bound)}-{i}" + ("X"*(512*1024) if byte_bound else "")
+                    value = f"lost-{bound}-{i}" + ("X"*(512*1024) if byte_bound else "")
                     attempt = append(old, value)
                     if attempt["status"] == 429: break
                     assert attempt["status"] == 202, attempt["status"]
                     round_accepts.append(attempt)
+                    if bound == "lease": break  # Leave capacity to isolate the lease gate.
                 else: raise AssertionError("admission failed to bound backlog")
                 assert round_accepts
                 state = receipt(old, round_accepts[-1], "pending", 100)
                 occupancy = state["result"]["progress"]
-                assert occupancy["pending_commands"] < 16 if byte_bound else occupancy["pending_commands"] == 16
-                assert append(old, f"still-full-{byte_bound}" + ("X"*(512*1024) if byte_bound else ""))["status"] == 429
+                if bound == "lease":
+                    assert 0 < occupancy["pending_commands"] < 16
+                    start_wait = time.monotonic_ns()
+                    time.sleep(1.1)  # Greater than the configured 700 ms lease.
+                    prior = lab.admin(old, 0, "metrics")
+                    assert prior["current_leader"] == old, "exercise expired lease while still leader"
+                    wal = lab.data / str(old) / "0/wal"
+                    wal_before = {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in wal.glob("*.wal")}
+                    denied = append(old, "lease-expired-no-frame")
+                    assert denied["status"] == 503 and "stream-receipt" not in denied["headers"]
+                    after = lab.admin(old, 0, "metrics")
+                    retained = receipt(old, round_accepts[-1], "pending")["result"]["progress"]
+                    wal_after = {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in wal.glob("*.wal")}
+                    emit(dict(op="lease", node=old, waited_ns=denied["start"]-start_wait,
+                        before=prior, after=after, occupancy_before=occupancy, occupancy_after=retained,
+                        wal_before=wal_before, wal_after=wal_after, denied=denied))
+                    assert prior["last_log_index"] == after["last_log_index"] and wal_before == wal_after
+                    assert retained["pending_commands"] == occupancy["pending_commands"]
+                    assert retained["pending_bytes"] == occupancy["pending_bytes"]
+                else:
+                    assert occupancy["pending_commands"] < 16 if byte_bound else occupancy["pending_commands"] == 16
+                    assert append(old, f"still-full-{bound}" + ("X"*(512*1024) if byte_bound else ""))["status"] == 429
                 for future in strong: assert future.result()["status"] in (0, 503)
                 watcher.result()
             lost.extend(round_accepts)
@@ -182,9 +208,9 @@ def run(output):
             assert lab.request(old,"GET",paths[0]+f"?offset={tail}&live=long-poll",headers={"stream-consistency":"prefix"})[0] == 204
             assert read(old,mode="session",session=round_accepts[0]["headers"]["stream-receipt"])["status"] == 400
             new = lab.wait(lambda: lab.leader(0, others), "majority leader")
-            for i in range(24): assert append(new, f"replacement-{int(byte_bound)}-{i}", False)["status"] == 200
+            for i in range(24): assert append(new, f"replacement-{bound}-{i}", False)["status"] == 200
             for event in round_accepts: receipt(new, event, "invalidated")
-            if not byte_bound:
+            if bound == "count":
                 # Stop peers so restarting the accepting node cannot immediately
                 # learn the replacement. Its recovered local WAL must stay hidden.
                 for node in others: pause(node, True)
@@ -268,12 +294,16 @@ def run(output):
         read(lab.leader(0))
         verdict = check(history)
         mutations = []
-        for mode in ("202 session", "pending is committed", "SSE speculative publication"):
+        for mode in ("202 session", "pending is committed", "SSE speculative publication", "expired lease assigns", "expiry frees debt"):
             bad = copy.deepcopy(history)
             if mode == "202 session":
                 next(e for e in bad if e["op"] == "append" and e["status"] == 202)["headers"]["stream-session"] = "wrong:0:1"
             elif mode == "pending is committed":
                 next(e for e in bad if e["op"] == "receipt" and e["result"]["state"] == "pending")["result"]["state"] = "committed"
+            elif mode == "expired lease assigns":
+                next(e for e in bad if e["op"] == "lease")["after"]["last_log_index"] += 1
+            elif mode == "expiry frees debt":
+                next(e for e in bad if e["op"] == "lease")["occupancy_after"]["pending_commands"] = 0
             else: next(e for e in bad if e["op"] == "live")["wire"] += "event:data\ndata:speculative\n\n"
             try: check(bad)
             except AssertionError: mutations.append(mode)

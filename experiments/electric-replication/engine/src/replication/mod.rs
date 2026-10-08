@@ -13,9 +13,10 @@ mod timing;
 
 use crate::api::{Body, Method, Req, Resp};
 use crate::store::Store;
-use openraft::{
-    BasicNode, EntryPayload, LogId, SnapshotMeta, StorageError, StorageIOError, StoredMembership,
-};
+use openraft::{BasicNode, EntryPayload};
+use openraft::async_runtime::WatchReceiver;
+use openraft::type_config::alias;
+use openraft_legacy::network_v1::ChunkedSnapshotReceiver;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -26,9 +27,15 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
-openraft::declare_raft_types!(pub Types: D = batch::Batch, R = Vec<Reply>, SnapshotData = tokio::fs::File);
-type Entry = openraft::Entry<Types>;
-type Raft = openraft::Raft<Types>;
+openraft::declare_raft_types!(pub Types: D = batch::Batch, R = Vec<Reply>);
+type Entry = alias::EntryOf<Types>;
+type LogId = alias::LogIdOf<Types>;
+type CommittedLeaderId = alias::CommittedLeaderIdOf<Types>;
+type Vote = alias::VoteOf<Types>;
+type SnapshotMeta = alias::SnapshotMetaOf<Types>;
+type Snapshot = alias::SnapshotOf<Types, tokio::fs::File>;
+type StoredMembership = alias::StoredMembershipOf<Types>;
+type Raft = openraft::Raft<Types, Arc<machine::Machine>>;
 pub static CLUSTER: OnceLock<Cluster> = OnceLock::new();
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -210,7 +217,7 @@ impl Group {
     async fn submit(&self, command: Command) -> Result<batch::Outcome, u16> {
         {
             let receiver = self.raft.metrics();
-            let metrics = receiver.borrow();
+            let metrics = receiver.borrow_watched();
             if metrics.current_leader != Some(metrics.id) { return Err(503); }
         }
         let permit = self.slots.clone().try_acquire_owned().map_err(|_| 429u16)?;
@@ -240,14 +247,14 @@ pub struct Cluster {
     _lock: std::fs::File,
 }
 
-fn storage_error(error: io::Error) -> StorageError<u64> {
+fn storage_error(error: io::Error) -> io::Error {
     // Fail-stop avoids continuing reads against a partially materialized
     // committed command. No error is converted into a successful fsync retry.
     eprintln!("FATAL replication storage: {error}");
     if CLUSTER.get().is_some() {
         std::process::abort();
     }
-    StorageIOError::write_logs(&error).into()
+    error
 }
 
 fn response(status: u16, text: impl Into<String>) -> Resp {
@@ -301,7 +308,7 @@ impl Cluster {
 
     fn unavailable(&self, group: usize, message: &str) -> Resp {
         let mut resp = response(503, message);
-        let metrics = self.groups[group].raft.metrics().borrow().clone();
+        let metrics = self.groups[group].raft.metrics().borrow_watched().clone();
         if let Some(leader) = metrics
             .current_leader
             .and_then(|id| metrics.membership_config.membership().get_node(&id))
@@ -316,7 +323,10 @@ impl Cluster {
         if req.path == "/health" {
             return response(200, "experimental electric replica");
         }
-        if req.path.starts_with("/_raft/") || req.path.starts_with("/_admin/") {
+        if req.path.starts_with("/_raft/") {
+            return response(409, "incompatible consensus protocol; this node requires identity 8");
+        }
+        if req.path.starts_with("/_raft8/") || req.path.starts_with("/_admin/") {
             return match tokio::time::timeout(Duration::from_secs(10), self.internal(req)).await {
                 Ok(resp) => resp,
                 Err(_) => response(503, "admin/RPC timeout: outcome unknown"),
@@ -345,7 +355,7 @@ impl Cluster {
                 }
                 _ => return response(400, "expected quorum-fsync, or local-fsync for POST append only"),
             }
-            if g.raft.metrics().borrow().current_leader != Some(self.config.node) {
+            if g.raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
                 return self.unavailable(group, "not leader; mutation was not forwarded");
             }
             if req.method == Method::Put
@@ -523,10 +533,10 @@ impl Cluster {
             };
         }
         match (parts[1], parts[3]) {
-            ("_raft", "append") => rpc(&raft.append_entries(decode!()).await),
-            ("_raft", "vote") => rpc(&raft.vote(decode!()).await),
-            ("_raft", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
-            ("_admin", "metrics") => json(&raft.metrics().borrow().clone()),
+            ("_raft8", "append") => rpc(&raft.append_entries(decode!()).await),
+            ("_raft8", "vote") => rpc(&raft.vote(decode!()).await),
+            ("_raft8", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
+            ("_admin", "metrics") => json(&raft.metrics().borrow_watched().clone()),
             ("_admin", "keys") => self.public_group_keys(parts[2].parse().unwrap()).await,
             ("_admin", "fork") => self.fork_control(parts[2].parse().unwrap(), req).await,
             ("_admin", "fork-state") if self.config.fault_testing => {
@@ -652,7 +662,7 @@ pub fn run() {
             "data directory already owned"
         );
         let identity = serde_json::to_vec(&(
-            7u32,
+            8u32, // Stock 0.10 APIs/wire semantics; no implicit 0.9 data migration.
             &config.cluster,
             config.node,
             config.partitions,

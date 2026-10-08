@@ -1,16 +1,17 @@
 use super::*;
 use crate::wal::codec::RecordKind;
 use crate::wal::shard::{CommitterHandle, RecordLocation, Shard};
-use openraft::storage::{LogFlushed, RaftLogStorage};
-use openraft::{LogState, RaftLogReader, Vote};
+use futures_util::{stream, Stream, StreamExt};
+use openraft::storage::{IOFlushed, RaftLogStorage};
+use openraft::{LogState, RaftLogReader};
 use sha2::{Digest, Sha256};
 use std::io::Write;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Mutex;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SnapshotRef {
-    pub meta: SnapshotMeta<u64, BasicNode>,
+    pub meta: SnapshotMeta,
     pub file: String,
     pub sha256: String,
 }
@@ -18,19 +19,19 @@ pub struct SnapshotRef {
 #[derive(Debug, Serialize, Deserialize)]
 enum Event {
     Entry(Entry),
-    Vote(Vote<u64>),
-    Commit(Option<LogId<u64>>),
-    Truncate(LogId<u64>),
-    Purge(LogId<u64>),
+    Vote(Vote),
+    Commit(Option<LogId>),
+    Truncate(LogId),
+    Purge(LogId),
     Snapshot(SnapshotRef),
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Index {
-    entries: BTreeMap<u64, (LogId<u64>, RecordLocation)>,
-    pub vote: Option<Vote<u64>>,
-    pub committed: Option<LogId<u64>>,
-    pub purged: Option<LogId<u64>>,
+    entries: BTreeMap<u64, (LogId, RecordLocation)>,
+    pub vote: Option<Vote>,
+    pub committed: Option<LogId>,
+    pub purged: Option<LogId>,
     pub snapshot: Option<SnapshotRef>,
     last_record: Option<RecordLocation>,
 }
@@ -192,11 +193,11 @@ impl Journal {
         Ok(())
     }
 
-    pub fn id_at(&self, index: u64) -> Option<LogId<u64>> {
+    pub fn id_at(&self, index: u64) -> Option<LogId> {
         self.index.lock().unwrap().entries.get(&index).map(|(id, _)| *id)
     }
 
-    pub fn uncommitted(&self) -> Vec<LogId<u64>> {
+    pub fn uncommitted(&self) -> Vec<LogId> {
         let index = self.index.lock().unwrap();
         let from = index.committed.map_or(0, |id| id.index + 1);
         index.entries.range(from..).map(|(_, (id, _))| *id).collect()
@@ -205,7 +206,7 @@ impl Journal {
     /// Called only by the serialized apply worker before native publication.
     /// Private startup replay can cover this batch with an already durable
     /// marker; never regress it when replaying in smaller chunks.
-    pub async fn cover_apply(&self, id: LogId<u64>) -> io::Result<()> {
+    pub async fn cover_apply(&self, id: LogId) -> io::Result<()> {
         let covered = self.index.lock().unwrap().committed.is_some_and(|old| old >= id);
         if !covered {
             self.persist(Event::Commit(Some(id))).await?;
@@ -234,19 +235,51 @@ impl RaftLogReader<Types> for Arc<Journal> {
     async fn try_get_log_entries<R: RangeBounds<u64> + Clone + std::fmt::Debug + Send>(
         &mut self,
         range: R,
-    ) -> Result<Vec<Entry>, StorageError<u64>> {
+    ) -> io::Result<Vec<Entry>> {
         let index = self.index.lock().unwrap();
         index.entries
             .range(range)
             .map(|(_, (_, p))| self.read(*p).map_err(storage_error))
             .collect()
     }
+
+    async fn read_vote(&mut self) -> io::Result<Option<Vote>> {
+        Ok(self.index.lock().unwrap().vote)
+    }
+
+    async fn limited_get_log_entries(&mut self, start: u64, end: u64) -> io::Result<Vec<Entry>> {
+        self.try_get_log_entries(start..end.min(start.saturating_add(64))).await
+    }
+
+    async fn entries_stream<R>(&mut self, range: R) -> impl Stream<Item = io::Result<Entry>> + Send
+    where R: RangeBounds<u64> + Clone + std::fmt::Debug + Send {
+        // The SM worker uses this for committed replay. It cannot be purged
+        // ahead of apply: a covering durable snapshot is required first. Capture
+        // the upper bound once; concurrent appends must not extend this stream.
+        let bounds = {
+            let index = self.index.lock().unwrap();
+            let mut entries = index.entries.range(range);
+            entries.next().map(|(first, _)| (*first,
+                entries.next_back().map_or(*first, |(last, _)| *last) + 1))
+        };
+        stream::unfold((self.clone(), bounds), |(mut reader, bounds)| async move {
+            let (start, end) = bounds?;
+            let next = start.saturating_add(64).min(end);
+            let entries = match reader.try_get_log_entries(start..next).await {
+                Ok(entries) if entries.len() as u64 == next-start => entries.into_iter().map(Ok).collect(),
+                Ok(_) => vec![Err(storage_error(io::Error::other("committed stream log gap")))],
+                Err(error) => vec![Err(error)],
+            };
+            let more = (next < end).then_some((next, end));
+            Some((stream::iter(entries), (reader, more)))
+        }).flatten()
+    }
 }
 
 impl RaftLogStorage<Types> for Arc<Journal> {
     type LogReader = Self;
 
-    async fn get_log_state(&mut self) -> Result<LogState<Types>, StorageError<u64>> {
+    async fn get_log_state(&mut self) -> io::Result<LogState<Types>> {
         let index = self.index.lock().unwrap();
         Ok(LogState {
             last_purged_log_id: index.purged,
@@ -260,10 +293,7 @@ impl RaftLogStorage<Types> for Arc<Journal> {
     async fn get_log_reader(&mut self) -> Self {
         self.clone()
     }
-    async fn read_vote(&mut self) -> Result<Option<Vote<u64>>, StorageError<u64>> {
-        Ok(self.index.lock().unwrap().vote)
-    }
-    async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<(), StorageError<u64>> {
+    async fn save_vote(&mut self, vote: &Vote) -> io::Result<()> {
         self.persist(Event::Vote(*vote))
             .await
             .map_err(storage_error)
@@ -273,8 +303,8 @@ impl RaftLogStorage<Types> for Arc<Journal> {
     async fn append<I>(
         &mut self,
         entries: I,
-        callback: LogFlushed<Types>,
-    ) -> Result<(), StorageError<u64>>
+        callback: IOFlushed<Types>,
+    ) -> io::Result<()>
     where
         I: IntoIterator<Item = Entry> + Send,
         I::IntoIter: Send,
@@ -300,17 +330,25 @@ impl RaftLogStorage<Types> for Arc<Journal> {
             for (id, durable) in accepted {
                 if let Some(send) = durable.lock().unwrap().take() { let _ = send.send(id); }
             }
-            callback.log_io_completed(Ok(()));
+            callback.io_completed(Ok(()));
             journal.changed.notify_waiters();
         });
         Ok(())
     }
-    async fn truncate(&mut self, id: LogId<u64>) -> Result<(), StorageError<u64>> {
-        self.persist(Event::Truncate(id))
-            .await
-            .map_err(storage_error)
+    async fn truncate_after(&mut self, last: Option<LogId>) -> io::Result<()> {
+        // The on-disk event is inclusive; the 0.10 API keeps `last` itself.
+        // None removes the complete retained suffix, not the purged prefix.
+        let first = {
+            let index = self.index.lock().unwrap();
+            index.entries.range((last.map_or(Bound::Unbounded, |id| Bound::Excluded(id.index)), Bound::Unbounded))
+                .next().map(|(_, (id, _))| *id)
+        };
+        if let Some(id) = first {
+            self.persist(Event::Truncate(id)).await.map_err(storage_error)?;
+        }
+        Ok(())
     }
-    async fn purge(&mut self, id: LogId<u64>) -> Result<(), StorageError<u64>> {
+    async fn purge(&mut self, id: LogId) -> io::Result<()> {
         // OpenRaft 0.9.25 dispatches installation to its separate SM worker,
         // then invokes purge without waiting for that worker. This barrier is
         // essential on a fresh learner: never persist a purge before the
@@ -343,6 +381,7 @@ impl RaftLogStorage<Types> for Arc<Journal> {
 mod tests {
     use super::*;
     use openraft::{storage::RaftStateMachine, RaftSnapshotBuilder};
+    use openraft::vote::RaftLeaderId;
     use proptest::prelude::*;
 
     async fn issue(
@@ -369,7 +408,7 @@ mod tests {
             .map(|id| id.index + 1)
             .unwrap_or(0);
         let entry = Entry {
-            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+            log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
             payload: EntryPayload::Normal(commands.into()),
         };
         machine
@@ -377,7 +416,7 @@ mod tests {
             .persist(Event::Entry(entry.clone()))
             .await
             .unwrap();
-        machine.apply([entry]).await.unwrap().pop().unwrap()
+        machine.apply_committed([entry]).await.unwrap().pop().unwrap()
     }
 
     async fn bytes(machine: &Arc<machine::Machine>, path: &str) -> (u16, Vec<u8>) {
@@ -465,6 +504,59 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
         #[test]
+        fn streamed_apply_error_preserves_only_complete_durable_cohorts(
+            sizes in prop::collection::vec(1usize..97, 130..195), failure in 0usize..195,
+        ) {
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut machine,"PUT","/streamed",1000,vec![],vec![241]).await.status,201);
+                let mut entries = Vec::new();
+                let mut expected = vec![241];
+                let mut prefix_lengths = vec![1];
+                for (i, size) in sizes.iter().enumerate() {
+                    let data = vec![(i%239) as u8; *size];
+                    expected.extend_from_slice(&data);
+                    prefix_lengths.push(expected.len());
+                    let entry = Entry {log_id:LogId::new(CommittedLeaderId::new(1,1),i as u64+1),
+                        payload:EntryPayload::Normal(vec![Command {method:"POST".into(),path:"/streamed".into(),
+                            headers:vec![("content-type".into(),"application/octet-stream".into())],body:data,time:1001}].into())};
+                    machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
+                    entries.push(entry);
+                }
+                let failure = failure % sizes.len();
+                let stream = stream::iter(entries.clone().into_iter().enumerate().map(|(i,e)| {
+                    if i==failure {Err(io::Error::other("injected apply-stream read failure"))} else {Ok((e,None))}
+                }));
+                assert!(machine.apply(stream).await.is_err());
+                let published = failure/64*64;
+                assert_eq!(machine.view.read().await.applied.unwrap().index,published as u64);
+                assert_eq!(bytes(&machine,"/streamed").await,(200,expected[..prefix_lengths[published]].to_vec()));
+                machine = reopen(machine,false).await;
+                assert_eq!(bytes(&machine,"/streamed").await,(200,expected[..prefix_lengths[published]].to_vec()));
+                let mut reader = machine.journal.clone();
+                let limited = reader.limited_get_log_entries(1,sizes.len() as u64+1).await.unwrap();
+                assert_eq!(limited.len(),64);
+                assert_eq!(limited.first().unwrap().log_id.index,1);
+                assert_eq!(limited.last().unwrap().log_id.index,64);
+                let stream = reader.entries_stream(published as u64+1..).await;
+                // A later append must not extend the captured replay interval.
+                machine.journal.persist(Event::Entry(Entry {
+                    log_id:LogId::new(CommittedLeaderId::new(1,1),sizes.len() as u64+1),payload:EntryPayload::Blank,
+                })).await.unwrap();
+                machine.apply(Box::pin(stream.map(|e|e.map(|entry|(entry,None))))).await.unwrap();
+                assert_eq!(machine.view.read().await.applied.unwrap().index,sizes.len() as u64);
+                assert_eq!(bytes(&machine,"/streamed").await,(200,expected.clone()));
+                drop(reader);
+                machine = reopen(machine,true).await;
+                assert_eq!(bytes(&machine,"/streamed").await,(200,expected));
+                assert_eq!(machine.journal.uncommitted().len(),1);
+            });
+        }
+
+        #[test]
         fn async_mixed_results_snapshot_replay_and_shorter_replacement(
             sizes in prop::collection::vec(1usize..300,2..10), snapshot in any::<bool>(),
             orphan_count in 2u64..9,
@@ -475,7 +567,7 @@ mod tests {
                 let mut machine = machine::Machine::open(dir.path().join("state"),
                     Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
                 assert_eq!(issue(&mut machine,"PUT","/async",1000,vec![],vec![3,251]).await.status,201);
-                let id = |term,index|LogId::new(openraft::CommittedLeaderId::new(term,1),index);
+                let id = |term,index|LogId::new(CommittedLeaderId::new(term,1),index);
                 let mut commands = Vec::new();
                 let mut expected = vec![3,251];
                 for (i,size) in sizes.iter().enumerate() {
@@ -529,7 +621,7 @@ mod tests {
                     assert_eq!(view.receipts.lookup(position,view.applied,machine.journal.id_at(2)).0,"unknown",
                         "an uncommitted replacement cannot prove invalidation");
                 }
-                machine.apply([replacement]).await.unwrap();
+                machine.apply_committed([replacement]).await.unwrap();
                 machine=reopen(machine,snapshot).await;
                 let view=machine.view.read().await;
                 assert_eq!(view.receipts.lookup(position,view.applied,machine.journal.id_at(2)).0,"invalidated");
@@ -566,14 +658,14 @@ mod tests {
                     commands.push(command(i,vec![0xDD;7])); // Duplicate must not append this body.
                     commands.push(command(i+2,vec![0xEE;13])); // Gap must not reserve/consume sequence.
                 }
-                let id=|index|LogId::new(openraft::CommittedLeaderId::new(1,1),index);
+                let id=|index|LogId::new(CommittedLeaderId::new(1,1),index);
                 let entry=Entry {log_id:id(1),payload:EntryPayload::Normal(commands.into())};
                 machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
                 assert_eq!(bytes(&machine,"/batched").await,(200,vec![1,255]));
                 machine.journal.shard.fail_next_write();
-                assert!(machine.apply([entry.clone()]).await.is_err());
+                assert!(machine.apply_committed([entry.clone()]).await.is_err());
                 assert_eq!(bytes(&machine,"/batched").await,(200,vec![1,255]));
-                let replies=machine.apply([entry]).await.unwrap().pop().unwrap();
+                let replies=machine.apply_committed([entry]).await.unwrap().pop().unwrap();
                 assert_eq!(replies.len(),3*sizes.len());
                 for (i,chunk) in replies.chunks_exact(3).enumerate() {
                     assert_eq!(chunk.iter().map(|r|r.status).collect::<Vec<_>>(),vec![200,204,409]);
@@ -645,7 +737,7 @@ mod tests {
                 let snapshot_file = state.join(&machine.journal.index.lock().unwrap().snapshot.as_ref().unwrap().file);
                 let snapshot_bytes = std::fs::read(&snapshot_file).unwrap();
                 let retained_from = count-3;
-                let id = |index| LogId::new(openraft::CommittedLeaderId::new(1,1),index);
+                let id = |index| LogId::new(CommittedLeaderId::new(1,1),index);
                 let vote = Vote::new(7,2);
                 machine.journal.persist(Event::Vote(vote)).await.unwrap();
                 // Persist but DO NOT commit this suffix. Recovery must not make
@@ -699,7 +791,7 @@ mod tests {
                 }
                 machine = machine::Machine::open(state.clone(),journal.clone()).await.unwrap();
                 assert_eq!(bytes(&machine,"/compact").await,(200,expected.clone()));
-                journal.truncate(id(count+1)).await.unwrap();
+                journal.truncate_after(Some(id(count))).await.unwrap();
                 assert_eq!(issue(&mut machine,"POST","/compact",1003,
                     vec![("content-type","application/octet-stream".into())],b"replacement".to_vec()).await.status,204);
                 expected.extend_from_slice(b"replacement");
@@ -743,7 +835,7 @@ mod tests {
                         EntryPayload::Normal(vec![Command {method:"POST".into(),path:"/batch".into(),
                             headers:vec![("content-type".into(),"application/octet-stream".into())],body:data,time:1001}].into())
                     };
-                    let entry = Entry {log_id:LogId::new(openraft::CommittedLeaderId::new(1,1),index as u64),payload};
+                    let entry = Entry {log_id:LogId::new(CommittedLeaderId::new(1,1),index as u64),payload};
                     machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
                     entries.push(entry);
                 }
@@ -756,12 +848,12 @@ mod tests {
                 // The actual native WAL stage fails. If the barrier moves after
                 // handlers, bytes/clock/wakes would already have been published.
                 machine.journal.shard.fail_next_write();
-                assert!(machine.apply(entries.clone()).await.is_err());
+                assert!(machine.apply(stream::iter(entries.clone().into_iter().map(|e| Ok((e,None))))).await.is_err());
                 assert_eq!(bytes(&machine,"/batch").await,(200,b"base".to_vec()));
                 assert_eq!(machine.view.read().await.applied,original);
                 let split = 1 + split_seed % count;
                 for batch in [&entries[..split], &entries[split..]] {
-                    assert_eq!(machine.apply(batch.to_vec()).await.unwrap().len(),batch.len());
+                    assert_eq!(machine.apply_committed(batch.to_vec()).await.unwrap().len(),batch.len());
                 }
                 assert_eq!(machine.journal.index.lock().unwrap().committed,Some(last));
                 assert_eq!(bytes(&machine,"/batch").await,(200,expected.clone()));
@@ -1067,17 +1159,21 @@ mod tests {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let dir = tempfile::tempdir().unwrap();
-                let keep = split % sizes.len();
+                let keep = split % (sizes.len()+1);
                 let make = |i, n, term| Entry {
-                    log_id: LogId::new(openraft::CommittedLeaderId::new(term, 1), i),
+                    log_id: LogId::new(CommittedLeaderId::new(term, 1), i),
                     payload: EntryPayload::Normal(vec![Command { method: "POST".into(), path: "/p".into(),
                         headers: vec![], body: vec![i as u8 + term as u8; n], time: 0 }].into()),
                 };
-                let journal = Journal::open(dir.path().into(), 1024).unwrap();
+                let mut journal = Journal::open(dir.path().into(), 1024).unwrap();
                 for (i, n) in sizes.iter().enumerate() {
                     journal.persist(Event::Entry(make(i as u64, *n, 1))).await.unwrap();
                 }
-                journal.persist(Event::Truncate(LogId::new(openraft::CommittedLeaderId::new(1, 1), keep as u64))).await.unwrap();
+                let last = keep.checked_sub(1).map(|i| LogId::new(CommittedLeaderId::new(1,1),i as u64));
+                journal.persist(Event::Commit(last)).await.unwrap();
+                journal.truncate_after(last).await.unwrap();
+                assert_eq!(journal.try_get_log_entries(..).await.unwrap().len(),keep);
+                assert_eq!(journal.index.lock().unwrap().committed,last,"truncation preserves committed boundary");
                 journal.persist(Event::Entry(make(keep as u64, 31, 2))).await.unwrap();
                 drop(journal);
                 for _ in 0..2 {

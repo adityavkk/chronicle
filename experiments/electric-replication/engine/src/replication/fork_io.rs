@@ -195,7 +195,7 @@ impl Cluster {
         // cancel a grant or infer abort from a failed connection.
         let finish = async {
             loop {
-                if self.groups[group].raft.metrics().borrow().current_leader
+                if self.groups[group].raft.metrics().borrow_watched().current_leader
                     != Some(self.config.node)
                 {
                     return None;
@@ -342,7 +342,7 @@ impl Cluster {
         let mut cursor = String::new();
         loop {
             tokio::time::sleep(Duration::from_millis(150)).await;
-            if self.groups[group].raft.metrics().borrow().current_leader != Some(self.config.node) {
+            if self.groups[group].raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
                 continue;
             }
             let batch: Vec<_> = {
