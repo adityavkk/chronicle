@@ -16,6 +16,22 @@ EXPERIMENT = ROOT / "experiments/electric-replication"
 BINARY = EXPERIMENT / "engine/target/release/durable-streams-server"
 
 
+def matching_pids(arguments):
+    """Find our exact argv prefix; unrelated processes can exit during /proc reads."""
+    expected = [arg.encode() for arg in arguments]
+    matches = []
+    for process in Path("/proc").iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            args = (process / "cmdline").read_bytes().split(b"\0")
+            if args[:len(expected)] == expected:
+                matches.append(int(process.name))
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return matches
+
+
 def source_hashes():
     paths = [EXPERIMENT / name for name in (
         "engine/Cargo.toml", "engine/Cargo.lock", "vendor/openraft/Cargo.toml",
@@ -60,15 +76,7 @@ class Lab:
                        check=True, stdout=subprocess.DEVNULL)
         self.nodes.add(node)
         self.wait(lambda: self.request(node, "GET", "/health")[0] == 200, "start node")
-        matches = []
-        for process in Path("/proc").iterdir():
-            if process.name.isdecimal():
-                try:
-                    args = (process / "cmdline").read_bytes().split(b"\0")
-                    if args[:3] == [str(self.binary).encode(), b"--cluster-config", str(path).encode()]:
-                        matches.append(int(process.name))
-                except (FileNotFoundError, PermissionError):
-                    pass
+        matches = matching_pids([str(self.binary), "--cluster-config", str(path)])
         assert len(matches) == 1, matches
         (self.output / f"node-{node}.pid").write_text(str(matches[0])+"\n")
 

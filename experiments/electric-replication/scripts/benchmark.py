@@ -22,7 +22,7 @@ import threading
 import time
 import traceback
 
-from lab import Lab, BINARY, EXPERIMENT, ROOT, source_hashes
+from lab import Lab, BINARY, EXPERIMENT, ROOT, matching_pids, source_hashes
 
 CLIENT = ROOT / ".tmp/electric-tools/bench-target/release/ds-bench"
 NATIVE = ROOT / ".tmp/electric-tools/upstream-target/release/durable-streams-server"
@@ -222,12 +222,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                             "--port", str(lab.port+1)], check=True, stdout=subprocess.DEVNULL)
             lab.nodes.add(1)
             lab.wait(lambda: lab.request(1,"GET","/health")[0] == 200, "native ready")
-            for proc in Path("/proc").iterdir():
-                try:
-                    if proc.name.isdecimal() and (proc / "cmdline").read_bytes().split(b"\0")[0] == str(NATIVE).encode():
-                        node_pids.append(int(proc.name))
-                except FileNotFoundError:
-                    pass
+            node_pids = matching_pids([str(NATIVE)])
             assert len(node_pids) == 1
         else:
             for node in range(1,replicas+1):
@@ -257,7 +252,9 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             args = ["multi-stream", "--streams", str(streams), "--connections", str(concurrency), "--batch", "1",
                     "--rate-per-stream", "0", "--payload-bytes", "256", "--setup-concurrency", "32",
                     "--warmup-secs", str(write_warmup_secs), "--settle-secs", "1", "--duration-secs", str(duration)]
-        args += ["--request-timeout-secs", "30"]
+        # reqwest's timeout spans the entire SSE body, starting before the
+        # writer barrier. It must outlive the drive window plus setup/drain.
+        args += ["--request-timeout-secs", str(duration + 30 if workload[0] == "fanout" else 30)]
         if profile and not heap_profile:
             if profiler == "perf":
                 command = ["perf", "record", "-F", "99", "-e", "cpu-clock:u", "--call-graph", "dwarf,16384",

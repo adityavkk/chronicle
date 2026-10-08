@@ -2,13 +2,38 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from benchmark import cell, committed_target, run, workload_streams
+from lab import matching_pids
+
+
+class ProcessDiscovery(unittest.TestCase):
+    def test_exited_unrelated_process_does_not_hide_identity_mismatches_or_io_failure(self):
+        expected = ["/fixture/server", "--cluster-config", "/fixture/node-3.json"]
+        prefix = b"\0".join(arg.encode() for arg in expected)
+        values = [FileNotFoundError(), ProcessLookupError(), PermissionError(),
+                  prefix+b"\0", prefix+b".other\0", b"/fixture/server-other\0"]
+        processes = []
+        for number, value in enumerate(values, 100):
+            process = MagicMock()
+            process.name = str(number)
+            read = process.__truediv__.return_value.read_bytes
+            if isinstance(value, Exception):
+                read.side_effect = value
+            else:
+                read.return_value = value
+            processes.append(process)
+        with patch("lab.Path.iterdir", return_value=processes):
+            self.assertEqual(matching_pids(expected), [103])
+        processes[0].__truediv__.return_value.read_bytes.side_effect = OSError("unexpected I/O failure")
+        with patch("lab.Path.iterdir", return_value=processes), self.assertRaisesRegex(OSError, "unexpected I/O"):
+            matching_pids(expected)
 
 
 class WorkloadReconciliation(unittest.TestCase):
@@ -31,6 +56,27 @@ class WorkloadReconciliation(unittest.TestCase):
         for callback in (workload_streams, lambda workload: committed_target(workload, raw)):
             with self.assertRaises(ValueError):
                 callback(("unknown",))
+
+    def test_fanout_http_deadline_outlives_the_whole_drive_window(self):
+        for duration in (17, 61):
+            with self.subTest(duration=duration), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "native"
+                binary.write_bytes(b"fixture-not-executable")
+                output = root / "fanout"
+                with patch("lab.ROOT", root), patch("benchmark.NATIVE", binary), \
+                     patch("benchmark.shutil.disk_usage", return_value=SimpleNamespace(free=9*1024**3)), \
+                     patch("benchmark.subprocess.run"), patch("benchmark.Lab.wait", return_value=True), \
+                     patch("benchmark.matching_pids", return_value=[os.getpid()]), \
+                     patch("benchmark.sample", return_value=dict(process_gaps=[])), \
+                     patch("benchmark.subprocess.Popen", side_effect=RuntimeError("client intercepted")), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    result = cell(output, "native", ("fanout", 100), duration=duration)
+                self.assertEqual(result["verdict"], "FAIL")
+                self.assertIn("client intercepted", result["error"])
+                args = json.loads((output / "client-argv.json").read_text())
+                self.assertEqual(args[args.index("--duration-secs")+1], str(duration))
+                self.assertEqual(args[args.index("--request-timeout-secs")+1], str(duration+30))
 
 
 class DiskPreflight(unittest.TestCase):
