@@ -89,8 +89,8 @@ not a substitute store or a model-only result.
 
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
-| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 141 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
-| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. A longer 90-second/16-connection envelope fails with count-bound and lease-expiry rejects. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 142 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. Pinned snapshots remove count-bound rejects in the longer 90-second/16-connection comparison, but one current async repetition still fails with 16 lease-expiry rejects. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
@@ -105,11 +105,11 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-028` executes **332/332 passing, zero failures/skips/todo**,
-with subscriptions enabled, three processes and two partitions. All 141 Rust
+The candidate's `conformance-029` executes **332/332 passing, zero failures/skips/todo**,
+with subscriptions enabled, three processes and two partitions. All 142 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-017` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-011` checks 310
+conformance exclusions. `storage-fault-019` checks seven real failing/short
+syscalls and retains three unknown HTTP outcomes. `async-fault-012` checks 311
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
@@ -171,6 +171,27 @@ separate traces show 1,024 sidecar fsyncs versus zero. All eight cells survive
 restart with exact bytes/offsets and producer retry state. Generated snapshot-only
 restore and conformance/fault reruns pass. This isolated cost reduction does not
 remove the hot-payload copy pause or qualify sustained async capacity.
+
+The next pinned-cut change releases apply during payload copy/hash/fsync while
+retaining a separate build/install/publication/cleanup lock. TLA+ precedes the
+implementation (865 safety states, 60 liveness states, six negative mutations);
+generated real-file tests restore the original cut despite later appends,
+receipts and unlink/recreation. Same-group delayed-fsync histories improve from
+zero completed operations / six unknowns to 38 completions / zero unknowns, no
+term change and exact restart recovery. `snapshot_cut` records the remaining
+metadata-capture pause. The conformance and fault counts above cover this change;
+sustained performance and memory qualification remain separate gates.
+
+The completed pinned-cut comparison (`snapshot-cut-envelope-001`) retains **17
+PASS / 4 FAIL**, all stable sampled clocks. One member is 8.93–9.48k/s versus
+native 15.84–17.31k/s at 16 connections, a paired 1.71–1.83× gap; all synchronous
+cells pass. Async improves from three failing repetitions (1,723–2,199 rejects)
+to two passing and one failing (16 lease-expired requests). No current async
+cell has a count-bound reject; exact accepted-byte drain passes everywhere.
+Leader apply-lock maxima fall from hundreds of milliseconds to below 11 ms, while
+snapshot copy/fsync continues concurrently. The metadata copy costs memory:
+aggregate async RSS rises from 129–131 to 147–148 MiB. This is a qualified
+scheduling fix, **not** a zero-error 90-second envelope or broad capacity claim.
 
 The first matched stock-0.10 comparison, `openraft010-writes-001`, has three
 30-second repetitions with identical local-fsync contracts, 256-byte payloads and

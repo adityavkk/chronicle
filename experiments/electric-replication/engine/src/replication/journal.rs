@@ -1032,6 +1032,75 @@ mod tests {
         }
 
         #[test]
+        fn pinned_snapshot_cut_excludes_later_appends_recreation_and_receipts(
+            a in prop::collection::vec(any::<u8>(), 1..150),
+            b in prop::collection::vec(any::<u8>(), 1..200),
+            recreate in any::<bool>(), time in 1001u64..1999,
+        ) {
+            use openraft_legacy::network_v1::SnapshotReceiverFactory;
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut source = machine::Machine::open(dir.path().join("s/state"),
+                    Journal::open(dir.path().join("s/wal"),4096).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut source,"PUT","/pinned",time,
+                    vec![("stream-ttl","1".into())],vec![197,1]).await.status,201);
+                assert_eq!(issue(&mut source,"PUT","/replaced",time,vec![],vec![13,248]).await.status,201);
+                let headers = |seq| vec![("content-type","application/octet-stream".into()),
+                    ("producer-id","cut".into()),("producer-epoch","5".into()),("producer-seq",format!("{seq}")),
+                    ("stream-durability","local-fsync".into())];
+                assert_eq!(issue(&mut source,"POST","/pinned",time+10,headers(0),a.clone()).await.status,200);
+                let cut = {
+                    let view = source.view.write().await;
+                    machine::SnapshotCut::capture(&view).unwrap()
+                };
+                let meta = cut.meta.clone();
+                let id = |index|LogId::new(CommittedLeaderId::new(1,1),index);
+                assert_eq!(meta.last_log_id,Some(id(2)));
+                // Copy is deliberately deferred until after committed mutations.
+                // Reopening names, copying to current EOF, or late control-state
+                // capture would all produce a different snapshot here.
+                assert_eq!(issue(&mut source,"POST","/pinned",time+20,headers(1),b.clone()).await.status,200);
+                assert_eq!(issue(&mut source,"DELETE","/replaced",time+20,vec![],vec![]).await.status,204);
+                assert_eq!(issue(&mut source,"PUT","/replaced",time+20,vec![],vec![44;51]).await.status,201);
+                if recreate {
+                    assert_eq!(issue(&mut source,"DELETE","/pinned",time+30,vec![],vec![]).await.status,204);
+                    assert_eq!(issue(&mut source,"PUT","/pinned",time+30,vec![],vec![61;399]).await.status,201);
+                }
+                let archive = source.dir.join("snapshot-pinned-test");
+                cut.write(&archive).unwrap();
+                let mut target = machine::Machine::open(dir.path().join("d/state"),
+                    Journal::open(dir.path().join("d/wal"),4096).unwrap()).await.unwrap();
+                let mut receiving = target.begin_receiving_snapshot().await.unwrap();
+                tokio::io::copy(&mut tokio::fs::File::open(archive).await.unwrap(),&mut receiving).await.unwrap();
+                target.install_snapshot(&meta,receiving).await.unwrap();
+                target.journal.clone().purge(id(2)).await.unwrap();
+                target = reopen(target,false).await;
+                let expected = [vec![197,1],a.clone()].concat();
+                assert_eq!(bytes(&target,"/pinned").await,(200,expected.clone()));
+                assert_eq!(bytes(&target,"/replaced").await,(200,vec![13,248]));
+                {
+                    let view = target.view.read().await;
+                    assert_eq!(clock::millis(view.store.clock.now()),time+10);
+                    let (state,reply) = view.receipts.lookup(receipts::Position {log_id:id(2),ordinal:0},view.applied,None);
+                    assert_eq!(state,"committed");
+                    assert_eq!(reply.unwrap().status,200);
+                    assert_eq!(view.receipts.lookup(receipts::Position {log_id:id(3),ordinal:0},view.applied,None).0,"unknown");
+                }
+                assert_eq!(issue(&mut target,"POST","/pinned",time+25,headers(0),vec![99;91]).await.status,204);
+                assert_eq!(bytes(&target,"/pinned").await,(200,expected));
+                issue(&mut target,"TICK","/pinned",time+1010,vec![],vec![]).await;
+                assert_eq!(bytes(&target,"/pinned").await.0,200);
+                issue(&mut target,"TICK","/pinned",time+1011,vec![],vec![]).await;
+                assert_eq!(bytes(&target,"/pinned").await.0,404);
+                source = reopen(source,false).await;
+                let current = if recreate {vec![61;399]} else {[vec![197,1],a,b].concat()};
+                assert_eq!(bytes(&source,"/pinned").await,(200,current));
+                assert_eq!(bytes(&source,"/replaced").await,(200,vec![44;51]));
+            });
+        }
+
+        #[test]
         fn snapshot_captures_fresh_metadata_without_rewriting_disposable_sidecars(
             chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..40), 2..7),
             time in 1001u64..1999,

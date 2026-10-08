@@ -69,6 +69,7 @@ pub(super) static READ: Timer = Timer::new();
 pub(super) static APPLY_LOCK: Timer = Timer::new();
 pub(super) static APPLY: Timer = Timer::new();
 pub(super) static SNAPSHOT: Timer = Timer::new();
+pub(super) static SNAPSHOT_CUT: Timer = Timer::new();
 pub(super) static RESOLVE: Timer = Timer::new();
 
 // Only fixed call-site labels, never request paths, headers, payloads or errors.
@@ -105,6 +106,7 @@ pub(super) fn spawn(secs: u64) {
                 ("apply_lock", &APPLY_LOCK),
                 ("apply", &APPLY),
                 ("snapshot", &SNAPSHOT),
+                ("snapshot_cut", &SNAPSHOT_CUT),
                 ("resolve", &RESOLVE),
             ] {
                 let stats = timer.0.lock().unwrap().clone();

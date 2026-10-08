@@ -1,0 +1,25 @@
+{
+  "cluster": "conformance-029",
+  "node": 1,
+  "listen": "127.0.0.1:19401",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/conformance-029/1",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": true,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:19401"
+    },
+    "2": {
+      "addr": "127.0.0.1:19402"
+    },
+    "3": {
+      "addr": "127.0.0.1:19403"
+    }
+  },
+  "stats_secs": 0,
+  "pending_commands": 256,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync"
+}

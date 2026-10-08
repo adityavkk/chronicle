@@ -39,11 +39,11 @@ impl Receipt {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct State {
     batches: BTreeMap<u64, Results>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Results {
     log_id: LogId,
     replies: BTreeMap<usize, Reply>,

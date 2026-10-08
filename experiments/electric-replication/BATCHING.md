@@ -811,3 +811,64 @@ Async leaders build nine or ten snapshots with 750–832 ms maxima. Removing
 per-stream sidecar fsyncs cannot by itself eliminate the hot-stream payload copy
 pause; that still holds the exclusive view. Do not label this a sustainable
 zero-error operating point or infer the sidecar optimization fixes these failures.
+
+### Pinned snapshot cuts separate payload copy from apply
+
+`SnapshotCut.tla` was checked before implementation: 865 distinct safety states,
+60 stable-period liveness states and six negative mutations. The full formal
+runner now checks 53 TLC mutations plus the Lean header negative control. The
+first path mutation hit an undefined short-sequence fixture rather than the
+invariant; its transcript remains. The corrected mutation uses a sufficiently
+long recreated file, so the counterexample is wrong bytes, not a model error.
+
+`Machine` now has one snapshot lifecycle lock. Under the view lock it captures
+applied position, membership, clock, control/stream metadata, open inode handles
+and exact file lengths. It then drops the view before bounded payload copy,
+metadata serialization, hashing and fsync. Build/install/reference publication
+and cleanup stay serialized; ordinary apply never takes this lifecycle lock.
+`snapshot_cut` separately times the exclusive capture. One metadata clone and
+one descriptor per file replace the long apply pause; cold tier remains disabled.
+
+The real-file generated test copies only **after** further appends, receipt
+results and unlink/recreation, then installs without the original WAL. It checks
+the old bytes/incarnations, clock, retry/TTL state and receipt cut while the source
+retains its newer state. `snapshot-cut-001` passes 142 Rust tests and unchanged
+`conformance-029` passes **332/332, zero failures/skips/todo**. Strong/fork/
+subscription/storage/reclaim/async histories pass (192 / 747 / 195 / 29 / 20 /
+311 operations), retaining one / three / six unknown subscription/storage/async
+outcomes. Nine webhook signatures and seven storage syscall faults are checked.
+
+`snapshot-progress-005/006` tests the **same** group during a real two-second
+snapshot fsync delay. Before: zero operations complete during the delay, six
+unknown outcomes; after: 38 complete, zero unknowns and no term change. Exact
+prefix/retry checking and restart pass in both; the earlier progress failure is
+not erased. This proves the exercised scheduling boundary, not zero backpressure
+under sustained CPU/disk/network load. The matched longer ds-bench matrix remains
+an independent gate, including capture time, memory and successful commits.
+
+`snapshot-cut-envelope-001` completes all 21 matched 90-second cells (three
+repetitions, 16 connections, zero warmup), with **17 PASS / 4 FAIL** and driver
+exit 1. Sampled clocks are stable. One member measures 8.93–9.48k/s versus native
+15.84–17.31k/s: paired 1.71–1.83× slower. The before binary measures 7.56–8.99k/s;
+one pair slightly regresses, so do not claim a uniform throughput improvement.
+All one-member and synchronous quorum cells pass, with exact all-replica drain.
+
+The causal lock result is clearer: old one-member maximum apply-lock waits are
+514–588 ms, versus 0.113–0.574 ms after the pinned cut. Async leaders previously
+waited 768–891 ms, versus 5.5–10.8 ms afterwards. The remaining exclusive cuts
+are 4.9–11.7 ms on async leaders; complete snapshots still reach 903–1,041 ms.
+Their receipt/control metadata is copied once, not held exclusively during the
+payload copy. Aggregate async peak RSS rises from 129–131 to 147–148 MiB; the
+extra snapshot metadata is a cost, not a free optimization or a leak proof.
+
+All three old async cells fail with 1,723 / 1,945 / 2,199 rejects (the last includes
+17 lease-expiry rejects). The new async cells accept 8.48–8.65k/s and have **zero
+count-bound rejects**, but repeat 3 still rejects **16 lease-expired** attempts.
+Its heartbeat timeouts remain in the log; this is **not** a qualified zero-error
+envelope. No timeout, quorum lease or admission limit was relaxed. Every accepted
+byte drains exactly to all three replicas; first/last sampled committed rates
+are 2.17–2.21 MB/s per replica, on their own observation windows. The leader's
+sampled unapplied-entry maximum is 5–10 and followers' maximum is 40, not an
+instantaneous command/byte backlog bound. One closing-client `/proc` permission
+gap in async repeat 2 is retained. Further profiling must separate disk/executor
+stalls from the now-removed snapshot lock hold.

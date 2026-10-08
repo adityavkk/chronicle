@@ -5,7 +5,7 @@ use openraft::{RaftLogReader, RaftSnapshotBuilder};
 use openraft_legacy::network_v1::SnapshotReceiverFactory;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom, Write};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 pub struct View {
     pub store: Arc<Store>,
@@ -20,6 +20,8 @@ pub struct Machine {
     pub view: RwLock<View>,
     pub journal: Arc<journal::Journal>,
     pub dir: PathBuf,
+    // Lock order: snapshots -> view -> journal. Apply never takes snapshots.
+    snapshots: Mutex<()>,
 }
 
 impl Machine {
@@ -79,6 +81,7 @@ impl Machine {
             }),
             journal,
             dir,
+            snapshots: Mutex::new(()),
         });
         let committed = machine.journal.index.lock().unwrap().committed;
         if let Some(committed) = committed {
@@ -109,8 +112,8 @@ impl Machine {
             && self.journal.id_at(id.index) == Some(*id))
     }
 
-    /// Caller is either booting privately or holds the view write lock after a
-    /// successful durable snapshot reference. Never run alongside a builder.
+    /// Caller is either booting privately or holds snapshots after a successful
+    /// durable reference. Never run alongside another builder or installation.
     fn cleanup_snapshots(&self) -> io::Result<()> {
         let index = self.journal.index.lock().unwrap();
         let current = index.snapshot.as_ref().map(|s| s.file.as_str());
@@ -266,6 +269,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         meta: &SnapshotMeta,
         snapshot: tokio::fs::File,
     ) -> io::Result<()> {
+        let _snapshot = self.snapshots.lock().await;
         snapshot.sync_all().await.map_err(storage_error)?;
         drop(snapshot);
         let mut view = self.view.write().await;
@@ -331,28 +335,18 @@ impl SnapshotReceiverFactory<Types> for Arc<Machine> {
 impl RaftSnapshotBuilder<Types> for Arc<Machine> {
     type SnapshotData = tokio::fs::File;
     async fn build_snapshot(&mut self) -> io::Result<Snapshot> {
-        // Serialize with apply. Payload is copied file->file in bounded buffers,
-        // not collected in an in-memory JSON snapshot. This can stall group
-        // writes for disk time: measure it, do not claim zero-copy snapshots.
+        // Serialize the lifecycle, not apply during payload copy/hash/fsync.
+        // Open descriptors pin incarnations; exact lengths pin their prefixes.
+        let _snapshot = self.snapshots.lock().await;
         let view = self.view.write().await;
         let _probe = timing::SNAPSHOT.start();
-        let meta = SnapshotMeta {
-            last_log_id: view.applied,
-            last_membership: view.membership.clone(),
-        };
+        let cut = tokio::task::block_in_place(|| SnapshotCut::capture(&view)).map_err(storage_error)?;
+        drop(view);
+        let meta = cut.meta.clone();
         let file = format!("snapshot-{}", nonce());
         let target = self.dir.join(&file);
-        // This server always uses a multi-thread Tokio runtime. Do not hold its
-        // worker hostage to copy/hash/fsync; keep the view guard, not the worker.
         let sha256 = tokio::task::block_in_place(|| {
-            pack(
-                &view.store,
-                &view.subscriptions,
-                &view.forks,
-                &view.receipts,
-                &target,
-                &meta,
-            )?;
+            cut.write(&target)?;
             digest_file(&target)
         }).map_err(storage_error)?;
         self.journal
@@ -418,56 +412,77 @@ fn pack_entry(
     Ok(())
 }
 
-fn pack(
-    store: &Store,
-    subscriptions: &subscriptions::State,
-    forks: &forks::State,
-    receipts: &receipts::State,
-    path: &std::path::Path,
-    meta: &SnapshotMeta,
-) -> io::Result<()> {
-    let control = store.data_dir.join("streams/.control");
-    let mut writer = io::BufWriter::new(std::fs::File::create(&control)?);
-    serde_json::to_writer(&mut writer, &(subscriptions, forks, receipts)).map_err(io::Error::other)?;
-    writer.flush()?;
-    drop(writer);
-    let mut streams: Vec<_> = store.streams.iter().map(|s| s.value().clone()).collect();
-    streams.sort_by(|a, b| a.file_path.cmp(&b.file_path));
-    let mut files = vec![store.data_dir.join("streams/.lanes"), control];
-    for stream in &streams {
-        files.push(stream.file_path.clone());
+pub(super) struct SnapshotCut {
+    pub meta: SnapshotMeta,
+    time: u64,
+    files: Vec<(PathBuf, std::fs::File, u64)>,
+    metadata: Vec<(PathBuf, crate::store::Meta)>,
+    subscriptions: subscriptions::State,
+    forks: forks::State,
+    receipts: receipts::State,
+}
+
+impl SnapshotCut {
+    /// Caller holds the exclusive view. No file path or mutable state is
+    /// consulted after this returns. Cold tier/compaction is disabled here.
+    pub fn capture(view: &View) -> io::Result<Self> {
+        let _probe = timing::SNAPSHOT_CUT.start();
+        let mut streams: Vec<_> = view.store.streams.iter().map(|s| s.value().clone()).collect();
+        streams.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+        let mut paths = vec![view.store.data_dir.join("streams/.lanes")];
+        paths.extend(streams.iter().map(|s| s.file_path.clone()));
+        let files = paths.into_iter().map(|path| {
+            // Opening anew gives the copier its own cursor, not the appender's.
+            let file = std::fs::File::open(&path)?;
+            let len = file.metadata()?.len();
+            Ok((path, file, len))
+        }).collect::<io::Result<Vec<_>>>()?;
+        Ok(Self {
+            meta: SnapshotMeta { last_log_id: view.applied, last_membership: view.membership.clone() },
+            time: clock::millis(view.store.clock.now()),
+            files,
+            metadata: streams.iter().map(|s|
+                (crate::store::meta_path(&s.file_path), crate::store::Meta::capture(s))).collect(),
+            subscriptions: view.subscriptions.clone(),
+            forks: view.forks.clone(),
+            receipts: view.receipts.clone(),
+        })
     }
-    // Snapshot only live objects, not sidecars awaiting native asynchronous GC.
-    files.sort();
-    let mut out = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    out.write_all(b"ERSP0005")?;
-    let header = serde_json::to_vec(&(meta, files.len() + streams.len(), clock::millis(store.clock.now())))
-        .map_err(io::Error::other)?;
-    out.write_all(&(header.len() as u64).to_le_bytes())?;
-    out.write_all(&header)?;
-    for path in files {
-        let file = std::fs::File::open(&path)?;
+
+    pub fn write(self, path: &std::path::Path) -> io::Result<()> {
+        // Spool potentially large control state instead of a second JSON-sized
+        // memory copy. The lifecycle lock protects this unreferenced temporary;
+        // recovery cleanup collects leftovers from interrupted copies.
+        let control = path.with_extension("control");
+        let mut writer = io::BufWriter::new(std::fs::File::create(&control)?);
+        serde_json::to_writer(&mut writer, &(self.subscriptions, self.forks, self.receipts))
+            .map_err(io::Error::other)?;
+        writer.flush()?;
+        drop(writer);
+        let mut out = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(path)?;
+        out.write_all(b"ERSP0005")?;
+        let header = serde_json::to_vec(&(self.meta, self.files.len() + self.metadata.len() + 1, self.time))
+            .map_err(io::Error::other)?;
+        out.write_all(&(header.len() as u64).to_le_bytes())?;
+        out.write_all(&header)?;
+        let file = std::fs::File::open(&control)?;
         let len = file.metadata()?.len();
-        pack_entry(&mut out, &path, file, len)?;
+        pack_entry(&mut out, std::path::Path::new(".control"), file, len)?;
+        std::fs::remove_file(control)?;
+        for (path, file, len) in self.files {
+            pack_entry(&mut out, &path, file, len)?;
+        }
+        for (path, meta) in self.metadata {
+            let data = serde_json::to_vec(&meta).map_err(io::Error::other)?;
+            pack_entry(&mut out, &path, data.as_slice(), data.len() as u64)?;
+        }
+        let len = out.stream_position()?;
+        let digest = hash_prefix(&mut out, len)?;
+        out.seek(SeekFrom::End(0))?;
+        out.write_all(&digest)?;
+        out.sync_all()?;
+        crate::store::fsync_parent_dir(path)
     }
-    // The exclusive view fixes metadata and payload at the same applied cut.
-    // Capture CURRENT metadata, not stale sidecars. The final archive fsync
-    // covers it; rewriting/fsyncing disposable hot sidecars adds no durability.
-    // Only one metadata record is encoded in memory at a time.
-    for stream in streams {
-        let data = serde_json::to_vec(&crate::store::Meta::capture(&stream)).map_err(io::Error::other)?;
-        pack_entry(&mut out, &crate::store::meta_path(&stream.file_path), data.as_slice(), data.len() as u64)?;
-    }
-    let len = out.stream_position()?;
-    let digest = hash_prefix(&mut out, len)?;
-    out.seek(SeekFrom::End(0))?;
-    out.write_all(&digest)?;
-    out.sync_all()?;
-    crate::store::fsync_parent_dir(path)
 }
 
 fn unpack(

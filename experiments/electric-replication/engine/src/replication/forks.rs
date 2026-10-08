@@ -37,7 +37,7 @@ pub struct Destination {
     pub released: bool,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct State {
     /// Only pending names. Published native objects own their ordinary names.
     pub reservations: BTreeMap<String, String>,
