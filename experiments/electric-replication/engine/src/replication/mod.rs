@@ -618,6 +618,9 @@ impl Cluster {
 pub fn run() {
     crate::raise_nofile_limit();
     tracing_subscriber::fmt()
+        // Share stderr's lock with native WAL/phase diagnostics. Independent
+        // stdout writes can split a JSON line when the service merges both fds.
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )

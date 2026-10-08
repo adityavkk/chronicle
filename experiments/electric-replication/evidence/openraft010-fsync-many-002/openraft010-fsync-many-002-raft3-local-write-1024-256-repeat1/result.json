@@ -1,0 +1,23 @@
+{
+  "arm": "raft3-local",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": true,
+  "profiler": "fsync",
+  "diagnostics": true,
+  "verdict": "FAIL",
+  "binary_sha256": "4eea5d8cf8c4ceb958ce047dbf02438f248c9474669681b2011f26ef225e6d76",
+  "ack_contract": "local-fsync acceptance, not commitment",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+  "disk_preflight": {
+    "free_bytes": 6141313024,
+    "minimum_free_bytes": 8589934592
+  },
+  "error": "RuntimeError('benchmark requires 8 GiB free before starting a cell; no SUT started')",
+  "diagnostic_tail_captured": false
+}

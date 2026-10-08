@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 34 and seed -213576959671518192 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3329967] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 31 and seed 6192660173660429584 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3025357] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Links.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/TLC.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Links
-Starting... (2026-10-08 16:13:13)
+Starting... (2026-10-08 19:35:36)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 16:13:13.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 19:35:36.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -29,9 +29,21 @@ State 1: <Initial predicate>
 /\ serial = 1
 /\ acked = 0
 
-State 2: <Append line 13, col 11 to line 15, col 89 of module Links>
+State 2: <Capture line 22, col 12 to line 23, col 95 of module Links>
 /\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ packets = {}
+/\ packets = {[inc |-> 1, tail |-> 1, index |-> 1]}
+/\ alive = TRUE
+/\ authorized = 0
+/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ tail = 1
+/\ regressed = FALSE
+/\ inc = 1
+/\ serial = 1
+/\ acked = 0
+
+State 3: <Append line 13, col 11 to line 15, col 89 of module Links>
+/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ packets = {[inc |-> 1, tail |-> 1, index |-> 1]}
 /\ alive = TRUE
 /\ authorized = 0
 /\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
@@ -41,9 +53,9 @@ State 2: <Append line 13, col 11 to line 15, col 89 of module Links>
 /\ serial = 2
 /\ acked = 0
 
-State 3: <Capture line 22, col 12 to line 23, col 95 of module Links>
+State 4: <Capture line 22, col 12 to line 23, col 95 of module Links>
 /\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ packets = {[inc |-> 1, tail |-> 2, index |-> 2]}
+/\ packets = {[inc |-> 1, tail |-> 1, index |-> 1], [inc |-> 1, tail |-> 2, index |-> 2]}
 /\ alive = TRUE
 /\ authorized = 0
 /\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
@@ -53,55 +65,31 @@ State 3: <Capture line 22, col 12 to line 23, col 95 of module Links>
 /\ serial = 2
 /\ acked = 0
 
-State 4: <Delete line 16, col 11 to line 18, col 82 of module Links>
-/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ packets = {[inc |-> 1, tail |-> 2, index |-> 2]}
-/\ alive = FALSE
+State 5: <Next line 39, col 12 to line 39, col 39 of module Links>
+/\ seen = [inc |-> 1, tail |-> 2, index |-> 2]
+/\ packets = {[inc |-> 1, tail |-> 1, index |-> 1], [inc |-> 1, tail |-> 2, index |-> 2]}
+/\ alive = TRUE
 /\ authorized = 0
 /\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ tail = 0
+/\ tail = 2
 /\ regressed = FALSE
 /\ inc = 1
-/\ serial = 3
-/\ acked = 0
-
-State 5: <Capture line 22, col 12 to line 23, col 95 of module Links>
-/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ packets = {[inc |-> 0, tail |-> 0, index |-> 3], [inc |-> 1, tail |-> 2, index |-> 2]}
-/\ alive = FALSE
-/\ authorized = 0
-/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ tail = 0
-/\ regressed = FALSE
-/\ inc = 1
-/\ serial = 3
+/\ serial = 2
 /\ acked = 0
 
 State 6: <Next line 39, col 12 to line 39, col 39 of module Links>
-/\ seen = [inc |-> 0, tail |-> 0, index |-> 3]
-/\ packets = {[inc |-> 0, tail |-> 0, index |-> 3], [inc |-> 1, tail |-> 2, index |-> 2]}
-/\ alive = FALSE
+/\ seen = [inc |-> 1, tail |-> 1, index |-> 1]
+/\ packets = {[inc |-> 1, tail |-> 1, index |-> 1], [inc |-> 1, tail |-> 2, index |-> 2]}
+/\ alive = TRUE
 /\ authorized = 0
 /\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ tail = 0
-/\ regressed = FALSE
-/\ inc = 1
-/\ serial = 3
-/\ acked = 0
-
-State 7: <Next line 39, col 12 to line 39, col 39 of module Links>
-/\ seen = [inc |-> 1, tail |-> 2, index |-> 2]
-/\ packets = {[inc |-> 0, tail |-> 0, index |-> 3], [inc |-> 1, tail |-> 2, index |-> 2]}
-/\ alive = FALSE
-/\ authorized = 0
-/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
-/\ tail = 0
+/\ tail = 2
 /\ regressed = TRUE
 /\ inc = 1
-/\ serial = 3
+/\ serial = 2
 /\ acked = 0
 
-369 states generated, 144 distinct states found, 74 states left on queue.
+378 states generated, 151 distinct states found, 79 states left on queue.
 The depth of the complete state graph search is 7.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 4).
-Finished in 00s at (2026-10-08 16:13:13)
+Finished in 00s at (2026-10-08 19:35:36)

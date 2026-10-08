@@ -1,0 +1,19 @@
+[
+  "strace",
+  "-f",
+  "-qq",
+  "-ttt",
+  "-T",
+  "-e",
+  "trace=fsync,fdatasync",
+  "-e",
+  "signal=none",
+  "-o",
+  "/home/user/workspace/repo/experiments/electric-replication/evidence/openraft010-fsync-many-003/openraft010-fsync-many-003-raft3-write-1024-256-repeat1/fsync-trace.log",
+  "-p",
+  "1292760",
+  "-p",
+  "1299333",
+  "-p",
+  "1303856"
+]

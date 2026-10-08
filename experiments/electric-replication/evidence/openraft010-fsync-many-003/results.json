@@ -1,0 +1,422 @@
+[
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "fsync",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+    "disk_preflight": {
+      "free_bytes": 12561653760,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      955832
+    ],
+    "affinity": {
+      "955832": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 955900,
+    "process_sample_gaps": [
+      {
+        "pid": 955900,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 955900,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 955900,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791488660032,
+      "end_unix_ms": 1791488676859,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 2146.690725989174,
+      "target_bytes": 10592256,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 10592256
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "fsync_trace_summary": {
+      "started": 26009,
+      "completed": 26009,
+      "incomplete_by_tid": {},
+      "resumed_without_start": 0,
+      "errors": {},
+      "successful": {
+        "count": 26009,
+        "total_us": 12232541,
+        "mean_us": 470.319543235034,
+        "p50_us": 217,
+        "p99_us": 3769,
+        "max_us": 16796,
+        "at_least_100ms": 0
+      },
+      "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+    },
+    "profile_script_exit_code": 0,
+    "verify_pid": 1188719,
+    "verify_window": {
+      "start_unix_ms": 1791488679105,
+      "end_unix_ms": 1791488679173,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "fsync",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "4eea5d8cf8c4ceb958ce047dbf02438f248c9474669681b2011f26ef225e6d76",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+    "disk_preflight": {
+      "free_bytes": 12597571584,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1241684
+    ],
+    "affinity": {
+      "1241684": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1245905,
+    "process_sample_gaps": [
+      {
+        "pid": 1245905,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1245905,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791488683035,
+      "end_unix_ms": 1791488701019,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1425.0303320004605,
+      "target_bytes": 25164288,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 25164288
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "fsync_trace_summary": {
+      "started": 7935,
+      "completed": 7935,
+      "incomplete_by_tid": {},
+      "resumed_without_start": 0,
+      "errors": {},
+      "successful": {
+        "count": 7935,
+        "total_us": 4181855,
+        "mean_us": 527.0138626339004,
+        "p50_us": 363,
+        "p99_us": 1604,
+        "max_us": 13453,
+        "at_least_100ms": 0
+      },
+      "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+    },
+    "profile_script_exit_code": 0,
+    "verify_pid": 1254866,
+    "verify_window": {
+      "start_unix_ms": 1791488702475,
+      "end_unix_ms": 1791488702507,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3-local",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "fsync",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "4eea5d8cf8c4ceb958ce047dbf02438f248c9474669681b2011f26ef225e6d76",
+    "ack_contract": "local-fsync acceptance, not commitment",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+    "disk_preflight": {
+      "free_bytes": 12595912704,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1256459,
+      1256718,
+      1256953
+    ],
+    "affinity": {
+      "1256459": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1256718": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1256953": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1257366,
+    "process_sample_gaps": [
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1257366,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791488707033,
+      "end_unix_ms": 1791488726244,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 4524.075444001937,
+      "target_bytes": 16024576,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 16024576
+        },
+        {
+          "node": 2,
+          "committed_bytes": 16024576
+        },
+        {
+          "node": 3,
+          "committed_bytes": 16024576
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "fsync_trace_summary": {
+      "started": 17178,
+      "completed": 17178,
+      "incomplete_by_tid": {},
+      "resumed_without_start": 0,
+      "errors": {},
+      "successful": {
+        "count": 17178,
+        "total_us": 10039444,
+        "mean_us": 584.4361392478752,
+        "p50_us": 466,
+        "p99_us": 2226,
+        "max_us": 11729,
+        "at_least_100ms": 0
+      },
+      "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+    },
+    "profile_script_exit_code": 0,
+    "verify_pid": 1259357,
+    "verify_window": {
+      "start_unix_ms": 1791488730838,
+      "end_unix_ms": 1791488730871,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "fsync",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "4eea5d8cf8c4ceb958ce047dbf02438f248c9474669681b2011f26ef225e6d76",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+    "disk_preflight": {
+      "free_bytes": 12593606656,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1292760,
+      1299333,
+      1303856
+    ],
+    "affinity": {
+      "1292760": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1299333": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1303856": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1315472,
+    "process_sample_gaps": [
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1315472,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791488736639,
+      "end_unix_ms": 1791488758799,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 3831.6686439939076,
+      "target_bytes": 9818880,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 9818880
+        },
+        {
+          "node": 2,
+          "committed_bytes": 9818880
+        },
+        {
+          "node": 3,
+          "committed_bytes": 9818880
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "fsync_trace_summary": {
+      "started": 16035,
+      "completed": 16035,
+      "incomplete_by_tid": {},
+      "resumed_without_start": 0,
+      "errors": {},
+      "successful": {
+        "count": 16035,
+        "total_us": 13161461,
+        "mean_us": 820.7958216401621,
+        "p50_us": 559,
+        "p99_us": 4975,
+        "max_us": 11010,
+        "at_least_100ms": 0
+      },
+      "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+    },
+    "profile_script_exit_code": 0,
+    "verify_pid": 1552200,
+    "verify_window": {
+      "start_unix_ms": 1791488762714,
+      "end_unix_ms": 1791488762747,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  }
+]
