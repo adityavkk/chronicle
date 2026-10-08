@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 46 and seed 5770506352900526517 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3651612] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 44 and seed 2992102815509259987 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 954236] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/AdmissionEpoch.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,13 +12,14 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module AdmissionEpoch
-Starting... (2026-10-07 21:56:08)
+Starting... (2026-10-08 13:47:48)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-07 21:56:08.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 13:47:48.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
 /\ offered = 0
+/\ expiredStage = FALSE
 /\ term = 0
 /\ foreign = {}
 /\ queued = {}
@@ -29,9 +30,11 @@ State 1: <Initial predicate>
 /\ unsafeStage = FALSE
 /\ imports = 0
 /\ charged = {}
+/\ lease = TRUE
 
-State 2: <Elect line 28, col 10 to line 31, col 80 of module AdmissionEpoch>
+State 2: <Elect line 30, col 10 to line 34, col 93 of module AdmissionEpoch>
 /\ offered = 0
+/\ expiredStage = FALSE
 /\ term = 1
 /\ foreign = {4, 5}
 /\ queued = {}
@@ -42,7 +45,8 @@ State 2: <Elect line 28, col 10 to line 31, col 80 of module AdmissionEpoch>
 /\ unsafeStage = FALSE
 /\ imports = 1
 /\ charged = {}
+/\ lease = FALSE
 
 5 states generated, 5 distinct states found, 1 states left on queue.
 The depth of the complete state graph search is 3.
-Finished in 00s at (2026-10-07 21:56:08)
+Finished in 00s at (2026-10-08 13:47:48)

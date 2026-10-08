@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 9 and seed -6364867825883265404 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3529701] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 32 and seed 1338028075930174532 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 796339] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Subscriptions.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Subscriptions
-Starting... (2026-10-07 21:55:37)
+Starting... (2026-10-08 13:47:19)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-07 21:55:38.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 13:47:19.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -77,26 +77,26 @@ State 4: <Deliver line 20, col 12 to line 24, col 68 of module Subscriptions>
 /\ intent = "delivered"
 /\ acked = 0
 
-State 5: <Delete line 39, col 11 to line 41, col 61 of module Subscriptions>
-/\ now = 0
+State 5: <Tick line 33, col 9 to line 35, col 67 of module Subscriptions>
+/\ now = 1
 /\ gen = 1
 /\ packets = {[inc |-> 1, gen |-> 1, offset |-> 1]}
-/\ alive = FALSE
+/\ alive = TRUE
 /\ authorized = 0
-/\ held = FALSE
+/\ held = TRUE
 /\ staleAccepted = FALSE
 /\ tail = 1
 /\ inc = 1
 /\ snapshot = 1
 /\ deadline = 1
-/\ intent = "none"
+/\ intent = "delivered"
 /\ acked = 0
 
 State 6: <Next line 50, col 21 to line 50, col 44 of module Subscriptions>
-/\ now = 0
+/\ now = 1
 /\ gen = 1
 /\ packets = {[inc |-> 1, gen |-> 1, offset |-> 1]}
-/\ alive = FALSE
+/\ alive = TRUE
 /\ authorized = 1
 /\ held = FALSE
 /\ staleAccepted = TRUE
@@ -107,7 +107,7 @@ State 6: <Next line 50, col 21 to line 50, col 44 of module Subscriptions>
 /\ intent = "none"
 /\ acked = 1
 
-155 states generated, 79 distinct states found, 40 states left on queue.
+182 states generated, 91 distinct states found, 46 states left on queue.
 The depth of the complete state graph search is 6.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 4).
-Finished in 00s at (2026-10-07 21:55:38)
+Finished in 00s at (2026-10-08 13:47:19)

@@ -78,6 +78,28 @@ disks; filesystem locking only fences one local directory.
 
 ## Remaining gates
 
+Work proceeds in this order. The clean local 0.9 checkpoint `7fc1605` and its
+qualified release binary remain the comparison baseline; the published branch
+checkpoint is not production-qualified. Each row requires the actual engine,
+not a substitute store or a model-only result.
+
+| Order | Acceptance gate | Current state and required evidence |
+| --- | --- | --- |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | In progress: formalize assignment-time lease rejection, outstanding durable callbacks and retained receipt debt before changing code. Require real WAL/recovery/snapshot/identity checks, fault histories and unchanged subscription-enabled 332/332. An alpha upgrade is a candidate, not an improvement by definition. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: repeated matched native/0.9/candidate measurements, hot/many streams, replay/fanout/mixed sustained loads. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles. Find the zero-error sustainable envelope separately from overload; retain unsuccessful candidates. |
+| 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
+| 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
+| 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
+
+Every deliverable needs a substantive TLA+, Lean, generated state-machine test
+or independently checked fault history over its risky behavior, with explicit
+model-to-code gaps and useful negative controls. Qualified publication and trunk
+integration are authorized, not automatic: audit the full unpublished range,
+preserve human commit identities, integrate concurrent `origin/main`, run
+fail-fast checks and CI, then verify the actual remote merge. No shared
+deployment is authorized. Independently complete experimental milestones may
+merge with explicit limits; they cannot waive the remaining acceptance gates.
+
 Conformance and the existing fault/property tests are necessary, not sufficient.
 The latest `conformance-022` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 139 Rust
@@ -164,8 +186,8 @@ checks and no accepted EOF, timeout, duplicate or gap. This finite JSON fixture
 is not a throughput measurement or proof about every omitted benchmark frame.
 
 No throughput or availability promise is made from blog numbers or single-orb
-runs. Paid evaluation needs separate authorization; no cloud budget or publication
-permission is implied.
+runs. Paid evaluation needs separate authorization; qualified publication and
+trunk integration do not imply a cloud budget or deployment permission.
 
 Physical WAL reclamation now uses a checksummed metadata-only checkpoint; old
 snapshot cleanup preserves open transfer descriptors. The new real-process

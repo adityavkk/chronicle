@@ -505,7 +505,8 @@ That changes the existing async contract: the prepared isolated owner currently
 can issue local-fsync receipts until its count/byte allowance is full. With 0.10,
 it would stop earlier on lease expiry and resume only after quorum contact is
 renewed. Already accepted receipts could still be pending, committed or lost;
-committed-only reads and local durability need not change. No upgrade or lease
-bypass has been implemented. Whether this narrower minority admission behavior
-is acceptable is a product decision before formalizing and qualifying an
-upgrade. Source-level pipelining is an opportunity, not measured performance.
+committed-only reads and local durability need not change. The user authorized
+this earlier rejection for the isolated stock 0.10 evaluation. `ASYNC.md` records
+the assignment-time contract; `AdmissionEpoch.tla` is extended before behavior.
+No lease bypass is permitted. Source-level pipelining is an opportunity, not
+measured performance; the qualified 0.9 baseline remains the comparison point.

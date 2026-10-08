@@ -36,7 +36,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live links links-
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue EarlyNotify LateCut; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -52,7 +52,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout|DropForming) model=Batches; config=batches ;;
     EarlyReceipt|PublishAccepted|IndexOnly|InvalidateAbsent|AcceptMeansSuccess|ReceiptSession) model=Receipts; config=receipts ;;
     ReleaseOnAccepted|AllowRecoveredAdmission) model=AsyncBacklog; config=backlog ;;
-    CacheAcrossTerm|UnguardedEnqueue) model=AdmissionEpoch; config=epochs ;;
+    CacheAcrossTerm|UnguardedEnqueue|IgnoreLeaseAtAssignment|DropAcceptedOnExpiry) model=AdmissionEpoch; config=epochs ;;
     EarlyNotify|LateCut) model=FsyncGroups; config=fsync ;;
   esac
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
@@ -79,4 +79,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 42 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 44 negative mutations; Lean and one header-projection negative mutation: PASS\n'

@@ -109,6 +109,38 @@ reservation, application queue, Raft API queue and log assignment. It rejects bo
 reusing preparation across terms and omitting the assignment-time check. Like the
 other models, it assumes consensus's log ownership rules rather than proving them.
 
+### Authorized 0.10 evaluation: earlier lease rejection
+
+The isolated stock OpenRaft 0.10 candidate deliberately narrows the 0.9 minority
+admission behavior above. It must have both the prepared full leader identity
+and a valid upstream quorum lease **when Raft assigns the log entry**, not merely
+when HTTP or the application queue accepts it. A request queued while the lease
+was valid may be rejected after expiry without an index, WAL frame or receipt.
+There is no promise of prolonged minority acceptance until the backlog fills.
+An actual one-voter group supplies its own quorum; this is not a bypass mode.
+
+The upstream lease uses monotonic time and the sending time of the last RPC
+acknowledged by a quorum, with `now < last_quorum_acked + election_timeout_max`.
+The current timeout is 700 ms. The adapter must not infer eligibility from
+`ServerState::Leader` alone or implement a second lease clock. The core owns the
+authoritative predicate; exposed lease age is diagnostic, not a reservation.
+
+Expiry affects **new log assignments**, not prior outcomes. An entry assigned
+before expiry can finish its native fsync and issue 202 afterwards. Its receipt
+and admission credits survive expiry; it may commit when contact returns, be
+conclusively replaced, or become unknown through evidence expiry. Lease expiry
+alone proves none of these outcomes and never frees retained debt. All reads
+remain committed-only. Timeout/503 without a receipt can still be an unknown
+outcome; clients retry with producer identity rather than assuming no effect.
+
+`AdmissionEpoch.tla` explores expiry between queueing and assignment, renewal,
+leadership change and unresolved retained debt. Mutations omit the assignment
+gate or release retained credit on expiry. Stable-period liveness assumes
+eventual quorum renewal, not progress through a permanent partition. The actual
+upstream quorum/clock implementation is an assumption. Native-Journal tests and
+process histories must check no new WAL entry after expiry, safe completion of
+earlier acceptance, no read leakage, and renewed admission after recovery.
+
 Apply first fsyncs its covering Commit marker, then invokes the native handlers.
 For local-acceptance commands it also retains their deterministic replies in
 partition-owned metadata. Recent result batches are bounded (the latest 1,024

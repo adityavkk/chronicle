@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 98 and seed -2311617428189546500 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3648187] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 49 and seed -4629589126942590468 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 891488] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Batches.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Batches
-Starting... (2026-10-07 21:55:58)
+Starting... (2026-10-08 13:47:38)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-07 21:55:58.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 13:47:38.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -45,21 +45,35 @@ State 2: <Admit line 23, col 10 to line 26, col 99 of module Batches>
 /\ forming = <<>>
 /\ admitted = 1
 
-State 3: <Resolve line 50, col 15 to line 53, col 99 of module Batches>
+State 3: <Admit line 23, col 10 to line 26, col 99 of module Batches>
+/\ durable = 0
+/\ log = <<>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<1, 2>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 2
+/\ forming = <<>>
+/\ admitted = 2
+
+State 4: <Resolve line 50, col 15 to line 53, col 99 of module Batches>
 /\ durable = 0
 /\ log = <<>>
 /\ replyOwner = <<1, 0, 0, 0>>
 /\ applied = 0
 /\ marker = 0
 /\ timedout = {}
-/\ queue = <<1>>
+/\ queue = <<1, 2>>
 /\ committed = 0
 /\ resolved = {1}
-/\ credits = 0
+/\ credits = 1
 /\ forming = <<>>
-/\ admitted = 1
+/\ admitted = 2
 
 11 states generated, 9 distinct states found, 4 states left on queue.
 The depth of the complete state graph search is 4.
 The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 1 and the 95th percentile is 1).
-Finished in 00s at (2026-10-07 21:55:58)
+Finished in 00s at (2026-10-08 13:47:38)
