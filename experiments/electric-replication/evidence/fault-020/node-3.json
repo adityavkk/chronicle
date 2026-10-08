@@ -1,0 +1,25 @@
+{
+  "cluster": "fault-020",
+  "node": 3,
+  "listen": "127.0.0.1:19303",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/fault-020/3",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": true,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:19301"
+    },
+    "2": {
+      "addr": "127.0.0.1:19302"
+    },
+    "3": {
+      "addr": "127.0.0.1:19303"
+    }
+  },
+  "stats_secs": 0,
+  "pending_commands": 256,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync"
+}

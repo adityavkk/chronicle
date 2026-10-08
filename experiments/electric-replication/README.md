@@ -9,7 +9,8 @@ The imported source is Electric npm 0.1.5 at
 Apache-2.0. `UPSTREAM-TREE.txt` pins original blobs; `engine/LICENSE` retains the
 license. The isolated stock OpenRaft 0.10.0-alpha.36 candidate provides consensus
 over Electric's WAL/group-fsync path; qualified 0.9.25 remains its comparison
-baseline. **The initial 0.10 candidate regresses write performance.**
+baseline. Its initial write regression and measured scheduling correction remain
+in the evidence ledger; broader performance qualification is incomplete.
 Committed commands materialize the native wire files; native file-range/sendfile
 and epoll SSE paths serve reads. No SQLite, RocksDB or Redis payload dependency.
 
@@ -103,17 +104,16 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-023` executes **332/332 passing, zero failures/skips/todo**,
+The candidate's `conformance-024` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 140 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-015` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-009` checks 308
+conformance exclusions. `storage-fault-016` checks seven real failing/short
+syscalls and retains three unknown HTTP outcomes. `async-fault-010` checks 307
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
 releasing unresolved credit. These are single-host qualifications, not
-independent-disk/AZ or power-loss evidence. The rebuilt release binary after the
-new streamed-replay property matches `conformance-023` exactly.
+independent-disk/AZ or power-loss evidence.
 
 The first matched stock-0.10 comparison, `openraft010-writes-001`, has three
 30-second repetitions with identical local-fsync contracts, 256-byte payloads and
@@ -126,6 +126,24 @@ they do not establish the cause of blocked time. The 0.10 builder await is
 enqueue-only, verified against pinned upstream; no performance improvement is
 inferred from its nonblocking storage API. Dispatch/apply interaction remains
 under investigation. The experiment has not switched its accepted baseline.
+
+Reducing locally-unflushed dispatch slots from two to one restores batching
+without a timer or weaker durability. `openraft010-flight1-001` measures
+**47.4–59.8k/s** against the original candidate's **3.4–3.5k/s**, with all nine
+cells passing exact-byte and zero-error checks. WAL fsyncs/ack drop to
+**0.033–0.034**, from 1.67–1.70. Native varies 70.6–101.8k/s in that matrix;
+this is evidence for the scheduling fix, not broad parity. The latest
+conformance/formal/fault reruns above include this change.
+
+The broader `openraft010-async-001` matrix retains **14 passing and seven failing
+cells**, with a nonzero driver exit. Native measures **94.3–100.7k/s**; current
+0.10 one member **52.3–60.7k/s** versus 0.9 **34.1–45.3k/s**, all zero-error with
+exact bytes. Current quorum measures 36.6–41.6k/s, but one repetition rejects
+2,864 requests and changes term during snapshots, so the quorum gate fails.
+Every async repetition rejects load: 7.1–7.9k attempts on 0.10, 90.8–101.7k on
+0.9. Accepted bytes drain exactly to every replica; these are overload runs, not
+sustainable zero-error async capacity. The pinned client combines 429 and 503;
+per-cause diagnosis and controlled snapshot-delay qualification remain open.
 
 The matched `async-writes-006` matrix has complete resource samples: native
 **77–84k/s**, one member **39–46k/s** (**1.84–1.96× slower**), and quorum-three

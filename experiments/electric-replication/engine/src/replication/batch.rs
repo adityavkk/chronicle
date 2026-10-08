@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 pub(super) const CAPACITY: usize = 256;
 pub(super) const MAX_COMMANDS: usize = 64;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
-const MAX_INFLIGHT_BATCHES: usize = 2;
+const MAX_INFLIGHT_BATCHES: usize = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Batch {

@@ -1,0 +1,50 @@
+{
+  "arm": "raft1-baseline",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "ec237f86520f34ff54df42bab336ae110b3a971194e463ba7ff82b6def9ac243",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "disk_preflight": {
+    "free_bytes": 8830648320,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    1761765
+  ],
+  "affinity": {
+    "1761765": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 1761773,
+  "process_sample_gaps": [
+    {
+      "pid": 1761773,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791471958288,
+    "end_unix_ms": 1791471992420,
+    "exit_code": 0
+  },
+  "verify_pid": 1761858,
+  "verify_window": {
+    "start_unix_ms": 1791471992420,
+    "end_unix_ms": 1791471992428,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

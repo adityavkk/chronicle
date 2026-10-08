@@ -510,3 +510,64 @@ this earlier rejection for the isolated stock 0.10 evaluation. `ASYNC.md` record
 the assignment-time contract; `AdmissionEpoch.tla` is extended before behavior.
 No lease bypass is permitted. Source-level pipelining is an opportunity, not
 measured performance; the qualified 0.9 baseline remains the comparison point.
+
+## Initial stock-0.10 regression and bounded scheduling test
+
+`openraft010-writes-001` retains three matched 30-second repetitions per arm:
+native 91.6–100.4k/s, 0.9 one member 34.4–40.0k/s, initial 0.10 one member
+3.4–10.5k/s. The last candidate repetition is again roughly 29× slower than
+native; this is a failed acceptance gate. Every cell has zero client errors and
+exact byte/offset probes. The slower candidate consumes only 0.80–0.84 CPU cores,
+but stages 0.53–1.89 records and performs 0.46–1.68 WAL fsyncs per acknowledged
+append. The corresponding 0.9 ratios are about 0.05 and 0.049. Candidate
+entry-durability waits average 302–398 µs while completion takes 62–75 ms;
+tiny entries queue behind serialized committed application. These populations
+overlap and are not an additive latency decomposition.
+
+Pinned upstream's
+[`WriteRequest::IntoFuture`](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/raft/message/write_request.rs#L133-L150)
+only enqueues; our separately retained `complete_only` receiver supplies the
+eventual apply result. The API receiver coalesces queued writes with matching
+leader preconditions, with zero default linger. This rules out an accidental
+quorum wait in the builder, not the adapter's scheduling interaction. Separate
+`openraft010-cpu-001` profiles retain the native/0.9/0.10 user-space stacks;
+they do not measure blocked or kernel time.
+
+The next bounded experiment reduces locally-unflushed batch slots from two to
+one. It may let HTTP completions accumulate in the FIFO before the next native
+fsync, without adding a timer or waiting for quorum. It changes neither command
+credits nor receipt visibility/durability. These are a subset of the already
+checked `Batches.tla` seal/flush interleavings: sealing can wait for the preceding
+flush, whose progress is a model assumption. The model does not predict batch
+shape or throughput. Keep the initial candidate binary/source/results for a
+matched comparison; reject the change if it does not improve measured behavior.
+
+`openraft010-flight1-001` completes all nine 30-second cells with zero client
+errors and exact byte checks. The one-slot change measures **58,491 / 47,377 /
+59,762 writes/s**, versus **3,452 / 3,419 / 3,441** for the preserved two-slot
+0.10 binary. WAL fsyncs/ack fall to **0.0327–0.0344** from **1.67–1.70**;
+records/ack fall to 0.0330–0.0349. This isolates a large effect of dispatch
+scheduling without changing either durability barrier. The native arm varies
+101,774 / 70,603 / 71,036 writes/s, so the apparent 1.19–1.74× native gap is
+not a stable performance bound. The original candidate's first closing client
+resource observation is unavailable and retained as a sampling gap.
+
+The one-slot change passes 140 Rust tests, unchanged subscriptions-enabled
+`conformance-024` (332/332, zero failures/skips/todo), and the full 44 TLC plus
+one Lean negative-control suite. Strong/fork/subscription/storage/reclamation
+campaigns pass 194/744/189/30/20 operations, with one/three subscription/storage
+unknown outcomes retained. `async-fault-010` passes 307 operations, 40 receipts
+and six unknown requests, including capacity-preserving lease expiry, visibility
+fencing, storage failure, movement and restart. This is local qualification;
+the broader native/0.9/0.10 sync/async matrix remains a separate gate.
+
+`openraft010-async-001` has 14 passing and seven failing cells. Native measures
+94.3–100.7k/s; current one-member 52.3–60.7k/s versus 0.9's 34.1–45.3k/s. All
+one-member cells pass zero-error and exact-byte checks. One current quorum cell
+rejects 2,864 attempts and changes from term 1 to term 3; its snapshot wall-time
+maximum reaches 1.73s against 350–700ms election timeouts. Synchronous snapshot
+copy/hash/fsync on Tokio workers is a hypothesis to test, not yet a measured
+causal attribution. All six async cells reject load despite exact accepted-byte
+drain on every replica. Neither lower rejection counts nor accepted throughput
+establish the sustainable zero-error envelope. The driver exits nonzero and
+keeps all failures and one baseline closing-client resource sampling gap.
