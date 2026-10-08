@@ -1,8 +1,8 @@
 ------------------------ MODULE JournalReclaim ------------------------
 EXTENDS Naturals, FiniteSets, TLC
-CONSTANTS EarlyUnlink, MissingDirSync, DropRetained, DropVote, UnpinnedReader
-VARIABLES tail, disk, stableCut, visibleCut, candidate, phase, reader, readOnce
-vars == <<tail, disk, stableCut, visibleCut, candidate, phase, reader, readOnce>>
+CONSTANTS EarlyUnlink, MissingDirSync, DropRetained, DropVote, UnpinnedReader, LostWake
+VARIABLES tail, disk, stableCut, visibleCut, candidate, phase, reader, readOnce, pending
+vars == <<tail, disk, stableCut, visibleCut, candidate, phase, reader, readOnce, pending>>
 
 \* Eight durable native frames: vote, entry, snapshot-reference, purge,
 \* then a second generation of the same. One record per segment is a bounded
@@ -17,39 +17,45 @@ RecoveredVote == IF tail >= 5 /\ stableCut < 5 THEN 2
                  ELSE IF DropVote THEN 0 ELSE VoteAt(stableCut)
 Init == /\ tail = 0 /\ disk = {} /\ stableCut = 0 /\ visibleCut = 0
         /\ candidate = 0 /\ phase = "Idle"
-        /\ reader = 0 /\ readOnce = {}
+        /\ reader = 0 /\ readOnce = {} /\ pending = FALSE
 \* An indexed reader holds the index mutex through its physical read. Index
 \* mutation (including Purge) and capture cannot overtake it. After capture,
 \* new readers need only entries retained at the cut or frames appended after
 \* it; unlink and directory fsync therefore need no index mutex. The mutation
 \* incorrectly releases the reader's mutex between location lookup and I/O.
+\* A durable purge only signals a single coalescing maintenance slot; it never
+\* waits for physical GC. Requesting work after every durable frame safely
+\* overapproximates the production purge/restart notifications. Capture consumes
+\* the slot BEFORE I/O: a later notification must survive that work's completion.
 Append == /\ tail < MaxRecord /\ (reader = 0 \/ UnpinnedReader)
           /\ tail' = tail + 1 /\ disk' = disk \cup {tail'}
+          /\ pending' = TRUE
           /\ UNCHANGED <<stableCut, visibleCut, candidate, phase, reader, readOnce>>
-Capture == /\ phase = "Idle" /\ stableCut < tail
+Capture == /\ phase = "Idle" /\ pending /\ tail > 0
            /\ (reader = 0 \/ UnpinnedReader)
-           /\ candidate' = tail /\ phase' = "Captured"
+           /\ candidate' = tail /\ phase' = "Captured" /\ pending' = FALSE
            /\ UNCHANGED <<tail, disk, stableCut, visibleCut, reader, readOnce>>
 FileSync == /\ phase = "Captured" /\ phase' = "FileSynced"
-            /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, reader, readOnce>>
+            /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, reader, readOnce, pending>>
 Rename == /\ phase = "FileSynced" /\ phase' = "Renamed"
           /\ visibleCut' = candidate
-          /\ UNCHANGED <<tail, disk, stableCut, candidate, reader, readOnce>>
+          /\ UNCHANGED <<tail, disk, stableCut, candidate, reader, readOnce, pending>>
 DirectorySync == /\ phase = "Renamed" /\ phase' = "Stable"
                  /\ stableCut' = visibleCut
-                 /\ UNCHANGED <<tail, disk, visibleCut, candidate, reader, readOnce>>
+                 /\ UNCHANGED <<tail, disk, visibleCut, candidate, reader, readOnce, pending>>
 Reclaim == /\ (phase = "Stable" \/ (EarlyUnlink /\ phase = "Captured")
                 \/ (MissingDirSync /\ phase = "Renamed"))
            /\ disk' = disk \cap Keep(candidate) /\ phase' = "Idle"
+           /\ pending' = IF LostWake THEN FALSE ELSE pending
            /\ UNCHANGED <<tail, stableCut, visibleCut, candidate, reader, readOnce>>
 ReadStart == /\ reader = 0
              /\ \E entry \in Payloads(tail) \ readOnce:
                   /\ reader' = entry /\ readOnce' = readOnce \cup {entry}
-             /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, phase>>
+             /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, phase, pending>>
 ReadDone == /\ reader # 0 /\ reader' = 0
-            /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, phase, readOnce>>
+            /\ UNCHANGED <<tail, disk, stableCut, visibleCut, candidate, phase, readOnce, pending>>
 Crash == /\ phase' = "Idle" /\ visibleCut' = stableCut /\ reader' = 0
-         /\ candidate' = stableCut
+         /\ candidate' = stableCut /\ pending' = TRUE
          /\ UNCHANGED <<tail, disk, stableCut, readOnce>>
 Next == Append \/ Capture \/ FileSync \/ Rename \/ DirectorySync \/ Reclaim \/ Crash \/ ReadStart \/ ReadDone
 SafetySpec == Init /\ [][Next]_vars

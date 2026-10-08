@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 106 and seed -6739198191409428847 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 4019972] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 20 and seed 6135381604328394638 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 668209] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Batches.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Batches
-Starting... (2026-10-08 21:41:46)
+Starting... (2026-10-08 22:03:26)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 21:41:46.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 22:03:27.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -87,7 +87,7 @@ State 5: <Gather line 29, col 11 to line 35, col 112 of module Batches>
 /\ forming = <<2>>
 /\ admitted = 2
 
-38 states generated, 26 distinct states found, 15 states left on queue.
-The depth of the complete state graph search is 5.
+36 states generated, 26 distinct states found, 13 states left on queue.
+The depth of the complete state graph search is 6.
 The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 5 and the 95th percentile is 5).
-Finished in 00s at (2026-10-08 21:41:46)
+Finished in 00s at (2026-10-08 22:03:27)

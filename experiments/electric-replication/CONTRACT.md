@@ -235,6 +235,22 @@ before checkpoint publication retains the old replay path. A crash after it can
 leave extra old segments but cannot lose needed ones. Directory fsync failures
 are terminal; successful rename alone does not authorize reclamation.
 
+OpenRaft's pinned [core awaits storage purge](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/core/raft_core.rs#L2436-L2457).
+Worker handoff alone therefore cannot keep that group responsive. The
+[storage contract](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/storage/v2/raft_log_storage.rs#L143-L148)
+requires serialized, hole-free logical deletion, not immediate physical GC.
+Purge must first wait for its covering durable snapshot reference and persist
+the native Purge record; only then may it signal maintenance and return. One
+maintenance task per group consumes a single coalescing notification before
+checkpoint I/O. Work arriving during I/O remains pending, rather than creating
+an unbounded task queue or being lost when the earlier operation finishes
+(`LostWake` liveness mutation). Startup also signals reclamation, recovering a
+notification lost in a crash. This is not a new authoritative WAL or a changed
+checkpoint format. Storage errors still fail-stop, including background errors.
+The finite model overapproximates requests by permitting work after every durable
+frame; it assumes eventual I/O completion, not a bound on disk growth under a
+stalled device. No additional read/ack or minority-availability guarantee follows.
+
 Snapshot cleanup serializes with snapshot construction/installation. A durable
 new journal reference is required before unlinking old files. Snapshot readers
 open their file under the journal lock before cleanup; open file descriptors

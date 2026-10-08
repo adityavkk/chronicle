@@ -67,13 +67,17 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
   test "$result" -ne 0
   grep -q "Invariant $invariant is violated" "$here/evidence/formal/$mutation.txt"
 done
-sed 's/StuckTimer = FALSE/StuckTimer = TRUE/' fsync-live.cfg > "$tools/StuckTimer.cfg"
-set +e
-java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/StuckTimer.cfg" FsyncGroups.tla > "$here/evidence/formal/StuckTimer.txt" 2>&1
-result=$?
-set -e
-test "$result" -ne 0
-grep -q 'Temporal properties were violated' "$here/evidence/formal/StuckTimer.txt"
+for mutation in StuckTimer LostWake; do
+  config=fsync-live; model=FsyncGroups
+  if test "$mutation" = LostWake; then config=reclaim-live; model=JournalReclaim; fi
+  sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
+  set +e
+  java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/$mutation.cfg" "$model.tla" > "$here/evidence/formal/$mutation.txt" 2>&1
+  result=$?
+  set -e
+  test "$result" -ne 0
+  grep -q 'Temporal properties were violated' "$here/evidence/formal/$mutation.txt"
+done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
 sed 's/name == "accept"/name == "host"/' Contracts.lean > "$tools/DiscardHost.lean"
@@ -83,4 +87,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 54 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 55 negative mutations; Lean and one header-projection negative mutation: PASS\n'

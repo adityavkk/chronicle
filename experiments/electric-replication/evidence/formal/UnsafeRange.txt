@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 97 and seed -6468088064777394902 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3826238] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 69 and seed 3214250461176457559 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 480919] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/FenceCompaction.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module FenceCompaction
-Starting... (2026-10-08 21:41:21)
+Starting... (2026-10-08 22:03:02)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 21:41:21.
+Finished computing initial states: 1 distinct state generated at 2026-10-08 22:03:03.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -53,7 +53,7 @@ State 4: <Compact line 61, col 15 to line 64, col 79 of module FenceCompaction>
 /\ destination = <<"reserved", "unused", "unused">>
 /\ issued = 1
 
-130 states generated, 86 distinct states found, 69 states left on queue.
+75 states generated, 50 distinct states found, 39 states left on queue.
 The depth of the complete state graph search is 5.
-The average outdegree of the complete state graph is 6 (minimum is 2, the maximum 12 and the 95th percentile is 12).
-Finished in 00s at (2026-10-08 21:41:21)
+The average outdegree of the complete state graph is 5 (minimum is 1, the maximum 10 and the 95th percentile is 10).
+Finished in 00s at (2026-10-08 22:03:03)
