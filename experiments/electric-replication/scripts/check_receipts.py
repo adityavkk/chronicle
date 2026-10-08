@@ -62,6 +62,20 @@ def check(history):
             assert before["pending_bytes"] < before["max_pending_bytes"]
             assert after["pending_commands"] == before["pending_commands"], "expiry freed unresolved credit"
             assert after["pending_bytes"] == before["pending_bytes"], "expiry freed unresolved bytes"
+        elif op == "diagnostic":
+            measurement = event["measurement"]
+            assert set(measurement) == {"schema_version", "unix_ms", "cumulative"}
+            assert measurement["schema_version"] == 1
+            allowed = {"not_leader", "count_bound", "byte_bound", "queue_unavailable", "response_unknown",
+                       "epoch_timeout", "epoch_unavailable", "locally_durable_commands", "lease_expired",
+                       "forward_rejected", "discarded_unknown", "other_write_error", "completion_unknown",
+                       "enqueue_unavailable", "applied_commands"}
+            counters = measurement["cumulative"]
+            assert set(counters) <= allowed and all(type(n) is int and n >= 0 for n in counters.values())
+            label, status = dict(count=("count_bound", 429), bytes=("byte_bound", 429),
+                                 lease=("lease_expired", 503))[event["gate"]]
+            assert event["denied"]["status"] == status
+            assert counters.get(label, 0) > 0, "diagnostic misclassified the actual admission gate"
         elif op == "receipt":
             token = event["token"]
             assert token in accepted, "unissued fixture receipt"

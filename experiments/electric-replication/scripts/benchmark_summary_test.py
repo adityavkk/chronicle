@@ -1,12 +1,13 @@
 import unittest
 
-from benchmark_summary import summarize_phase_timings, summarize_progress, summarize_sync_timings
+from benchmark_summary import summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
 
 
 class ProgressSummary(unittest.TestCase):
     def test_commit_windows_are_per_observation_and_entry_gaps_are_not_acks(self):
         def observation(start, end, size, last, applied, matched, snapshot):
             return dict(node=1, unix_ms=start, end_unix_ms=end, head_status=200,
+                        sampled_stream_indices=[0, 1023], total_streams=1024,
                         committed_bytes=size, groups=[dict(last_log_index=last,
                         last_applied=dict(index=applied), snapshot=dict(index=snapshot),
                         replication={"1": dict(index=last), "2": dict(index=matched), "3": None})])
@@ -19,6 +20,8 @@ class ProgressSummary(unittest.TestCase):
         node = result["nodes"]["1"]
         self.assertEqual(node["samples"], 2)
         self.assertEqual(node["committed_bytes_per_second"], 1024)
+        self.assertEqual(node["sampled_stream_indices"], [0, 1023])
+        self.assertEqual(node["total_streams"], 1024)
         self.assertEqual(node["max_collection_ms"], 200)
         self.assertEqual(result["nodes"]["2"], dict(errors=1, samples=0))
         group = result["groups"]["1/0"]
@@ -32,6 +35,33 @@ class ProgressSummary(unittest.TestCase):
         self.assertEqual(result["nodes"]["4"]["samples"], 1)
         self.assertNotIn("committed_bytes_per_second", result["nodes"]["4"])
         self.assertEqual(result["groups"], {})
+
+
+class WriteOutcomeSummary(unittest.TestCase):
+    def test_sparse_counter_deltas_keep_stage_units_and_window_boundaries(self):
+        def row(when, **counters):
+            return dict(schema_version=1, unix_ms=when, cumulative=counters)
+        values = [row(90, lease_expired=2, applied_commands=70),
+                  row(120, lease_expired=3, applied_commands=101),
+                  row(230, lease_expired=7, applied_commands=179, byte_bound=8),
+                  row(310, lease_expired=70, applied_commands=200, byte_bound=9)]
+        result = summarize_write_outcomes(values, 100, 300)
+        self.assertFalse(result["counter_reset_detected"])
+        self.assertEqual(result["sampled_window"], dict(start_unix_ms=120, end_unix_ms=230,
+            cumulative_delta=dict(lease_expired=4, applied_commands=78, byte_bound=8)))
+        self.assertEqual(result["whole_invocation"], dict(lease_expired=70, applied_commands=200, byte_bound=9))
+        self.assertIsNone(summarize_write_outcomes(values, 121, 300)["sampled_window"])
+
+    def test_counter_reset_or_unknown_schema_cannot_produce_a_successful_total(self):
+        values = [dict(schema_version=1, unix_ms=120, cumulative=dict(applied_commands=900, count_bound=3)),
+                  dict(schema_version=1, unix_ms=230, cumulative=dict(applied_commands=4))]
+        result = summarize_write_outcomes(values, 100, 300)
+        self.assertTrue(result["counter_reset_detected"])
+        self.assertIsNone(result["whole_invocation"])
+        self.assertIsNone(result["sampled_window"])
+        values[1]["schema_version"] = 2
+        with self.assertRaises(AssertionError):
+            summarize_write_outcomes(values, 100, 300)
 
 
 class PhaseTimingSummary(unittest.TestCase):

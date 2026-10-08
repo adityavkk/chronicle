@@ -159,6 +159,8 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
             let expected = match prepare_epoch(&raft, &machine, &admitted_term).await {
                 Ok(expected) => expected,
                 Err(status) => {
+                    super::timing::write_outcome(
+                        if status == 429 { "epoch_timeout" } else { "epoch_unavailable" }, completions.len());
                     for mut completion in completions {
                         let _ = completion.result.take().unwrap().send(Err(status));
                     }
@@ -177,11 +179,13 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
             let machine = machine.clone();
             tokio::spawn(async move {
                 let _resolve_probe = resolve_probe;
+                let count = completions.len();
                 let log_id = if receive_commit.is_ok() { flushed.await.ok() } else { None };
                 // Strong requests ahead in FIFO must not block local-fsync
                 // dispatch on quorum. All unresolved request credits stay held.
                 drop(flight);
                 if let Some(log_id) = log_id {
+                    super::timing::write_outcome("locally_durable_commands", count);
                     for (ordinal, completion) in completions.iter_mut().enumerate() {
                         if completion.local {
                             let _ = completion.result.take().unwrap().send(
@@ -190,13 +194,36 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
                     }
                 }
                 let committed = match receive_commit {
-                    Ok(receive) => receive.await.ok().and_then(Result::ok),
-                    Err(_) => None,
+                    Ok(receive) => match receive.await {
+                        Ok(Ok(committed)) => Some(committed),
+                        Ok(Err(error)) => {
+                            use openraft::errors::{ClientWriteError, ForwardReason};
+                            // ForwardToLeader is pre-assignment; LogEntryDiscarded
+                            // is an unknown committed outcome, not a safe retry.
+                            let label = match error {
+                                ClientWriteError::ForwardToLeader(forward) if forward.reason == ForwardReason::LeaseExpired => "lease_expired",
+                                ClientWriteError::ForwardToLeader(_) => "forward_rejected",
+                                ClientWriteError::LogEntryDiscarded(_) => "discarded_unknown",
+                                _ => "other_write_error",
+                            };
+                            super::timing::write_outcome(label, count);
+                            None
+                        }
+                        Err(_) => {
+                            super::timing::write_outcome("completion_unknown", count);
+                            None
+                        }
+                    },
+                    Err(_) => {
+                        super::timing::write_outcome("enqueue_unavailable", count);
+                        None
+                    }
                 };
                 match committed {
                     Some(committed) => {
                         assert_eq!(Some(committed.log_id), log_id, "local flush identity");
                         assert_eq!(committed.data.len(), completions.len(), "per-command apply replies");
+                        super::timing::write_outcome("applied_commands", count);
                         for (data, mut completion) in committed.data.into_iter().zip(completions) {
                             if let Some(result) = completion.result.take() {
                                 let _ = result.send(Ok(Outcome::Committed(Committed { log_id: committed.log_id, data })));

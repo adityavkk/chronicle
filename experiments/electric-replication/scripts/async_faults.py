@@ -47,7 +47,13 @@ def run(output):
         lab.start(node, dict(LD_PRELOAD=str(interposer), DS_TEST_DATA_ROOT=str(lab.data / str(node)),
             DS_TEST_FAULT_FILE=str(lab.data / f"fault-{node}"),
             DS_TEST_FAULT_LOG=str(lab.output / f"syscalls-{node}.jsonl")),
-            pending_commands=16, pending_bytes=2*1024*1024, append_durability=default)
+            pending_commands=16, pending_bytes=2*1024*1024, append_durability=default, stats_secs=1)
+
+    def outcomes(node):
+        for line in reversed((lab.output / f"node-{node}.log").read_text().splitlines()):
+            if line.startswith("RAFT_WRITE_OUTCOMES "):
+                return json.loads(line.removeprefix("RAFT_WRITE_OUTCOMES "))
+        return dict(cumulative={})
 
     def pause(node, stopped):
         pid = int((lab.output / f"node-{node}.pid").read_text())
@@ -197,7 +203,12 @@ def run(output):
                     assert retained["pending_bytes"] == occupancy["pending_bytes"]
                 else:
                     assert occupancy["pending_commands"] < 16 if byte_bound else occupancy["pending_commands"] == 16
-                    assert append(old, f"still-full-{bound}" + ("X"*(512*1024) if byte_bound else ""))["status"] == 429
+                    denied = append(old, f"still-full-{bound}" + ("X"*(512*1024) if byte_bound else ""))
+                    assert denied["status"] == 429
+                label = dict(count="count_bound", bytes="byte_bound", lease="lease_expired")[bound]
+                lab.wait(lambda: outcomes(old)["cumulative"].get(label, 0) > 0,
+                         "diagnostics distinguish quota rejection from lease rejection")
+                emit(dict(op="diagnostic", gate=bound, denied=denied, measurement=outcomes(old)))
                 for future in strong: assert future.result()["status"] in (0, 503)
                 watcher.result()
             lost.extend(round_accepts)
@@ -294,7 +305,7 @@ def run(output):
         read(lab.leader(0))
         verdict = check(history)
         mutations = []
-        for mode in ("202 session", "pending is committed", "SSE speculative publication", "expired lease assigns", "expiry frees debt"):
+        for mode in ("202 session", "pending is committed", "SSE speculative publication", "expired lease assigns", "expiry frees debt", "misclassified byte bound"):
             bad = copy.deepcopy(history)
             if mode == "202 session":
                 next(e for e in bad if e["op"] == "append" and e["status"] == 202)["headers"]["stream-session"] = "wrong:0:1"
@@ -304,6 +315,8 @@ def run(output):
                 next(e for e in bad if e["op"] == "lease")["after"]["last_log_index"] += 1
             elif mode == "expiry frees debt":
                 next(e for e in bad if e["op"] == "lease")["occupancy_after"]["pending_commands"] = 0
+            elif mode == "misclassified byte bound":
+                next(e for e in bad if e["op"] == "diagnostic" and e["gate"] == "bytes")["measurement"]["cumulative"]["byte_bound"] = 0
             else: next(e for e in bad if e["op"] == "live")["wire"] += "event:data\ndata:speculative\n\n"
             try: check(bad)
             except AssertionError: mutations.append(mode)

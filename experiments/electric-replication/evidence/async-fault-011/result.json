@@ -1,0 +1,34 @@
+{
+  "verdict": "PASS",
+  "operations": 310,
+  "accepted": 40,
+  "terminal_receipts": {
+    "committed": 21,
+    "rejected": 1,
+    "invalidated": 18
+  },
+  "observations": {
+    "committed": 23,
+    "rejected": 1,
+    "pending": 8,
+    "invalidated": 21,
+    "unknown": 1
+  },
+  "lease_expirations_checked": 1,
+  "unknown_requests": 6,
+  "append_checker": {
+    "verdict": "PASS",
+    "operations": 268,
+    "streams": 2,
+    "scope": "append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum"
+  },
+  "scope": "directed receipt fixture plus independent byte-prefix/real-time graph; one host",
+  "negative_mutations_rejected": [
+    "202 session",
+    "pending is committed",
+    "SSE speculative publication",
+    "expired lease assigns",
+    "expiry frees debt",
+    "misclassified byte bound"
+  ]
+}

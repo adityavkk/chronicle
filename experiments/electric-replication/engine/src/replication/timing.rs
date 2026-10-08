@@ -2,6 +2,7 @@
 //! These nested/overlapping phases are NOT additive CPU or fsync syscall time.
 //! A phase counts completed attempts, including errors. Buckets have inclusive
 //! upper bounds 1,2,...,524288 microseconds; the last bucket is overflow.
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -70,6 +71,16 @@ pub(super) static APPLY: Timer = Timer::new();
 pub(super) static SNAPSHOT: Timer = Timer::new();
 pub(super) static RESOLVE: Timer = Timer::new();
 
+// Only fixed call-site labels, never request paths, headers, payloads or errors.
+// These command-stage counters overlap: an HTTP wait can time out before apply.
+// They include internal metadata commands and are not HTTP wire-ack counters.
+static WRITE_OUTCOMES: Mutex<BTreeMap<&'static str, u64>> = Mutex::new(BTreeMap::new());
+pub(super) fn write_outcome(label: &'static str, commands: usize) {
+    if crate::srvstats::enabled() {
+        *WRITE_OUTCOMES.lock().unwrap().entry(label).or_default() += commands as u64;
+    }
+}
+
 pub(super) fn spawn(secs: u64) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(secs));
@@ -77,6 +88,12 @@ pub(super) fn spawn(secs: u64) {
         tick.tick().await;
         loop {
             tick.tick().await;
+            let outcomes = WRITE_OUTCOMES.lock().unwrap().clone();
+            eprintln!("RAFT_WRITE_OUTCOMES {}", serde_json::json!({
+                "schema_version": 1,
+                "unix_ms": super::clock::millis(std::time::SystemTime::now()),
+                "cumulative": outcomes,
+            }));
             for (phase, timer) in [
                 ("entry_stage", &ENTRY_STAGE),
                 ("marker_stage", &MARKER_STAGE),

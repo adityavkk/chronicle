@@ -98,7 +98,7 @@ def sample(pids, ports, node_pids):
 
 
 def cell(output, arm, workload, profile=False, diagnostics=False, pending_commands=256, duration=8, progress=False,
-         profiler="strace", binary=BINARY):
+         profiler="strace", binary=BINARY, write_warmup_secs=3):
     replicas = 3 if arm.startswith("raft3") else 1
     lab = Lab(output, replicas=replicas, partitions=2, port=19800, binary=binary)
     lab.cluster = "bench-"+hashlib.sha256(str(lab.output).encode()).hexdigest()[:16]
@@ -145,7 +145,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             proc = subprocess.Popen(command, stdout=out, stderr=err, env=env)
             result[name+"_pid"] = proc.pid
             try:
-                proc.wait(timeout=240)
+                proc.wait(timeout=max(240, duration+120))
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
@@ -216,19 +216,19 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         if workload[0] == "reads":
             seed([f"bench-reads-stream-{i}" for i in range(4)], 4*1024*1024)
             args = ["reads", "--mode", "catchup", "--streams", "4", "--connections", "16", "--read-size-bytes", "4096",
-                    "--seed-bytes", "0", "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", "8"]
+                    "--seed-bytes", "0", "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", str(duration)]
         elif workload[0] == "mixed":
             seed([f"s{i:06}" for i in range(16)], 256*1024)
             args = ["mixed", "--streams", "16", "--writers-per-stream", "1", "--writer-rate", "0", "--readers", "16",
-                    "--read-rate", "1", "--backfill-events", "0", "--subscribers", "0", "--duration-secs", "10", "--payload-bytes", "256"]
+                    "--read-rate", "1", "--backfill-events", "0", "--subscribers", "0", "--duration-secs", str(duration), "--payload-bytes", "256"]
         elif workload[0] == "fanout":
             args = ["fan-out", "--stream", "fanout", "--subscribers", str(workload[1]), "--writer-rate", "50",
-                    "--duration-secs", "10", "--payload-bytes", "256", "--subscriber-idle-timeout-secs", "10"]
+                    "--duration-secs", str(duration), "--payload-bytes", "256", "--subscriber-idle-timeout-secs", "10"]
         else:
             _, streams, concurrency = workload
             args = ["multi-stream", "--streams", str(streams), "--connections", str(concurrency), "--batch", "1",
                     "--rate-per-stream", "0", "--payload-bytes", "256", "--setup-concurrency", "32",
-                    "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", str(duration)]
+                    "--warmup-secs", str(write_warmup_secs), "--settle-secs", "1", "--duration-secs", str(duration)]
         args += ["--request-timeout-secs", "30"]
         if profile and not heap_profile:
             if profiler == "perf":
@@ -259,12 +259,21 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                                 try:
                                     if not native:
                                         row["groups"] = [lab.admin(node,g,"metrics") for g in range(2)]
-                                    if workload == ("write",1,256):
-                                        status, headers, _ = lab.request(node,"HEAD","/v1/stream/s00000000",
-                                                                       headers={"stream-consistency":"prefix"})
-                                        row["head_status"] = status
-                                        if status == 200:
-                                            row["committed_bytes"] = int(headers["stream-next-offset"].rsplit("_",1)[-1])
+                                    if workload[0] == "write":
+                                        # Bound observer load. Never extrapolate these sampled
+                                        # prefixes into a many-stream total; final drain is exhaustive.
+                                        row["sampled_stream_indices"] = sorted({i*(workload[1]-1)//15 for i in range(16)})
+                                        row["total_streams"] = workload[1]
+                                        total = 0
+                                        for i in row["sampled_stream_indices"]:
+                                            status, headers, _ = lab.request(node,"HEAD",f"/v1/stream/s{i:08}",
+                                                                           headers={"stream-consistency":"prefix"})
+                                            row["head_status"] = status
+                                            if status != 200:
+                                                break
+                                            total += int(headers["stream-next-offset"].rsplit("_",1)[-1])
+                                        else:
+                                            row["committed_bytes"] = total
                                 except (OSError, AssertionError, KeyError, ValueError) as error:
                                     row["error"] = repr(error)
                                 row["end_unix_ms"] = time.time_ns()//1_000_000
@@ -393,7 +402,8 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
 
 
 def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False,
-        cpu_profiles=False, heap_profiles=False, baseline_binary=None, baseline_provenance=None, duration_secs=None):
+        cpu_profiles=False, heap_profiles=False, baseline_binary=None, baseline_provenance=None, duration_secs=None,
+        write_streams=1, write_connections=256, write_warmup_secs=3):
     if (baseline_binary is None) != (baseline_provenance is None):
         raise ValueError("baseline comparison requires both binary and conformance provenance")
     baseline = None
@@ -405,6 +415,11 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
             raise ValueError("baseline binary does not match its retained conformance provenance")
     if duration_secs is not None and duration_secs <= 0:
         raise ValueError("duration must be positive")
+    if write_streams <= 0 or write_connections <= 0 or write_warmup_secs < 0:
+        raise ValueError("write streams/connections must be positive and warmup nonnegative")
+    if (write_streams, write_connections, write_warmup_secs) != (1, 256, 3) and not any(
+            (write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles)):
+        raise ValueError("write controls require an explicit write diagnostic/profile/async matrix")
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = source_hashes()
@@ -419,8 +434,10 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         native_durability="local fsync", raft1_durability="one-member local fsync", raft3_durability="quorum fsync on shared host",
         raft3_local_durability="local-fsync202 acceptance; all reads committed-only; background durable-quorum replication",
         pending_commands=1024 if async_writes else 256, pending_bytes=16*1024*1024,
-        progress_sampling="prefix HEAD per replica and group Raft metrics at ~0.5s; adds observation work" if async_writes else "none",
+        progress_sampling="prefix HEAD for at most 16 declared stream indices per replica and group Raft metrics, then 0.5s idle; adds observation work" if async_writes else "none",
         client_limits="202 is success; receipt headers discarded; 429 and 503 combined as measured backpressure, not timed; warmup errors not counted",
+        write_load="closed-loop concurrency, not paced; the pinned pool ignores rate-per-stream",
+        write_warmup_secs=write_warmup_secs,
         read_consistency="replicated default linearizable", tail_cache_bytes=0,
         qualification="short local windows, client not independently calibrated; no cloud capacity headline")
     if baseline is not None:
@@ -439,9 +456,9 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
     if reads_only:
         workloads = [("reads",), ("mixed",)]
     if write_diagnostics or async_writes:
-        workloads = [("write",1,256)] * 3
+        workloads = [("write",write_streams,write_connections)] * 3
     if write_profiles or cpu_profiles or heap_profiles:
-        workloads = [("write",1,256)]
+        workloads = [("write",write_streams,write_connections)]
     results = []
     for i, workload in enumerate(workloads):
         # Rotate arm order to reduce a systematic page-cache/time-order bias.
@@ -456,12 +473,14 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
                                 pending_commands=1024 if async_writes else 256,
                                 duration=duration_secs if duration_secs is not None else 30 if async_writes else 8, progress=async_writes,
                                 binary=baseline_binary if arm.endswith("-baseline") else BINARY,
+                                write_warmup_secs=write_warmup_secs,
                                 profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "strace"))
     if not smoke and not write_diagnostics and not write_profiles and not async_writes and not cpu_profiles and not heap_profiles:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
-                results.append(cell(output / name,arm,workload,profile=True))
+                results.append(cell(output / name,arm,workload,profile=True,
+                                    duration=duration_secs if duration_secs is not None else 8))
     (output / "results.json").write_text(json.dumps(results,indent=2)+"\n")
     return all(r["verdict"] == "PASS" for r in results)
 
@@ -474,4 +493,8 @@ if __name__ == "__main__":
     parser.add_argument("--baseline-binary", type=Path)
     parser.add_argument("--baseline-provenance", type=Path)
     parser.add_argument("--duration-secs", type=int)
+    parser.add_argument("--write-streams", type=int, default=1)
+    parser.add_argument("--write-connections", type=int, default=256)
+    parser.add_argument("--write-warmup-secs", type=int, default=3,
+                        help="Use 0 for the reject-free envelope: the pinned client does not count warmup errors")
     sys.exit(0 if run(**vars(parser.parse_args())) else 1)

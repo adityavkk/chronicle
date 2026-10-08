@@ -51,6 +51,21 @@ def summarize_phase_timings(observations, begin, end):
     return result
 
 
+def summarize_write_outcomes(values, begin, end):
+    """Stage counts can overlap; do not add them into an HTTP failure total."""
+    assert all(v["schema_version"] == 1 for v in values)
+    reset = any(any(b["cumulative"].get(k, 0) < n for k, n in a["cumulative"].items())
+                for a, b in zip(values, values[1:]))
+    result = dict(counter_reset_detected=reset, observations=len(values),
+                  whole_invocation=None if reset else values[-1]["cumulative"], sampled_window=None)
+    inside = [v for v in values if begin <= v["unix_ms"] <= end]
+    if not reset and len(inside) >= 2:
+        first, last = inside[0], inside[-1]
+        delta = {k:n-first["cumulative"].get(k, 0) for k,n in last["cumulative"].items()}
+        result["sampled_window"] = dict(start_unix_ms=first["unix_ms"], end_unix_ms=last["unix_ms"], cumulative_delta=delta)
+    return result
+
+
 def summarize_progress(samples, begin, end):
     nodes, groups = {}, {}
     for sample in samples:
@@ -60,6 +75,9 @@ def summarize_progress(samples, begin, end):
                 continue
             node = str(observation["node"])
             row = nodes.setdefault(node, dict(heads=[], errors=0))
+            if "sampled_stream_indices" in observation:
+                for key in ("sampled_stream_indices", "total_streams"):
+                    assert row.setdefault(key, observation[key]) == observation[key], "HEAD sample domain changed"
             row["errors"] += int("error" in observation or observation.get("head_status") != 200)
             if "committed_bytes" in observation:
                 row["heads"].append(dict(unix_ms=when, bytes=observation["committed_bytes"],
@@ -93,6 +111,7 @@ def summarize_progress(samples, begin, end):
         state["observed_snapshot_indices"] = sorted(state.pop("snapshots"))
     return dict(nodes=nodes, groups=groups,
         scope="Committed HEAD byte rates between individual observation completions, not exact client-window acks. "
+              "Bytes cover only declared sampled stream indices, with no extrapolation to total streams. "
               "Raft entry gaps are not commands or bytes, and last_log_index is not a commit index. "
               "Sequential node samples cannot establish an instantaneous cross-node gap. Missed peaks are possible.")
 
@@ -166,9 +185,11 @@ def summarize(directory):
             staged, syncs = 0, 0
             phase_timings = {}
             sync_timings = {}
+            write_outcomes = {}
             for log in cell.glob("node-*.log.gz"):
                 observations = []
                 sync_observations = []
+                outcome_observations = []
                 with gzip.open(log, "rt") as file:
                     for line in file:
                         match = re.search(r"WAL_CONT staged/s=(\d+) fsync/s=(\d+)", line)
@@ -179,10 +200,19 @@ def summarize(directory):
                             observations.append(json.loads(line.removeprefix("RAFT_TIMING ")))
                         if line.startswith("WAL_SYNC "):
                             sync_observations.append(json.loads(line.removeprefix("WAL_SYNC ")))
+                        if line.startswith("RAFT_WRITE_OUTCOMES "):
+                            outcome_observations.append(json.loads(line.removeprefix("RAFT_WRITE_OUTCOMES ")))
                 if observations:
                     phase_timings[log.name] = summarize_phase_timings(observations, begin, end)
                 if sync_observations:
                     sync_timings[log.name] = summarize_sync_timings(sync_observations, begin, end)
+                if outcome_observations:
+                    write_outcomes[log.name] = summarize_write_outcomes(outcome_observations, begin, end)
+            if write_outcomes:
+                row["write_outcomes"] = dict(nodes=write_outcomes,
+                    scope="Process-wide command-stage counters, including internal metadata; not HTTP wire acknowledgements. "
+                          "Stage counts overlap: a response timeout can precede durable apply. Sampled windows are "
+                          "first/last observations INSIDE the client window, not exact client boundaries. Missing is not zero.")
             if phase_timings:
                 row["phase_timings"] = dict(nodes=phase_timings,
                     scope="Cumulative completed-attempt wall times, including setup/warmup for whole_invocation. "

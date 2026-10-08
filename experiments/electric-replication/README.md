@@ -105,16 +105,28 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-025` executes **332/332 passing, zero failures/skips/todo**,
+The candidate's `conformance-026` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 140 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
 conformance exclusions. `storage-fault-017` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-010` checks 307
+syscalls and retains three unknown HTTP outcomes. `async-fault-011` checks 310
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
 releasing unresolved credit. These are single-host qualifications, not
 independent-disk/AZ or power-loss evidence.
+
+Opt-in `RAFT_WRITE_OUTCOMES` schema-1 counters distinguish count/byte backlog
+limits, epoch/lease/forward rejection, locally durable/applied command stages,
+and unknown post-assignment outcomes. They contain fixed labels, not request
+data; overlapping stages and internal commands are not HTTP totals. The fault
+checker tests real count/byte/lease rejection and rejects misclassified evidence.
+Benchmark envelope controls include concurrency, stream count and zero warmup:
+the pinned write pool is closed-loop (ignores `rate-per-stream`), combines
+429/503, drops rejected attempts and excludes warmup errors. Progress samples
+cover at most 16 explicitly declared streams without extrapolation; final drain
+still checks every stream on every replica. These are diagnostic instruments,
+not completed production observability or proof of sustained capacity.
 
 `snapshot-progress-002/003` isolates a scheduling bug and its fix with an actual
 two-second snapshot fsync delay. Before worker handoff, no unrelated-partition
@@ -152,7 +164,8 @@ exact bytes. Current quorum measures 36.6–41.6k/s, but one repetition rejects
 Every async repetition rejects load: 7.1–7.9k attempts on 0.10, 90.8–101.7k on
 0.9. Accepted bytes drain exactly to every replica; these are overload runs, not
 sustainable zero-error async capacity. The pinned client combines 429 and 503;
-per-cause diagnosis and controlled snapshot-delay qualification remain open.
+per-cause load diagnosis remains open; the controlled snapshot-delay result
+above does not make these earlier load failures pass.
 
 The matched `async-writes-006` matrix has complete resource samples: native
 **77–84k/s**, one member **39–46k/s** (**1.84–1.96× slower**), and quorum-three

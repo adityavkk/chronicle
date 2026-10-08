@@ -218,17 +218,32 @@ impl Group {
         {
             let receiver = self.raft.metrics();
             let metrics = receiver.borrow_watched();
-            if metrics.current_leader != Some(metrics.id) { return Err(503); }
+            if metrics.current_leader != Some(metrics.id) {
+                timing::write_outcome("not_leader", 1);
+                return Err(503);
+            }
         }
-        let permit = self.slots.clone().try_acquire_owned().map_err(|_| 429u16)?;
+        let permit = self.slots.clone().try_acquire_owned().map_err(|_| {
+            timing::write_outcome("count_bound", 1);
+            429u16
+        })?;
         let size = u32::try_from(command.encoded_len()).map_err(|_| 413u16)?;
-        let bytes = self.bytes.clone().try_acquire_many_owned(size).map_err(|_| 429u16)?;
+        let bytes = self.bytes.clone().try_acquire_many_owned(size).map_err(|_| {
+            timing::write_outcome("byte_bound", 1);
+            429u16
+        })?;
         let (result, receive) = tokio::sync::oneshot::channel();
         // The queue/consensus worker, not the HTTP future, owns this permit.
-        self.proposals.try_send(batch::Pending { command, result, permit, bytes }).map_err(|_| 503u16)?;
+        self.proposals.try_send(batch::Pending { command, result, permit, bytes }).map_err(|_| {
+            timing::write_outcome("queue_unavailable", 1);
+            503u16
+        })?;
         match tokio::time::timeout(Duration::from_secs(3), receive).await {
             Ok(Ok(result)) => result,
-            _ => Err(503),
+            _ => {
+                timing::write_outcome("response_unknown", 1);
+                Err(503)
+            }
         }
     }
 
@@ -356,6 +371,7 @@ impl Cluster {
                 _ => return response(400, "expected quorum-fsync, or local-fsync for POST append only"),
             }
             if g.raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
+                timing::write_outcome("not_leader", 1);
                 return self.unavailable(group, "not leader; mutation was not forwarded");
             }
             if req.method == Method::Put
