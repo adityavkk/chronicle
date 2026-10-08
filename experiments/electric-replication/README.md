@@ -90,7 +90,7 @@ not a substitute store or a model-only result.
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
 | 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 140 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
-| 2 | Single-node overhead and replicated sync/async performance | Open: repeated matched native/0.9/candidate measurements, hot/many streams, replay/fanout/mixed sustained loads. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles. Find the zero-error sustainable envelope separately from overload; retain unsuccessful candidates. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. Longer envelopes, replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
@@ -115,6 +115,34 @@ six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
 releasing unresolved credit. These are single-host qualifications, not
 independent-disk/AZ or power-loss evidence.
+
+The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
+**51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**
+gap. All strong cells pass; all six async cells fail the unchanged zero-rejection
+gate, with accepted bytes nevertheless draining exactly. A separate four-connection
+campaign (`openraft010-envelope-c4-001`) passes all **12/12 sixty-second cells**;
+async accepts 4.18–5.01k/s without errors/rejections. That is an operating point,
+not maximum sustainable capacity. No admission bound or durability was relaxed.
+
+The 1,024-stream matrix (`openraft010-many-001`) passes **12/12 thirty-second
+cells**: native 39.6–45.0k/s, one member 38.2–51.9k/s, quorum-three 19.0–19.3k/s,
+async 19.7–20.1k/s. Async does not approach one-member throughput here. Its
+111–113 ms p99 and 215–216 MiB aggregate RSS need diagnosis. Exhaustive post-run
+drain includes thousands of HEAD requests; it is not pure replication latency.
+Heap profiles separately attribute 26.80 decimal MB per current process to stock
+`base2histogram` startup tables, including with OpenRaft runtime-stats disabled.
+That fixed allocation explains the startup regression versus 0.9, not the extra
+async-versus-quorum memory or a leak. See [BATCHING.md](BATCHING.md) for evidence
+and remaining limits; no private histogram/consensus fork was added.
+
+The corrected read matrix (`openraft010-reads-002`) passes **60/60 execution
+checks**, with stable sampled clocks and twelve separate finite 1,000-reader
+sequence checks. Mixed writes measure native 19.5–20.5k/s, one member 11.5–12.1k/s,
+quorum 6.20–6.63k/s and async 6.66–8.20k accepts/s. Paced fanout frame counters are
+not per-reader sequence proof or capacity. Follow-on syscall profiling retains
+an analyzer failure caused by interleaved diagnostic logs; it does not resolve
+the untraced p99. Allocation profiles implicate bounded receipt results in the
+extra async heap, without changing retention or establishing a leak.
 
 Opt-in `RAFT_WRITE_OUTCOMES` schema-1 counters distinguish count/byte backlog
 limits, epoch/lease/forward rejection, locally durable/applied command stages,

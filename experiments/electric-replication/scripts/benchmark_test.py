@@ -166,6 +166,54 @@ class BaselineComparison(unittest.TestCase):
                 self.assertEqual(call.kwargs["pending_commands"], 1024)
             self.assertNotEqual([call.args[1] for call in calls[:4]], [call.args[1] for call in calls[20:24]])
 
+    def test_fsync_profile_is_perturbed_four_arm_diagnostic_not_capacity_repetitions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "binary"
+            binary.write_bytes(b"not-executable")
+            with patch("benchmark.ROOT", root), patch("benchmark.NATIVE", binary), \
+                 patch("benchmark.CLIENT", binary), patch("benchmark.BINARY", binary), \
+                 patch("benchmark.source_hashes", return_value={}), \
+                 patch("benchmark.cell", return_value={"verdict": "PASS"}) as execute:
+                self.assertTrue(run(root / "fsync", fsync_profiles=True, async_writes=True,
+                    duration_secs=19, write_streams=1024, write_warmup_secs=0))
+            self.assertEqual([call.args[1] for call in execute.call_args_list],
+                             ["native", "raft1", "raft3-local", "raft3"])
+            for call in execute.call_args_list:
+                self.assertEqual(call.args[2], ("write", 1024, 256))
+                self.assertTrue(call.kwargs["profile"])
+                self.assertTrue(call.kwargs["diagnostics"])
+                self.assertEqual(call.kwargs["profiler"], "fsync")
+                self.assertEqual(call.kwargs["duration"], 19)
+                self.assertEqual(call.kwargs["write_warmup_secs"], 0)
+                self.assertEqual(call.kwargs["pending_commands"], 1024)
+
+    def test_optional_stats_do_not_change_workloads_bounds_or_external_observations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "binary"
+            binary.write_bytes(b"not-executable")
+            with patch("benchmark.ROOT", root), patch("benchmark.NATIVE", binary), \
+                 patch("benchmark.CLIENT", binary), patch("benchmark.BINARY", binary), \
+                 patch("benchmark.source_hashes", return_value={}), \
+                 patch("benchmark.cell", return_value={"verdict": "PASS"}) as execute:
+                run(root / "on", async_writes=True, write_warmup_secs=0)
+                enabled = execute.call_args_list
+                execute.reset_mock()
+                run(root / "off", async_writes=True, write_warmup_secs=0, no_stats=True)
+                disabled = execute.call_args_list
+            self.assertEqual(len(enabled), 12)
+            self.assertEqual(len(enabled), len(disabled))
+            for before, after in zip(enabled, disabled):
+                self.assertEqual(before.args[1:], after.args[1:])
+                settings = dict(before.kwargs)
+                self.assertTrue(settings["diagnostics"])
+                settings["diagnostics"] = False
+                self.assertEqual(settings, after.kwargs)
+            for name, expected in (("on", False), ("off", True)):
+                recorded = json.loads((root / name / "provenance.json").read_text())
+                self.assertEqual(recorded["disable_optional_stats"], expected)
+
     def test_invalid_or_ignored_write_controls_fail_before_creating_a_run(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "not-started"
@@ -174,6 +222,9 @@ class BaselineComparison(unittest.TestCase):
                               dict(async_writes=True, write_warmup_secs=-1),
                               dict(reads_only=True, write_connections=17),
                               dict(read_diagnostics=True, async_writes=True),
+                              dict(read_diagnostics=True, fsync_profiles=True),
+                              dict(cpu_profiles=True, fsync_profiles=True),
+                              dict(heap_profiles=True, fsync_profiles=True),
                               dict(read_diagnostics=True, write_connections=17)):
                 with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                     run(output, **arguments)

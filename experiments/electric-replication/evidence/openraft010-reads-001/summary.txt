@@ -1,0 +1,60 @@
+native ['fanout', 1] PASS clock STABLE cpu 0.01 RSS MiB 1.4 replication MiB lower bound 0.0
+native ['fanout', 1] PASS clock STABLE cpu 0.02 RSS MiB 3.6 replication MiB lower bound 0.0
+native ['fanout', 1] PASS clock STABLE cpu 0.01 RSS MiB 1.4 replication MiB lower bound 0.0
+native ['fanout', 100] PASS clock STABLE cpu 0.05 RSS MiB 3.9 replication MiB lower bound 0.0
+native ['fanout', 100] PASS clock STABLE cpu 0.06 RSS MiB 3.8 replication MiB lower bound 0.0
+native ['fanout', 100] PASS clock STABLE cpu 0.06 RSS MiB 3.7 replication MiB lower bound 0.0
+native ['fanout', 1000] PASS clock STABLE cpu 0.32 RSS MiB 6.3 replication MiB lower bound 0.0
+native ['fanout', 1000] PASS clock STABLE cpu 0.33 RSS MiB 8.1 replication MiB lower bound 0.0
+native ['fanout', 1000] PASS clock STABLE cpu 0.36 RSS MiB 6.6 replication MiB lower bound 0.0
+native ['mixed'] FAIL clock UNVERIFIED cpu unqualified RSS MiB 0.0 replication MiB lower bound 0.0
+native ['mixed'] PASS clock INVALID cpu unqualified RSS MiB 5.8 replication MiB lower bound 0.0
+native ['mixed'] PASS clock STABLE cpu 0.88 RSS MiB 5.8 replication MiB lower bound 0.0
+native ['reads'] PASS clock STABLE cpu 2.06 RSS MiB 5.2 replication MiB lower bound 0.0
+native ['reads'] PASS clock STABLE cpu 2.31 RSS MiB 5.3 replication MiB lower bound 0.0
+native ['reads'] PASS clock STABLE cpu 1.77 RSS MiB 5.5 replication MiB lower bound 0.0
+raft1 ['fanout', 1] PASS clock STABLE cpu 0.03 RSS MiB 34.7 replication MiB lower bound 0.0
+raft1 ['fanout', 1] PASS clock STABLE cpu 0.03 RSS MiB 35.0 replication MiB lower bound 0.0
+raft1 ['fanout', 1] PASS clock STABLE cpu 0.03 RSS MiB 34.9 replication MiB lower bound 0.0
+raft1 ['fanout', 100] PASS clock STABLE cpu 0.07 RSS MiB 35.5 replication MiB lower bound 0.0
+raft1 ['fanout', 100] PASS clock STABLE cpu 0.07 RSS MiB 35.6 replication MiB lower bound 0.0
+raft1 ['fanout', 100] PASS clock STABLE cpu 0.07 RSS MiB 35.5 replication MiB lower bound 0.0
+raft1 ['fanout', 1000] PASS clock STABLE cpu 0.32 RSS MiB 39.2 replication MiB lower bound 0.0
+raft1 ['fanout', 1000] PASS clock STABLE cpu 0.38 RSS MiB 43.7 replication MiB lower bound 0.0
+raft1 ['fanout', 1000] PASS clock STABLE cpu 0.41 RSS MiB 45.1 replication MiB lower bound 0.0
+raft1 ['mixed'] PASS clock STABLE cpu 1.27 RSS MiB 44.1 replication MiB lower bound 0.0
+raft1 ['mixed'] PASS clock STABLE cpu 1.27 RSS MiB 45.3 replication MiB lower bound 0.0
+raft1 ['mixed'] PASS clock STABLE cpu 1.21 RSS MiB 43.8 replication MiB lower bound 0.0
+raft1 ['reads'] PASS clock STABLE cpu 1.6 RSS MiB 35.1 replication MiB lower bound 0.0
+raft1 ['reads'] PASS clock STABLE cpu 1.6 RSS MiB 34.9 replication MiB lower bound 0.0
+raft1 ['reads'] PASS clock STABLE cpu 2.13 RSS MiB 35.5 replication MiB lower bound 0.0
+raft3 ['fanout', 1] PASS clock STABLE cpu 0.11 RSS MiB 105.6 replication MiB lower bound 2.6
+raft3 ['fanout', 1] PASS clock STABLE cpu 0.12 RSS MiB 105.3 replication MiB lower bound 2.6
+raft3 ['fanout', 1] PASS clock STABLE cpu 0.12 RSS MiB 105.2 replication MiB lower bound 2.6
+raft3 ['fanout', 100] PASS clock STABLE cpu 0.15 RSS MiB 106.0 replication MiB lower bound 2.6
+raft3 ['fanout', 100] PASS clock STABLE cpu 0.16 RSS MiB 106.2 replication MiB lower bound 2.6
+raft3 ['fanout', 100] PASS clock STABLE cpu 0.16 RSS MiB 106.1 replication MiB lower bound 2.6
+raft3 ['fanout', 1000] PASS clock STABLE cpu 0.45 RSS MiB 114.1 replication MiB lower bound 2.7
+raft3 ['fanout', 1000] PASS clock STABLE cpu 0.49 RSS MiB 113.9 replication MiB lower bound 2.7
+raft3 ['fanout', 1000] PASS clock STABLE cpu 0.5 RSS MiB 111.6 replication MiB lower bound 2.7
+raft3-local ['fanout', 1] PASS clock STABLE cpu 0.12 RSS MiB 109.0 replication MiB lower bound 2.7
+raft3-local ['fanout', 1] PASS clock STABLE cpu 0.11 RSS MiB 108.4 replication MiB lower bound 2.7
+raft3-local ['fanout', 1] PASS clock STABLE cpu 0.12 RSS MiB 108.4 replication MiB lower bound 2.7
+raft3-local ['fanout', 100] PASS clock STABLE cpu 0.16 RSS MiB 109.0 replication MiB lower bound 2.7
+raft3-local ['fanout', 100] PASS clock STABLE cpu 0.15 RSS MiB 108.9 replication MiB lower bound 2.7
+raft3-local ['fanout', 100] PASS clock STABLE cpu 0.16 RSS MiB 108.6 replication MiB lower bound 2.7
+raft3-local ['fanout', 1000] PASS clock STABLE cpu 0.47 RSS MiB 113.0 replication MiB lower bound 2.8
+raft3-local ['fanout', 1000] PASS clock STABLE cpu 0.45 RSS MiB 116.4 replication MiB lower bound 2.8
+raft3-local ['fanout', 1000] PASS clock STABLE cpu 0.46 RSS MiB 115.3 replication MiB lower bound 2.8
+raft3-local ['mixed'] PASS clock STABLE cpu 1.99 RSS MiB 148.3 replication MiB lower bound 261.7
+raft3-local ['mixed'] PASS clock STABLE cpu 1.9 RSS MiB 153.3 replication MiB lower bound 236.9
+raft3-local ['mixed'] PASS clock STABLE cpu 2.12 RSS MiB 152.1 replication MiB lower bound 258.7
+raft3-local ['reads'] PASS clock STABLE cpu 1.95 RSS MiB 113.8 replication MiB lower bound 24.0
+raft3-local ['reads'] PASS clock STABLE cpu 2.14 RSS MiB 112.7 replication MiB lower bound 26.2
+raft3-local ['reads'] PASS clock STABLE cpu 1.74 RSS MiB 112.5 replication MiB lower bound 20.0
+raft3 ['mixed'] PASS clock STABLE cpu 2.11 RSS MiB 127.1 replication MiB lower bound 210.8
+raft3 ['mixed'] PASS clock STABLE cpu 2.45 RSS MiB 127.4 replication MiB lower bound 234.6
+raft3 ['mixed'] PASS clock STABLE cpu 2.23 RSS MiB 132.5 replication MiB lower bound 213.8
+raft3 ['reads'] PASS clock STABLE cpu 2.17 RSS MiB 113.2 replication MiB lower bound 27.4
+raft3 ['reads'] FAIL clock UNVERIFIED cpu unqualified RSS MiB 0.0 replication MiB lower bound 0.0
+raft3 ['reads'] PASS clock STABLE cpu 2.55 RSS MiB 112.4 replication MiB lower bound 31.4

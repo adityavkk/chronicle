@@ -1,0 +1,97 @@
+{
+  "arm": "raft3",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": true,
+  "profiler": "heaptrack",
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "profiler_version": "heaptrack 1.4.0",
+  "disk_preflight": {
+    "free_bytes": 9026031616,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    1510360,
+    1510413,
+    1510470
+  ],
+  "affinity": {
+    "1510360": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "1510413": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "1510470": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 1510479,
+  "process_sample_gaps": [
+    {
+      "pid": 1510479,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    },
+    {
+      "pid": 1510479,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    },
+    {
+      "pid": 1510479,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791487710765,
+    "end_unix_ms": 1791487728207,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 1488.7585490068886,
+    "target_bytes": 43081216,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 43081216
+      },
+      {
+        "node": 2,
+        "committed_bytes": 43081216
+      },
+      {
+        "node": 3,
+        "committed_bytes": 43081216
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "verify_pid": 1551220,
+  "verify_window": {
+    "start_unix_ms": 1791487729697,
+    "end_unix_ms": 1791487729820,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true,
+  "heap_report_exit_codes": {
+    "heap-node-2-1510413.zst": 0,
+    "heap-node-3-1510470.zst": 0,
+    "heap-node-1-1510360.zst": 0
+  }
+}

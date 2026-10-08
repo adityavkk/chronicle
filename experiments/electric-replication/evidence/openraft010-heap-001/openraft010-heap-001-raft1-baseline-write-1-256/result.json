@@ -1,0 +1,49 @@
+{
+  "arm": "raft1-baseline",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": true,
+  "profiler": "heaptrack",
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "253ad722f8623f9db9a1b0f39e2490a27de3292036c93f68a02bd13db0919abf",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "profiler_version": "heaptrack 1.4.0",
+  "disk_preflight": {
+    "free_bytes": 9308266496,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    642366
+  ],
+  "affinity": {
+    "642366": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 647872,
+  "process_sample_gaps": [],
+  "client_window": {
+    "start_unix_ms": 1791481235406,
+    "end_unix_ms": 1791481251454,
+    "exit_code": 0
+  },
+  "verify_pid": 747753,
+  "verify_window": {
+    "start_unix_ms": 1791481251454,
+    "end_unix_ms": 1791481251463,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true,
+  "heap_report_exit_codes": {
+    "heap-node-1-642366.zst": 0
+  }
+}

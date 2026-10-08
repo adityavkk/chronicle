@@ -1,0 +1,318 @@
+[
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "heaptrack 1.4.0",
+    "disk_preflight": {
+      "free_bytes": 9053859840,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1285724
+    ],
+    "affinity": {
+      "1285724": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1285738,
+    "process_sample_gaps": [
+      {
+        "pid": 1285738,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791487634193,
+      "end_unix_ms": 1791487650535,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 249.23500799923204,
+      "target_bytes": 99786496,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 99786496
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 1285977,
+    "verify_window": {
+      "start_unix_ms": 1791487650785,
+      "end_unix_ms": 1791487650819,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {
+      "heap-node-1-1285724.zst": 0
+    }
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "heaptrack 1.4.0",
+    "disk_preflight": {
+      "free_bytes": 9142190080,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1350952
+    ],
+    "affinity": {
+      "1350952": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1356236,
+    "process_sample_gaps": [
+      {
+        "pid": 1356236,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791487657800,
+      "end_unix_ms": 1791487675360,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 231.8140300048981,
+      "target_bytes": 65905408,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 65905408
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 1497496,
+    "verify_window": {
+      "start_unix_ms": 1791487675592,
+      "end_unix_ms": 1791487675659,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {
+      "heap-node-1-1350952.zst": 0
+    }
+  },
+  {
+    "arm": "raft3-local",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "local-fsync acceptance, not commitment",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "heaptrack 1.4.0",
+    "disk_preflight": {
+      "free_bytes": 9135570944,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1501094,
+      1501356,
+      1501622
+    ],
+    "affinity": {
+      "1501094": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1501356": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1501622": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1501801,
+    "process_sample_gaps": [
+      {
+        "pid": 1501801,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791487683338,
+      "end_unix_ms": 1791487700676,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 781.5404519933509,
+      "target_bytes": 23145216,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 23145216
+        },
+        {
+          "node": 2,
+          "committed_bytes": 23145216
+        },
+        {
+          "node": 3,
+          "committed_bytes": 23145216
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 1508949,
+    "verify_window": {
+      "start_unix_ms": 1791487701459,
+      "end_unix_ms": 1791487701575,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {
+      "heap-node-1-1501094.zst": 0,
+      "heap-node-3-1501622.zst": 0,
+      "heap-node-2-1501356.zst": 0
+    }
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1024,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "profiler_version": "heaptrack 1.4.0",
+    "disk_preflight": {
+      "free_bytes": 9026031616,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      1510360,
+      1510413,
+      1510470
+    ],
+    "affinity": {
+      "1510360": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1510413": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "1510470": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 1510479,
+    "process_sample_gaps": [
+      {
+        "pid": 1510479,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1510479,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      },
+      {
+        "pid": 1510479,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791487710765,
+      "end_unix_ms": 1791487728207,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1488.7585490068886,
+      "target_bytes": 43081216,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 43081216
+        },
+        {
+          "node": 2,
+          "committed_bytes": 43081216
+        },
+        {
+          "node": 3,
+          "committed_bytes": 43081216
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 1551220,
+    "verify_window": {
+      "start_unix_ms": 1791487729697,
+      "end_unix_ms": 1791487729820,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {
+      "heap-node-2-1510413.zst": 0,
+      "heap-node-3-1510470.zst": 0,
+      "heap-node-1-1510360.zst": 0
+    }
+  }
+]

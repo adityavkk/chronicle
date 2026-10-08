@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 234, in cell
+    assert lab.admin(1, group, "init", lab.genesis) == {"Ok":None}
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/lab.py", line 67, in start
+    with open(self.output / "config-history.jsonl", "a") as history:
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1051, in read_bytes
+    return f.read()
+           ^^^^^^^^
+ProcessLookupError: [Errno 3] No such process

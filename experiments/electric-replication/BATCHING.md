@@ -587,3 +587,175 @@ cleanup; the change affects scheduling, not snapshot atomicity. The affected
 group's apply still pauses. Load rejection and sustained async progress remain
 separate gates. Qualification includes 140 Rust tests, the full formal negative
 controls, `conformance-025` (332/332, zero skips), and fork/storage fault reruns.
+
+### Instrumented overload versus a reject-free operating point
+
+`openraft010-async-002` uses zero warmup, three 30-second repetitions, 256
+connections, the same 256-byte payload and unchanged 1,024-command admission
+bound. Fifteen cells pass and all six async cells fail; the driver exits 1.
+
+| Repetition | Native writes/s | 0.9 one member | Current one member | Native/current | Current quorum-three | Current async accepts/s | Current async rejects |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 87,412 | 35,700 | 51,811 | 1.69 | 30,865 | 33,775 | 6,656 |
+| 2 | 100,133 | 39,882 | 57,547 | 1.74 | 38,368 | 28,166 | 9,407 |
+| 3 | 102,263 | 46,055 | 61,173 | 1.67 | 37,824 | 37,473 | 6,683 |
+
+All native/one-member/quorum cells have zero client errors and exact-byte drain.
+Every accepted async byte also drains to every replica, but that does not make
+its rejected load a passing capacity result. `RAFT_WRITE_OUTCOMES` identifies
+all 6,656 / 6,683 first/third async rejections as count-bound rejection. The
+second has 7,615 count-bound and 1,792 lease-expired rejections. Count bursts
+occur in the observation intervals containing snapshot completion (leader
+snapshot wall times 622 / 781 / 579 ms). These intervals support attribution
+but are not exact request/lock timelines or proof that every lease loss has
+the same cause. No admission limit or durability barrier was relaxed.
+
+Current one-member p50 is 3.71–3.98 ms and p99 5.96–12.46 ms, versus native
+2.38–2.50 / 4.31–9.88 ms. These are closed-loop load latencies, not unloaded
+service times. Sampled one-member RSS is 40.8–42.2 MiB versus 0.9's
+13.3–13.7 MiB. The first sample, before append measurement, is already
+32.4 versus 5.9 MiB; payload backlog alone does not explain the difference.
+The earlier pre-worker-handoff 0.10 run also uses about 40 MiB. This memory
+regression needs measurement, not an assumed log-cache explanation.
+
+`openraft010-envelope-c4-001` instead uses four connections, zero warmup and
+three 60-second repetitions. All **12/12 cells pass** with zero rejected/error
+requests and exact bytes on every replica. Native is 7.84–8.34k writes/s,
+one member 3.89–4.35k, quorum-three 2.55–3.01k, and async 4.18–5.01k accepted/s.
+Async p50 is 0.755–0.832 ms and p99 1.573–3.867 ms; observed post-exit drain
+is 1.7–274.2 ms. Sampled log-minus-applied gaps reach 204–375 **entries**, not
+commands or bytes, and samples can miss peaks. A closing client `/proc` gap
+in the first async repetition is retained. This is a reject-free 60-second
+operating point, not maximum capacity or indefinitely bounded storage growth.
+
+The pinned pool ignores `rate-per-stream`, drops rejected attempts, sleeps
+20 ms after 429/503 and excludes warmup errors. Zero warmup is necessary for
+these envelope checks. Its success histogram omits rejected-request latency.
+The upstream `sustained` mode really paces, but exports neither exact wall-clock
+measurement boundaries nor useful in-window client counts; writer histograms
+are only merged on exit. It also discards worker join errors. Any future paced
+use must check achieved attempt count against offered load and independently
+verify committed drain, rather than equating a configured rate with capacity.
+
+### Startup memory is histogram geometry, not retained log payload
+
+`openraft010-heap-001` passes all five workload checks and exports all nine
+allocation traces (native, 0.9/current one-member and three-member). Tracing
+perturbs throughput; these 15-second executions are allocation evidence, not
+capacity runs. The current one-member trace attributes **26.80 MB** of peak
+live allocation to `base2histogram::LogScale::new`, called from OpenRaft startup.
+Its total peak heap is 35.11 MB versus 0.9's 5.45 MB. These are the profiler's
+decimal MB, not RSS/MiB, and live allocations at SIGTERM are not proof of leaks.
+
+The pinned Apache-2.0 `base2histogram` 0.2.3
+[`LogScale::get`](https://github.com/drmingdrmer/base2histogram/blob/125f07670e1e287ad95e33a4e66b41c959fb59b8/src/histogram/scale/log_scale.rs#L22-L31)
+eagerly initializes **all widths 1–16** when any width is requested. The large
+widths dominate the process-global lookup table even though OpenRaft uses the
+default width 3. This allocation occurs with the `runtime-stats` feature disabled:
+stock OpenRaft still constructs its internal
+[`RuntimeStats`](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/core/runtime_stats/runtime_stats.rs#L129-L146)
+histograms. It is a fixed once-per-process cost, not a per-entry or per-group
+payload cache. Turning off our diagnostics does not remove it. The effective
+Cargo feature graph confirms `runtime-stats` is not enabled.
+
+Keep this cost explicit in the stock-upstream evaluation rather than privately
+forking consensus or the histogram library to improve a comparison. Upstream's
+current source and newest tag still have this initializer. No measured throughput
+improvement is inferred from diagnosing a fixed startup allocation; transient
+allocation costs and sustained memory/storage growth remain separate concerns.
+
+### Many-stream writes have a different bottleneck
+
+`openraft010-many-001` passes **12/12 cells**, three 30-second repetitions with
+1,024 streams, 256 connections, zero warmup and unchanged admission limits.
+Every cell has zero client errors/rejections and exact acknowledged bytes on
+every replica. Native measures **39.6–45.0k/s**, one member **38.2–51.9k/s**,
+quorum-three **19.0–19.3k/s**, and async **19.7–20.1k accepts/s**. One-member
+variation overlaps native; this is not a general claim that Raft is faster.
+
+The three-member p99 is **111–113 ms**, versus one member **7.9–15.7 ms**.
+Async does not approach one-member throughput at this operating point. Its
+aggregate sampled RSS is 214.6–216.4 MiB versus quorum's 128.2 MiB; fixed startup
+histogram allocation does not explain that difference between two three-process
+arms. These remaining latency/memory costs need profiling, not a generic
+attribution to network or fsync. CPU averages 1.59–1.71 aggregate cores on the
+same four-core SUT affinity, so this does not establish CPU-saturated capacity.
+
+In-window HEAD probes cover exactly 16 declared streams per replica without
+extrapolation. The final drain checks all 1,024 on each replica; its 0.66–1.22s
+three-member observation includes those sequential requests and is **not pure
+replication latency**. Raw closing-client `/proc` gaps remain recorded. The
+shared-host/disk and uncalibrated-client limitations still apply.
+
+### Read harness corrections are retained, not engine improvements
+
+`openraft010-reads-001` ends with 58 execution checks passing and two setup
+failures. A process can exit between enumerating `/proc` and reading its command
+line; the driver now tolerates `ProcessLookupError` as well as disappearing and
+inaccessible processes, without relaxing exact argv matching or swallowing other
+I/O failures. Regression fixtures exercise both identity mismatches and unexpected
+I/O errors. The pinned ds-bench client itself remains unchanged.
+
+The initial 30-second request timeout also started **before** the fanout writer
+barrier and expired during its 30-second drive window. Its measured frame fractions
+therefore cannot establish complete delivery or qualified fanout latency. The
+corrected timeout is drive duration plus 30 seconds; independent finite sequence
+probes remain separate from the client's frame counters. A full corrected matrix
+is required, not just successful reruns of the two process-discovery failures.
+
+Native mixed repeat 2 also contains a **75.428-second forward wall-clock step**:
+the retained sample interval spans 106.346 wall seconds but 30.918 monotonic
+seconds. `summary-before-clock-check.json` preserves the earlier invalid resource
+calculation. The analyzer compares all paired wall/monotonic samples (including
+ones outside the nominal window), flags steps over 100 ms and non-increasing
+monotonic clocks, and omits affected aligned rates/phase windows. Stable resource
+rates use monotonic duration; original execution checks, raw client results and
+cumulative counters remain intact. A passing protocol check is not a valid timing
+measurement. Generated step/reversal fixtures verify that equal endpoints cannot
+hide an intervening clock step. No samples means unverified, not stable.
+
+The hot-write, many-stream and four-connection envelope campaigns all pass this
+clock check. It does not qualify unsampled intervals or prove client calibration.
+
+`openraft010-reads-002` completes the corrected matrix: **60/60 execution checks**
+pass, with stable sampled clocks and zero client-reported errors/rejections. Each
+arm runs three 30-second repetitions of fanout at 1/100/1,000 readers, catch-up
+replay and mixed writes/reads. All twelve separate finite 1,000-reader sequence
+checks pass. Timed 1,000-reader frame fractions are 1.0 for native/quorum and
+0.99942–0.99996 for one-member/async. Frames can coalesce; the pinned counter is
+not a per-reader record check, and the finite checks do not prove the timed
+client observed every record. Fanout is paced at 50 writes/s, not a capacity run.
+
+Mixed writes measure native **19.5–20.5k/s**, one member **11.5–12.1k/s**, quorum
+**6.20–6.63k/s** and async **6.66–8.20k accepts/s**, with exact final committed
+bytes on every replica. Catch-up replay (4 MiB per successful request) measures
+native **7.50–11.70 decimal GB/s**, one member **7.25–11.21**, quorum **8.70–8.90**
+and async-configured **8.21–10.97**. All replicated reads still use the default
+linearizable barrier. These loopback/page-cache rates overlap widely; they do
+not establish network/disk capacity or a general advantage for either mode.
+Mixed read tails remain variable (including native's 529 ms p99 in one repeat).
+
+### Profiling the many-stream latency and memory cost
+
+`openraft010-fsync-many-001` retains four passing perturbed workload checks and
+independently parsed syscall traces, but **aggregate analysis fails**: two
+`RAFT_TIMING` JSON records in the quorum leader log are interleaved with tracing
+warnings written through stdout into the same service log as stderr. Do not use
+those phase samples or label the whole analysis clean. The failure traceback
+and unmodified log are retained; fixing output serialization requires a rerun.
+No traced fsync/fdatasync lasts 100 ms (maxima 8.8–18.9 ms across replicated arms),
+but ptrace reduces the workload substantially. This does not explain or rule out
+the untraced 111–113 ms p99. The untraced native-WAL sync-loop maxima themselves
+reach 103–105 ms on all three replicas, without snapshots in those cells; those
+wall times include descheduling and are not pure device latency.
+
+`openraft010-heap-many-001` passes four perturbed workload checks and exports
+eight allocation traces. The async leader peaks at **57.48 decimal MB** versus
+one member's **38.48 MB**; these are heap allocations, not RSS. Besides the fixed
+26.80 MB histogram tables, its largest retained allocations include 10.45 MB in
+apply-path BTreeMap insertions and 8.92 MB in cloned reply vectors. This supports
+the bounded receipt-result cache as a source of extra memory; it is not proof of
+a leak or a complete attribution of the untraced RSS difference. Result retention
+remains the latest 1,024 receipt-bearing batches per partition (up to 65,536
+results). No receipt retention, admission bound or durability guarantee was
+reduced to improve a number.

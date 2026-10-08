@@ -13,6 +13,79 @@ import re
 import sys
 
 
+def check_clock(samples):
+    """Compare paired clocks, including steps that reverse before the final sample."""
+    tolerance_ms = 100
+    result = dict(status="UNVERIFIED", tolerance_ms=tolerance_ms, samples=len(samples), discontinuities=[],
+                  scope="Sampled wall/monotonic consistency only; unsampled intervals are not qualified.")
+    if len(samples) < 2 or any("monotonic_ns" not in s for s in samples):
+        return result
+    first = samples[0]
+    previous = first["monotonic_ns"] - 1
+    for i, sample in enumerate(samples):
+        wall_ns = (sample["unix_ms"] - first["unix_ms"]) * 1_000_000
+        mono_ns = sample["monotonic_ns"] - first["monotonic_ns"]
+        drift_ms = (wall_ns - mono_ns) / 1_000_000
+        if abs(drift_ms) > tolerance_ms or sample["monotonic_ns"] <= previous:
+            result["discontinuities"].append(dict(sample_index=i, unix_ms=sample["unix_ms"],
+                wall_delta_ms=wall_ns/1_000_000, monotonic_delta_ms=mono_ns/1_000_000, offset_drift_ms=drift_ms))
+        previous = sample["monotonic_ns"]
+    result["status"] = "INVALID" if result["discontinuities"] else "STABLE"
+    return result
+
+
+def summarize_fsync_trace(lines):
+    """strace -f -qq -ttt -T, filtered to fsync/fdatasync; failures stay explicit."""
+    pending, successful, failures = {}, [], {}
+    started = completed = resumed_without_start = 0
+    for number, line in enumerate(lines, 1):
+        match = re.fullmatch(r"\s*(\d+)\s+\d+\.\d+\s+(.+)\s*", line.rstrip())
+        if not match:
+            raise ValueError(f"unrecognized fsync trace line {number}")
+        tid, call = match.groups()
+        kind = re.search(r"(fsync|fdatasync)(?:\(| resumed>)", call)
+        if kind is None:
+            raise ValueError(f"unrecognized fsync call on line {number}")
+        kind = kind[1]
+        if "<unfinished ...>" in call:
+            if tid in pending:
+                raise ValueError(f"overlapping calls on line {number}")
+            pending[tid] = kind
+            started += 1
+            continue
+        if call.startswith("<..."):
+            original = pending.pop(tid, None)
+            if original is None:
+                resumed_without_start += 1
+            elif original != kind:
+                raise ValueError(f"resumed syscall mismatch on line {number}")
+        else:
+            if tid in pending:
+                raise ValueError(f"missing resume on line {number}")
+            started += 1
+        result = re.search(r"= (-?\d+)(?: ([A-Z][A-Z0-9]+) .*)?\s+<(\d+)\.(\d{6})>$", call)
+        if result is None:
+            raise ValueError(f"missing fsync result/duration on line {number}")
+        status, error, seconds, fraction = result.groups()
+        completed += 1
+        if status == "0":
+            successful.append(int(seconds)*1_000_000+int(fraction))
+        else:
+            label = error or f"return_{status}"
+            failures[label] = failures.get(label, 0)+1
+    successful.sort()
+    n = len(successful)
+    return dict(started=started, completed=completed, incomplete_by_tid=pending,
+        resumed_without_start=resumed_without_start, errors=failures,
+        successful=dict(count=n, total_us=sum(successful),
+            mean_us=sum(successful)/n, p50_us=successful[(n*50+99)//100-1],
+            p99_us=successful[(n*99+99)//100-1], max_us=successful[-1],
+            at_least_100ms=sum(us >= 100_000 for us in successful)) if n else None,
+        scope="All traced filesystem fsync/fdatasync calls, including setup and drain. "
+              "Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. "
+              "Failed and unfinished calls are not successful durability; not an unperturbed capacity result.")
+
+
 def summarize_sync_timings(values, begin, end):
     keys = ("count", "calls", "total_ns")
     reset = any(any(b[k] < a[k] for k in keys) for a, b in zip(values, values[1:]))
@@ -139,14 +212,16 @@ def summarize(directory):
         peaks = dict(sut_rss_bytes=0,client_rss_bytes=0)
         window = []
         progress = []
+        observations = []
         samples = cell / "samples.jsonl.gz"
         if samples.exists():
             with gzip.open(samples,"rt") as file:
                 for line in file:
                     sample = json.loads(line)
+                    observations.append(sample)
                     if not begin <= sample["unix_ms"] <= end:
                         continue
-                    window.append(sample["unix_ms"])
+                    window.append(sample)
                     if "replicas" in sample:
                         progress.append(sample)
                     for pid, process in sample["processes"].items():
@@ -161,15 +236,25 @@ def summarize(directory):
                             sent = socket["counters"].get("bytes_sent",0)
                             initial, maximum = sockets.setdefault(key,(sent,sent))
                             sockets[key] = (initial,max(maximum,sent))
+        row["clock_integrity"] = check_clock(observations)
+        clock_stable = row["clock_integrity"]["status"] == "STABLE"
         resources = dict(peak_sampled=peaks,samples=len(window),
                          observed_replication_sent_bytes_lower_bound=sum(b-a for a,b in sockets.values()))
-        if len(window) >= 2:
-            seconds = (window[-1]-window[0])/1000
+        if clock_stable and len(window) >= 2:
+            seconds = (window[-1]["monotonic_ns"]-window[0]["monotonic_ns"])/1_000_000_000
             resources.update(sampled_seconds=seconds,
                 average_sut_cpu_cores=sum(last[p]["cpu_ticks"]-first[p]["cpu_ticks"] for p in nodes if p in first)/provenance["cpu_hz"]/seconds,
                 sut_write_bytes=sum(last[p]["io"]["write_bytes"]-first[p]["io"]["write_bytes"] for p in nodes if p in first),
                 sut_read_bytes=sum(last[p]["io"]["read_bytes"]-first[p]["io"]["read_bytes"] for p in nodes if p in first))
         row["resources"] = resources
+        trace = cell / "fsync-trace.log.gz"
+        if trace.exists():
+            with gzip.open(trace, "rt") as file:
+                row["fsync_trace"] = summarize_fsync_trace(file)
+        if not clock_stable:
+            # Keep original executions/counters, but do not align rates or phase
+            # windows against a clock that jumped (or was never observed).
+            begin, end = 1, 0
         if result.get("progress_sampling"):
             row["progress"] = summarize_progress(progress, begin, end)
             row["drain"] = result.get("drain")
@@ -244,7 +329,8 @@ def summarize(directory):
         if not row["profile"]:
             resource = row["resources"]
             print(row["arm"],row["workload"],row["verdict"],
-                  "cpu",round(resource.get("average_sut_cpu_cores",0),2),
+                  "clock",row["clock_integrity"]["status"],
+                  "cpu",round(resource["average_sut_cpu_cores"],2) if "average_sut_cpu_cores" in resource else "unqualified",
                   "RSS MiB",round(resource["peak_sampled"]["sut_rss_bytes"]/2**20,1),
                   "replication MiB lower bound",round(resource["observed_replication_sent_bytes_lower_bound"]/2**20,1))
 

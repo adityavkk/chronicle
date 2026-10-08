@@ -1,0 +1,811 @@
+[
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8747671552,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      2587465
+    ],
+    "affinity": {
+      "2587465": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2587476,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480329437,
+      "end_unix_ms": 1791480390485,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.7091760053299367,
+      "target_bytes": 128077312,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 128077312
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 2801231,
+    "verify_window": {
+      "start_unix_ms": 1791480390487,
+      "end_unix_ms": 1791480390495,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8747524096,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      2801277
+    ],
+    "affinity": {
+      "2801277": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2801286,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480393395,
+      "end_unix_ms": 1791480454833,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.7969509897520766,
+      "target_bytes": 66794496,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 66794496
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 2801436,
+    "verify_window": {
+      "start_unix_ms": 1791480454835,
+      "end_unix_ms": 1791480454843,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3-local",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "local-fsync acceptance, not commitment",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8747155456,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      2801483,
+      2801511,
+      2801538
+    ],
+    "affinity": {
+      "2801483": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2801511": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2801538": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2801546,
+    "process_sample_gaps": [
+      {
+        "pid": 2801546,
+        "error": "FileNotFoundError(2, 'No such file or directory')"
+      }
+    ],
+    "client_window": {
+      "start_unix_ms": 1791480458561,
+      "end_unix_ms": 1791480519603,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 274.224310007412,
+      "target_bytes": 76971008,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 76971008
+        },
+        {
+          "node": 2,
+          "committed_bytes": 76971008
+        },
+        {
+          "node": 3,
+          "committed_bytes": 76971008
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 2801698,
+    "verify_window": {
+      "start_unix_ms": 1791480519878,
+      "end_unix_ms": 1791480519887,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8746254336,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      2801786,
+      2801813,
+      2801842
+    ],
+    "affinity": {
+      "2801786": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2801813": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2801842": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2801851,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480524226,
+      "end_unix_ms": 1791480585265,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1.456211000913754,
+      "target_bytes": 46255360,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 46255360
+        },
+        {
+          "node": 2,
+          "committed_bytes": 46255360
+        },
+        {
+          "node": 3,
+          "committed_bytes": 46255360
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 2802000,
+    "verify_window": {
+      "start_unix_ms": 1791480585267,
+      "end_unix_ms": 1791480585275,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8745398272,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      2802088
+    ],
+    "affinity": {
+      "2802088": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2802097,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480588933,
+      "end_unix_ms": 1791480649962,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.8695430005900562,
+      "target_bytes": 59940864,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 59940864
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3007767,
+    "verify_window": {
+      "start_unix_ms": 1791480649964,
+      "end_unix_ms": 1791480649972,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3-local",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "local-fsync acceptance, not commitment",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8744968192,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3009390,
+      3009631,
+      3009855
+    ],
+    "affinity": {
+      "3009390": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3009631": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3009855": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3010073,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480653616,
+      "end_unix_ms": 1791480714675,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 2.625135995913297,
+      "target_bytes": 64207872,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 64207872
+        },
+        {
+          "node": 2,
+          "committed_bytes": 64207872
+        },
+        {
+          "node": 3,
+          "committed_bytes": 64207872
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3212328,
+    "verify_window": {
+      "start_unix_ms": 1791480714678,
+      "end_unix_ms": 1791480714685,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8744120320,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3221602,
+      3221857,
+      3222123
+    ],
+    "affinity": {
+      "3221602": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3221857": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3222123": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3222330,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480719257,
+      "end_unix_ms": 1791480780303,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1.798741999664344,
+      "target_bytes": 39203328,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 39203328
+        },
+        {
+          "node": 2,
+          "committed_bytes": 39203328
+        },
+        {
+          "node": 3,
+          "committed_bytes": 39203328
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3443495,
+    "verify_window": {
+      "start_unix_ms": 1791480780305,
+      "end_unix_ms": 1791480780313,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8729088000,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3444836
+    ],
+    "affinity": {
+      "3444836": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3444849,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480783643,
+      "end_unix_ms": 1791480844683,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.7658149988856167,
+      "target_bytes": 120464640,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 120464640
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3645528,
+    "verify_window": {
+      "start_unix_ms": 1791480844684,
+      "end_unix_ms": 1791480844690,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3-local",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "local-fsync acceptance, not commitment",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8743137280,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3650062,
+      3650314,
+      3650565
+    ],
+    "affinity": {
+      "3650062": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3650314": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3650565": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3650770,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480848367,
+      "end_unix_ms": 1791480909421,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1.6957499901764095,
+      "target_bytes": 68711936,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 68711936
+        },
+        {
+          "node": 2,
+          "committed_bytes": 68711936
+        },
+        {
+          "node": 3,
+          "committed_bytes": 68711936
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3659622,
+    "verify_window": {
+      "start_unix_ms": 1791480909424,
+      "end_unix_ms": 1791480909431,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8742326272,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3659710,
+      3659737,
+      3659764
+    ],
+    "affinity": {
+      "3659710": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3659737": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "3659764": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3659775,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480913898,
+      "end_unix_ms": 1791480974919,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 1.4470479945885018,
+      "target_bytes": 39841280,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 39841280
+        },
+        {
+          "node": 2,
+          "committed_bytes": 39841280
+        },
+        {
+          "node": 3,
+          "committed_bytes": 39841280
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 3865706,
+    "verify_window": {
+      "start_unix_ms": 1791480974921,
+      "end_unix_ms": 1791480974929,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8741535744,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      3867646
+    ],
+    "affinity": {
+      "3867646": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 3867735,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791480978236,
+      "end_unix_ms": 1791481039266,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.8185659971786663,
+      "target_bytes": 123583488,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 123583488
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 4078854,
+    "verify_window": {
+      "start_unix_ms": 1791481039267,
+      "end_unix_ms": 1791481039275,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1,
+      4
+    ],
+    "profile": false,
+    "profiler": null,
+    "diagnostics": true,
+    "verdict": "PASS",
+    "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 1024,
+    "progress_sampling": true,
+    "disk_preflight": {
+      "free_bytes": 8741330944,
+      "minimum_free_bytes": 8589934592
+    },
+    "node_pids": [
+      4080095
+    ],
+    "affinity": {
+      "4080095": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 4080297,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791481042209,
+      "end_unix_ms": 1791481103225,
+      "exit_code": 0
+    },
+    "drain": {
+      "observed_ms": 0.874036006280221,
+      "target_bytes": 59680512,
+      "replicas": [
+        {
+          "node": 1,
+          "committed_bytes": 59680512
+        }
+      ],
+      "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+    },
+    "verify_pid": 108757,
+    "verify_window": {
+      "start_unix_ms": 1791481103227,
+      "end_unix_ms": 1791481103235,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true
+  }
+]

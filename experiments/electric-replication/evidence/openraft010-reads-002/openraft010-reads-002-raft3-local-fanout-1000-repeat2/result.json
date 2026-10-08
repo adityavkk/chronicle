@@ -1,0 +1,78 @@
+{
+  "arm": "raft3-local",
+  "workload": [
+    "fanout",
+    1000
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+  "ack_contract": "local-fsync acceptance, not commitment",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "disk_preflight": {
+    "free_bytes": 9182543872,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    110927,
+    110955,
+    110983
+  ],
+  "affinity": {
+    "110927": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "110955": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "110983": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 110991,
+  "process_sample_gaps": [
+    {
+      "pid": 110991,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791486020060,
+    "end_unix_ms": 1791486052403,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 1.6903479991015047,
+    "target_bytes": 384256,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 384256
+      },
+      {
+        "node": 2,
+        "committed_bytes": 384256
+      },
+      {
+        "node": 3,
+        "committed_bytes": 384256
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "delivery_fraction": 0.9995942704863424,
+  "finite_fanout_exit_code": 0,
+  "diagnostic_tail_captured": true
+}

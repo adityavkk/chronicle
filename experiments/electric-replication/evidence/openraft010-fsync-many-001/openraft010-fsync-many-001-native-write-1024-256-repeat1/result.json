@@ -1,0 +1,88 @@
+{
+  "arm": "native",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": true,
+  "profiler": "fsync",
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "48e5390d3101748b6c691c2310ffe58517f26c89d6f3b26b8cd5138fba0685e5",
+  "ack_contract": "native local-fsync",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+  "disk_preflight": {
+    "free_bytes": 9057488896,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    3911642
+  ],
+  "affinity": {
+    "3911642": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 3911661,
+  "process_sample_gaps": [
+    {
+      "pid": 3911661,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    },
+    {
+      "pid": 3911661,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    },
+    {
+      "pid": 3911661,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791487153269,
+    "end_unix_ms": 1791487170005,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 2040.943400003016,
+    "target_bytes": 12705024,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 12705024
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "fsync_trace_summary": {
+    "started": 40757,
+    "completed": 40757,
+    "incomplete_by_tid": {},
+    "resumed_without_start": 0,
+    "errors": {},
+    "successful": {
+      "count": 40757,
+      "total_us": 12302311,
+      "mean_us": 301.8453517187232,
+      "p50_us": 176,
+      "p99_us": 2165,
+      "max_us": 12951,
+      "at_least_100ms": 0
+    },
+    "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+  },
+  "profile_script_exit_code": 0,
+  "verify_pid": 3997193,
+  "verify_window": {
+    "start_unix_ms": 1791487172200,
+    "end_unix_ms": 1791487172268,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

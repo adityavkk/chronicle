@@ -6,7 +6,105 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmark_summary import summarize, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+from benchmark_summary import check_clock, summarize, summarize_fsync_trace, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+
+
+class FsyncTrace(unittest.TestCase):
+    def test_interleaved_resumes_errors_and_partial_tail_keep_distinct_outcomes(self):
+        lines = ["81 10.000001 fsync(3 <unfinished ...>",
+                 "82 10.000002 fdatasync(4) = 0 <0.099999>",
+                 "81 10.000003 <... fsync resumed>) = 0 <0.100000>",
+                 "82 10.000004 fsync(4) = -1 EIO (Input/output error) <0.700000>",
+                 "81 10.000005 fsync(3) = 0 <0.000017>",
+                 "82 10.000006 fdatasync(4 <unfinished ...>"]
+        result = summarize_fsync_trace(lines)
+        self.assertEqual(result["started"], 5)
+        self.assertEqual(result["completed"], 4)
+        self.assertEqual(result["incomplete_by_tid"], {"82": "fdatasync"})
+        self.assertEqual(result["resumed_without_start"], 0)
+        self.assertEqual(result["errors"], {"EIO": 1})
+        self.assertEqual(result["successful"], dict(count=3, total_us=200016, mean_us=66672,
+            p50_us=99999, p99_us=100000, max_us=100000, at_least_100ms=1))
+        unmatched = summarize_fsync_trace(["81 10.001000 <... fsync resumed>) = 0 <0.000100>"])
+        self.assertEqual(unmatched["started"], 0)
+        self.assertEqual(unmatched["completed"], 1)
+        self.assertEqual(unmatched["resumed_without_start"], 1)
+
+    def test_bad_trace_does_not_silently_discard_missing_or_conflicting_calls(self):
+        for lines in (["garbage"], ["81 10.1 fsync(3) = 0"],
+                      ["81 10.1 fsync(3 <unfinished ...>", "81 10.2 fdatasync(4 <unfinished ...>"],
+                      ["81 10.1 fsync(3 <unfinished ...>", "81 10.2 <... fdatasync resumed>) = 0 <0.000001>"],
+                      ["81 10.1 fsync(3 <unfinished ...>", "81 10.2 fsync(4) = 0 <0.000001>"]):
+            with self.subTest(lines=lines), self.assertRaises(ValueError):
+                summarize_fsync_trace(lines)
+        self.assertIsNone(summarize_fsync_trace(["81 10.1 fsync(3) = -1 EINVAL (Invalid argument) <0.000001>"])["successful"])
+
+
+class ClockIntegrity(unittest.TestCase):
+    def test_steps_in_either_direction_and_reversed_steps_are_not_hidden_by_endpoints(self):
+        base = [dict(unix_ms=1000+i*500, monotonic_ns=7_000_000_000+i*500_000_000) for i in range(6)]
+        self.assertEqual(check_clock(base)["status"], "STABLE")
+        for start in range(1, 5):
+            for end in range(start+1, 7):
+                for jump in (-75428, -101, 101, 75428):
+                    values = [dict(row, unix_ms=row["unix_ms"]+(jump if start <= i < end else 0))
+                              for i, row in enumerate(base)]
+                    with self.subTest(start=start, end=end, jump=jump):
+                        result = check_clock(values)
+                        self.assertEqual(result["status"], "INVALID")
+                        self.assertEqual(result["discontinuities"][0]["offset_drift_ms"], jump)
+        # A missing/regressed monotonic clock must not be interpreted as a
+        # zero-duration or a trustworthy wall-only rate.
+        self.assertEqual(check_clock([])["status"], "UNVERIFIED")
+        self.assertEqual(check_clock([base[0]])["status"], "UNVERIFIED")
+        self.assertEqual(check_clock([base[0], {"unix_ms": 2000}])["status"], "UNVERIFIED")
+        self.assertEqual(check_clock([base[1], base[0]])["status"], "INVALID")
+
+    def test_invalid_clock_omits_rates_and_aligned_windows_but_retains_results(self):
+        for jump in (0, 75428, -75428):
+            with self.subTest(jump=jump), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                cell = root / "clock"
+                cell.mkdir()
+                (root / "provenance.json").write_text(json.dumps(dict(page_bytes=4096, cpu_hz=100)))
+                (cell / "result.json").write_text(json.dumps(dict(arm="raft1", workload=["mixed"],
+                    profile=False, diagnostics=True, verdict="PASS", progress_sampling=True, node_pids=[1],
+                    client_window=dict(start_unix_ms=1000, end_unix_ms=4000), drain=dict(target_bytes=768))))
+                raw = dict(write_counts=dict(ok=3), drive_secs=2)
+                (cell / "client.json").write_text(json.dumps(raw))
+                with gzip.open(cell / "samples.jsonl.gz", "wt") as out:
+                    for i, elapsed in enumerate((0, 500, 2000)):
+                        wall = 1100+elapsed+(jump if i == 1 else 0)
+                        sample = dict(unix_ms=wall, monotonic_ns=7_000_000_000+elapsed*1_000_000,
+                            processes={"1": dict(cpu_ticks=10+elapsed//20, rss_pages=7,
+                                io=dict(write_bytes=elapsed*2, read_bytes=0))}, sockets=[],
+                            replicas=[dict(node=1, unix_ms=wall, end_unix_ms=wall+1,
+                                head_status=200, committed_bytes=i*384)])
+                        out.write(json.dumps(sample)+'\n')
+                with gzip.open(cell / "node-1.log.gz", "wt") as out:
+                    for when, count in ((1100, 9), (3100, 17)):
+                        out.write('RAFT_WRITE_OUTCOMES '+json.dumps(dict(schema_version=1,
+                            unix_ms=when, cumulative=dict(applied_commands=count)))+'\n')
+                with contextlib.redirect_stdout(io.StringIO()):
+                    summarize(root)
+                row = json.loads((root / "summary.json").read_text())["rows"][0]
+                self.assertEqual(row["verdict"], "PASS")  # original protocol check, not timing qualification
+                self.assertEqual(row["raw_client"], raw)
+                self.assertEqual(row["drain"], dict(target_bytes=768))
+                outcome = row["write_outcomes"]["nodes"]["node-1.log.gz"]
+                self.assertEqual(outcome["whole_invocation"], dict(applied_commands=17))
+                if jump:
+                    self.assertEqual(row["clock_integrity"]["status"], "INVALID")
+                    self.assertNotIn("sampled_seconds", row["resources"])
+                    self.assertNotIn("average_sut_cpu_cores", row["resources"])
+                    self.assertEqual(row["progress"]["nodes"], {})
+                    self.assertIsNone(outcome["sampled_window"])
+                else:
+                    self.assertEqual(row["clock_integrity"]["status"], "STABLE")
+                    self.assertEqual(row["resources"]["sampled_seconds"], 2)
+                    self.assertEqual(row["resources"]["average_sut_cpu_cores"], 0.5)
+                    self.assertEqual(row["progress"]["nodes"]["1"]["committed_bytes_per_second"], 384)
+                    self.assertEqual(outcome["sampled_window"]["cumulative_delta"], dict(applied_commands=8))
 
 
 class ProgressSummary(unittest.TestCase):

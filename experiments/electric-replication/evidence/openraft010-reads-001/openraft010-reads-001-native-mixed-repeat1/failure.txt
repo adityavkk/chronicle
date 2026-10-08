@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 227, in cell
+    if proc.name.isdecimal() and (proc / "cmdline").read_bytes().split(b"\0")[0] == str(NATIVE).encode():
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1051, in read_bytes
+    return f.read()
+           ^^^^^^^^
+ProcessLookupError: [Errno 3] No such process

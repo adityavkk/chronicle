@@ -22,6 +22,7 @@ import threading
 import time
 import traceback
 
+from benchmark_summary import summarize_fsync_trace
 from lab import Lab, BINARY, EXPERIMENT, ROOT, matching_pids, source_hashes
 
 CLIENT = ROOT / ".tmp/electric-tools/bench-target/release/ds-bench"
@@ -144,7 +145,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
     (lab.output / "hdr").mkdir()
     heap_profile = profile and profiler == "heaptrack"
     if profile:
-        result["profiler_version"] = subprocess.check_output([profiler, "--version"], text=True).strip()
+        result["profiler_version"] = subprocess.check_output(["strace" if profiler == "fsync" else profiler, "--version"], text=True).strip()
 
     def stop_profile():
         nonlocal trace
@@ -162,6 +163,15 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                      "-i", str(lab.output / "perf.data")], stdout=report, stderr=subprocess.STDOUT).returncode
             if (lab.output / "perf.data").exists():
                 result["profile_script_exit_code"] = export_cpu_profile(lab.output)
+        elif profiler == "fsync":
+            try:
+                with open(lab.output / "fsync-trace.log") as data:
+                    result["fsync_trace_summary"] = summarize_fsync_trace(data)
+                stats = result["fsync_trace_summary"]
+                result["profile_script_exit_code"] = int(not stats["successful"] or bool(stats["errors"]))
+            except (OSError, ValueError) as error:
+                result["profile_script_exit_code"] = 1
+                result["profile_error"] = str(error)
 
     def run_client(args, name):
         command = ["taskset", "-c", "4-7", str(CLIENT), *args, "--target", f"http://127.0.0.1:{lab.port+1}", "--api-style", "durable"]
@@ -260,8 +270,10 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                 command = ["perf", "record", "-F", "99", "-e", "cpu-clock:u", "--call-graph", "dwarf,16384",
                            "-o", str(lab.output / "perf.data"), "-p", ",".join(map(str, node_pids))]
             else:
-                assert profiler == "strace", profiler
-                command = ["strace", "-f", "-c", "-w", "-o", str(lab.output / "syscall-profile.txt")]
+                assert profiler in ("strace", "fsync"), profiler
+                command = (["strace", "-f", "-qq", "-ttt", "-T", "-e", "trace=fsync,fdatasync", "-e", "signal=none",
+                            "-o", str(lab.output / "fsync-trace.log")] if profiler == "fsync" else
+                           ["strace", "-f", "-c", "-w", "-o", str(lab.output / "syscall-profile.txt")])
                 for pid in node_pids:
                     command += ["-p", str(pid)]
             (lab.output / "profile-argv.json").write_text(json.dumps(command, indent=2)+"\n")
@@ -439,9 +451,12 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
 
 def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False,
         cpu_profiles=False, heap_profiles=False, baseline_binary=None, baseline_provenance=None, duration_secs=None,
-        write_streams=1, write_connections=256, write_warmup_secs=3, read_diagnostics=False):
-    if read_diagnostics and any((smoke, reads_only, write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles)):
+        write_streams=1, write_connections=256, write_warmup_secs=3, read_diagnostics=False, fsync_profiles=False,
+        no_stats=False):
+    if read_diagnostics and any((smoke, reads_only, write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles, fsync_profiles)):
         raise ValueError("read diagnostics is a separate repeated four-arm matrix")
+    if sum((write_profiles, cpu_profiles, heap_profiles, fsync_profiles)) > 1:
+        raise ValueError("select one profiler per campaign")
     if (baseline_binary is None) != (baseline_provenance is None):
         raise ValueError("baseline comparison requires both binary and conformance provenance")
     baseline = None
@@ -456,7 +471,7 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
     if write_streams <= 0 or write_connections <= 0 or write_warmup_secs < 0:
         raise ValueError("write streams/connections must be positive and warmup nonnegative")
     if (write_streams, write_connections, write_warmup_secs) != (1, 256, 3) and not any(
-            (write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles)):
+            (write_diagnostics, write_profiles, async_writes, cpu_profiles, heap_profiles, fsync_profiles)):
         raise ValueError("write controls require an explicit write diagnostic/profile/async matrix")
     progress = async_writes or read_diagnostics
     output = Path(output).resolve()
@@ -467,12 +482,14 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         lab_driver_sha256=hashlib.sha256(Path(__file__).with_name("lab.py").read_bytes()).hexdigest(),
         finite_fanout_driver_sha256=hashlib.sha256(Path(__file__).with_name("fanout_drain.mjs").read_bytes()).hexdigest(),
+        analyzer_sha256=hashlib.sha256(Path(__file__).with_name("benchmark_summary.py").read_bytes()).hexdigest(),
         binaries={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (CLIENT,NATIVE,BINARY)},
         sut_cpus="0-3 aggregate across replicas", client_cpus="4-7", memory="shared 16 GiB host, no separate quota",
         disk="shared orb root filesystem; same 8 MiB WAL segments, no cold tier", workers_per_process=2,
         wal_shards_or_partitions=2, cpu_hz=os.sysconf("SC_CLK_TCK"), page_bytes=os.sysconf("SC_PAGE_SIZE"),
         native_durability="local fsync", raft1_durability="one-member local fsync", raft3_durability="quorum fsync on shared host",
         raft3_local_durability="local-fsync202 acceptance; all reads committed-only; background durable-quorum replication",
+        disable_optional_stats=no_stats,
         pending_commands=1024 if progress else 256, pending_bytes=16*1024*1024,
         progress_sampling="prefix HEAD for at most 16 declared stream indices per replica and group Raft metrics, then 0.5s idle; adds observation work" if progress else "none",
         client_limits="202 is success; receipt headers discarded; 429 and 503 combined as measured backpressure, not timed; warmup errors not counted",
@@ -500,7 +517,7 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         workloads = [("reads",), ("mixed",)]
     if write_diagnostics or async_writes:
         workloads = [("write",write_streams,write_connections)] * 3
-    if write_profiles or cpu_profiles or heap_profiles:
+    if write_profiles or cpu_profiles or heap_profiles or fsync_profiles:
         workloads = [("write",write_streams,write_connections)]
     if read_diagnostics:
         workloads = read_workloads * 3
@@ -514,14 +531,14 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         for arm in arms:
             repeat = i//len(read_workloads)+1 if read_diagnostics else i+1
             name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{repeat}" if write_diagnostics or progress else "")
-            results.append(cell(output / name, arm, workload, profile=write_profiles or cpu_profiles or heap_profiles,
-                                diagnostics=write_diagnostics or write_profiles or progress or cpu_profiles or heap_profiles,
+            results.append(cell(output / name, arm, workload, profile=write_profiles or cpu_profiles or heap_profiles or fsync_profiles,
+                                diagnostics=not no_stats and (write_diagnostics or write_profiles or progress or cpu_profiles or heap_profiles or fsync_profiles),
                                 pending_commands=1024 if progress else 256,
                                 duration=duration_secs if duration_secs is not None else 30 if progress else 8, progress=progress,
                                 binary=baseline_binary if arm.endswith("-baseline") else BINARY,
                                 write_warmup_secs=write_warmup_secs,
-                                profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "strace"))
-    if not smoke and not write_diagnostics and not write_profiles and not progress and not cpu_profiles and not heap_profiles:
+                                profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "fsync" if fsync_profiles else "strace"))
+    if not smoke and not write_diagnostics and not write_profiles and not progress and not cpu_profiles and not heap_profiles and not fsync_profiles:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
@@ -534,7 +551,7 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output")
-    for name in ("smoke", "reads-only", "write-diagnostics", "write-profiles", "async-writes", "cpu-profiles", "heap-profiles", "read-diagnostics"):
+    for name in ("smoke", "reads-only", "write-diagnostics", "write-profiles", "async-writes", "cpu-profiles", "heap-profiles", "fsync-profiles", "read-diagnostics"):
         parser.add_argument("--"+name, action="store_true")
     parser.add_argument("--baseline-binary", type=Path)
     parser.add_argument("--baseline-provenance", type=Path)
@@ -543,4 +560,6 @@ if __name__ == "__main__":
     parser.add_argument("--write-connections", type=int, default=256)
     parser.add_argument("--write-warmup-secs", type=int, default=3,
                         help="Use 0 for the reject-free envelope: the pinned client does not count warmup errors")
+    parser.add_argument("--no-stats", action="store_true",
+                        help="Disable optional server/WAL probes; keep identical workload, bounds and external observations")
     sys.exit(0 if run(**vars(parser.parse_args())) else 1)

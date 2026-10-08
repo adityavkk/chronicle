@@ -1,0 +1,25 @@
+{
+  "cluster": "bench-aac72a6c39d1a6ca",
+  "node": 3,
+  "listen": "127.0.0.1:19803",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/openraft010-reads-002-raft3-reads-repeat2/3",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": false,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:19801"
+    },
+    "2": {
+      "addr": "127.0.0.1:19802"
+    },
+    "3": {
+      "addr": "127.0.0.1:19803"
+    }
+  },
+  "stats_secs": 1,
+  "pending_commands": 1024,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync"
+}

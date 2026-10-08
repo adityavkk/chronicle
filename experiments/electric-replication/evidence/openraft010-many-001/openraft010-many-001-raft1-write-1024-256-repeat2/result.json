@@ -1,0 +1,61 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1024,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "binary_sha256": "0df77f0d6f4fbcb7fa32b1c75ccdb447284410d00349bde9eef22f020b795a25",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "disk_preflight": {
+    "free_bytes": 9183596544,
+    "minimum_free_bytes": 8589934592
+  },
+  "node_pids": [
+    2044606
+  ],
+  "affinity": {
+    "2044606": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 2044619,
+  "process_sample_gaps": [
+    {
+      "pid": 2044619,
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791481722512,
+    "end_unix_ms": 1791481755725,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 238.13904599228408,
+    "target_bytes": 293180160,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 293180160
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "verify_pid": 2253954,
+  "verify_window": {
+    "start_unix_ms": 1791481755963,
+    "end_unix_ms": 1791481755996,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}
