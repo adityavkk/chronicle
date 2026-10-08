@@ -1,0 +1,56 @@
+{
+  "verdict": "FAIL",
+  "error": "AssertionError({'kind': 'wal-header-crc', 'path': '/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/0/wal/1.wal', 'original_sha256': '6054b8794e66fe05f1633949ef3f9556a7aef367c70494226222812d7abb40bc', 'mutated_sha256': '5325acadddaaa6df8cc894f8db1a9d07fb91a07d993ff1118e8006ad36fd4f84', 'expected_error': 'corrupt or non-consensus journal frame', 'exit_code': 101, 'rejected': False})",
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/0/state/snapshot-1791497709971368981",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 5,
+          "node_id": 1
+        },
+        "index": 15
+      }
+    },
+    {
+      "kind": "identity-v6",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/IDENTITY",
+      "original_sha256": "5acbd7ff39490b2c321300dbcbe7a9d8fdcb252e778c6456dc88f8e129304471",
+      "mutated_sha256": "dab3b5fc140c01492775854448de11f47e484aa02f3ed27f672eb7449629001e",
+      "expected_error": "node/cluster/partition identity mismatch",
+      "exit_code": 101,
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-v7",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/IDENTITY",
+      "original_sha256": "5acbd7ff39490b2c321300dbcbe7a9d8fdcb252e778c6456dc88f8e129304471",
+      "mutated_sha256": "662a3327b5ad6b71c5786cae9a39116b56c89cf21a780ef86cb8f8a574ca3bb3",
+      "expected_error": "node/cluster/partition identity mismatch",
+      "exit_code": 101,
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-batch128",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/IDENTITY",
+      "original_sha256": "5acbd7ff39490b2c321300dbcbe7a9d8fdcb252e778c6456dc88f8e129304471",
+      "mutated_sha256": "09424e03f59c2e3b15c405731a4d98465939a0aafa16fed7ce81205b5dee3bae",
+      "expected_error": "node/cluster/partition identity mismatch",
+      "exit_code": 101,
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "wal-header-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-020/1/0/wal/1.wal",
+      "original_sha256": "6054b8794e66fe05f1633949ef3f9556a7aef367c70494226222812d7abb40bc",
+      "mutated_sha256": "5325acadddaaa6df8cc894f8db1a9d07fb91a07d993ff1118e8006ad36fd4f84",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": false
+    }
+  ]
+}

@@ -787,6 +787,7 @@ pub fn run() {
         for group in 0..CLUSTER.get().unwrap().groups.len() {
             tokio::spawn(CLUSTER.get().unwrap().subscription_worker(group));
             tokio::spawn(CLUSTER.get().unwrap().fork_worker(group));
+            tokio::spawn(CLUSTER.get().unwrap().groups[group].machine.journal.maintain());
         }
         println!("replicated Electric engine ready");
         crate::engine_raw::serve(placeholder, listener).await;

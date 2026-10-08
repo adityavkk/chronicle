@@ -90,7 +90,7 @@ not a substitute store or a model-only result.
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
 | 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 142 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
-| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. Pinned snapshots remove count-bound rejects in the longer 90-second/16-connection comparison, but one current async repetition still fails with 16 lease-expiry rejects. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
+| 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions, 60/60 corrected read/fanout/mixed execution checks and a 60-second reject-free async operating point are retained below. The pinned-snapshot checkpoint still has 16 lease-expiry rejects in one 90-second/16-connection repetition. Coalesced physical GC passes its delayed-fsync progress/recovery probe; sustained-load comparison is outstanding. Replicated latency/memory and instrumentation overhead still need qualification. Report accepts versus commit progress, rejection, backlog/lag, p50/p99, CPU/RSS/fsync and profiles; retain unsuccessful candidates. |
 | 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
@@ -105,16 +105,25 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-029` executes **332/332 passing, zero failures/skips/todo**,
+The candidate's `conformance-030` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 142 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-019` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-012` checks 311
+conformance exclusions. `storage-fault-022` checks seven real failing/short
+syscalls and retains three unknown HTTP outcomes. `async-fault-013` checks 311
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
 releasing unresolved credit. These are single-host qualifications, not
 independent-disk/AZ or power-loss evidence.
+
+`reclaim-progress-001/002/003` isolates a second scheduling boundary: OpenRaft
+awaits logical purge inside its core task, so worker handoff alone still stalls
+the group. Coalescing physical GC after durable logical purge raises completions
+inside the same two-second checkpoint fsync from zero to 38, with no unknowns
+or leadership change and exact restart. The reader/reclamation model checks
+4,910 safety states, 2,047 stable-period liveness states and six mutations.
+Background storage errors still fail-stop; no durability/lease bound changes.
+This is not evidence that the remaining sustained-load lease rejects are fixed.
 
 The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
 **51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**

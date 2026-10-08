@@ -28,6 +28,7 @@ def run(output):
     sources = source_hashes()
     (lab.output / "provenance.json").write_text(json.dumps(dict(
         binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(), sources=sources,
+        driver=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         interposer=hashlib.sha256(interposer.read_bytes()).hexdigest(),
         interposer_source=hashlib.sha256(Path(__file__).with_suffix(".c").read_bytes()).hexdigest(),
         compile_command=compile_command, processes=3, partitions=2,
@@ -90,6 +91,7 @@ def run(output):
 
     def corrupt_probe(node, target, replacement, label, expected):
         # All supervised processes are stopped before modifying authoritative files.
+        expected = [expected] if isinstance(expected, str) else list(expected)
         original = target.read_bytes()
         target.write_bytes(replacement)
         result = dict(kind=label, path=str(target), original_sha256=hashlib.sha256(original).hexdigest(),
@@ -98,9 +100,15 @@ def run(output):
             run = subprocess.run([str(BINARY), "--cluster-config", str(lab.output / f"node-{node}.json")],
                 capture_output=True, timeout=10, preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CORE, (0, 0)))
             (lab.output / f"{label}.txt").write_bytes(run.stdout+run.stderr)
-            result.update(exit_code=run.returncode, rejected=run.returncode != 0 and expected.encode() in run.stderr)
+            observed = [message for message in expected if message.encode() in run.stderr]
+            result.update(exit_code=run.returncode, observed_errors=observed,
+                          rejected=run.returncode != 0 and bool(observed))
             faults.append(result)
             assert result["rejected"], result
+        except subprocess.TimeoutExpired as error:
+            (lab.output / f"{label}.txt").write_bytes((error.stdout or b"") + (error.stderr or b""))
+            faults.append(dict(result, rejected=False, timed_out=True))
+            raise
         finally:
             target.write_bytes(original)  # Restore only this disposable fault fixture.
 
@@ -174,20 +182,31 @@ def run(output):
                               for p in (lab.data / str(leader)).rglob("*") if p.is_file()}
             assert after_identity == before_identity, "identity rejection mutated storage"
             faults[-1]["all_file_bytes_unchanged_after_restoring_identity"] = True
-        wal = lab.data / str(leader) / "0/wal/1.wal"
+        wal = max((lab.data / str(leader) / "0/wal").glob("*.wal"), key=lambda p:int(p.stem))
         original = wal.read_bytes()
-        for label, offset, expected in [("wal-header-crc", 4, "corrupt or non-consensus journal frame"),
-                                        ("wal-payload-crc", 38, "corrupt or non-consensus journal frame")]:
+        end, offsets = 0, []
+        while end < len(original) and original[end:end+38] != bytes(38):
+            offsets.append(end)
+            size = int.from_bytes(original[end:end+4], "little")
+            assert size > 0 and end+38+size <= len(original), "incomplete original fixture"
+            end += 38+size
+        last = offsets[-1]
+        assert any(original[last+38:end]), "zero-hole fixture needs a nonzero suffix"
+        faults.append(dict(kind="authoritative-tail-selection", path=str(wal), offset=last, end=end))
+        # Unlike an obsolete initial Vote, the final complete physical frame is
+        # always authority: at the checkpoint's validated cut or in later replay.
+        # Either indexed validation or sequential replay must reject corruption.
+        crc_errors = ("corrupt or non-consensus journal frame", "indexed WAL read failed CRC/identity")
+        for label, offset in [("wal-header-crc", last+4), ("wal-payload-crc", last+38)]:
             mutated = bytearray(original)
             mutated[offset] ^= 1
-            corrupt_probe(leader, wal, mutated, label, expected)
+            corrupt_probe(leader, wal, mutated, label, crc_errors)
         mutated = bytearray(original)
-        mutated[:38] = bytes(38)
-        corrupt_probe(leader, wal, mutated, "wal-zero-hole", "nonzero suffix behind journal hole")
-        end = 0
-        while original[end:end+38] != bytes(38):
-            end += 38 + int.from_bytes(original[end:end+4], "little")
-        corrupt_probe(leader, wal, original[:end-1], "wal-torn-tail", "truncated/oversize journal record")
+        mutated[last:last+38] = bytes(38)
+        corrupt_probe(leader, wal, mutated, "wal-zero-hole",
+                      ("nonzero suffix behind journal hole", "indexed WAL read failed CRC/identity"))
+        corrupt_probe(leader, wal, original[:end-1], "wal-torn-tail",
+                      ("truncated/oversize journal record", "failed to fill whole buffer"))
         good_snapshot = next(p for p in prior if p != failed_file)
         mutated = bytearray(good_snapshot.read_bytes())
         mutated[-1] ^= 1

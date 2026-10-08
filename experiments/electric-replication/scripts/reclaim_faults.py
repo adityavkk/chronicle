@@ -24,6 +24,7 @@ def run(output):
     (lab.output / "provenance.json").write_text(json.dumps(dict(
         binary=hashlib.sha256(BINARY.read_bytes()).hexdigest(),
         sources=source_hashes(),
+        driver=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         interposer_source=hashlib.sha256(source.read_bytes()).hexdigest(),
         interposer=hashlib.sha256(interposer.read_bytes()).hexdigest(), compile_command=command,
         processes=3, partitions=2, durability="quorum-fsync", consistency="linearizable default"), indent=2)+"\n")
@@ -131,7 +132,15 @@ def run(output):
         expected = read(owner)
         for node in (1,2,3):
             lab.wait(lambda:read(node,"prefix") == expected,"replica catchup")
+            cut = lab.admin(node,0,"metrics")["last_applied"]["index"]
             assert lab.admin(node,0,"snapshot") == {"Ok":None}
+            # The RPC schedules a build. Prior/restart reclamation may already
+            # have removed 1.wal, so that cannot prove this build has completed.
+            snapshot = lab.wait(lambda: (s := lab.admin(node,0,"metrics").get("snapshot"))
+                and s["index"] >= cut and s,
+                "snapshot covers current applied prefix")
+            emit(dict(op="snapshot-ready", node=node, minimum_index=cut,
+                      observed_index=snapshot["index"], start=time.monotonic_ns()))
             directory = lab.data / str(node) / "0/wal"
             lab.wait(lambda: (directory / "journal-checkpoint").exists() and not (directory / "1.wal").exists(),
                      "physical old-segment reclamation")

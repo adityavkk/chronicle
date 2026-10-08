@@ -905,3 +905,36 @@ local privilege without changing system access controls. Thirty Python checks
 pass, including 48 generated interleaving/error/boundary cases and redaction,
 partial-capture and lost-event rejection. One closing-client sampling gap in the
 one-member cell is retained. Raw captures are not included in publication.
+
+### Journal reclamation must not run inside the Raft core's purge wait
+
+`reclaim-progress-001/002/003` injects a real two-second checkpoint-file fsync
+delay into a three-process/two-group cluster with one Tokio worker per process.
+Both the prior pinned-snapshot binary and an initial `block_in_place`-only
+candidate complete zero same-group requests during the delay, retain six unknown
+requests and disrupt leadership. Exact recovery still passes. The initial
+candidate is preserved, not presented as a successful scheduling fix.
+
+Pinned OpenRaft awaits `RaftLogStorage::purge` inside its core task. Keeping the
+worker available therefore does not unblock that core. The corrected integration
+waits for the covering snapshot and durable native Purge record, signals one
+coalescing maintenance worker per group, and returns. Checkpoint file/directory
+fsync and capture-before-unlink remain required; indexed readers retain their
+guard through physical I/O. The maintenance worker consumes its pending permit
+before starting I/O, retries no failed durability barrier, and signals once at
+startup to recover a lost notification. There is no per-purge task queue.
+
+The corrected probe completes 38 requests during the actual delay, with zero
+unknowns or term changes and exact 312-operation restart history. Full conformance
+remains 332/332, zero skips; 142 Rust tests and the expanded 55-mutation formal
+runner pass. `journal_compact` is an optional fixed-label wall-time phase,
+including serialized wait/capture/fsync/deletion, not an extra per-append probe
+or an additive CPU metric. Sustained-load benefit remains unmeasured.
+
+Retained storage-harness failures exposed assumptions invalidated by startup
+maintenance. Old-file deletion does not prove a newly requested snapshot is
+complete; the corrected check waits for its published log position. Also, a
+first WAL frame can be an obsolete Vote, not retained authority. Offline
+corruption now targets the final complete frame, at the validated checkpoint
+cut or in later replay, and records the exact rejection path. CRC, zero-hole,
+torn-tail, snapshot corruption and real ENOSPC/fsync fail-stop gates still run.

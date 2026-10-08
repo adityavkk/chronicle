@@ -1,0 +1,62 @@
+{
+  "verdict": "FAIL",
+  "error": "TimeoutExpired(['/home/user/workspace/repo/experiments/electric-replication/engine/target/release/durable-streams-server', '--cluster-config', '/home/user/workspace/repo/experiments/electric-replication/evidence/storage-fault-021/node-2.json'], 10)",
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-021/2/0/state/snapshot-1791497899239245597",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 4,
+          "node_id": 2
+        },
+        "index": 16
+      }
+    },
+    {
+      "kind": "identity-v6",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-021/2/IDENTITY",
+      "original_sha256": "ff97c160070ca9da81fa1e7141128f26d340c95b75025aab1a84b9bee2d3c4ce",
+      "mutated_sha256": "832b6fb439630cd23de6992a69c3477fe0f28722e45135a22bdd9af702fb8735",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-v7",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-021/2/IDENTITY",
+      "original_sha256": "ff97c160070ca9da81fa1e7141128f26d340c95b75025aab1a84b9bee2d3c4ce",
+      "mutated_sha256": "0cef7a6cabbcbb121635e7c2d978a55405d74324910f5837d54e20bcfa928940",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-batch128",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-021/2/IDENTITY",
+      "original_sha256": "ff97c160070ca9da81fa1e7141128f26d340c95b75025aab1a84b9bee2d3c4ce",
+      "mutated_sha256": "75c3038022bf2f781289662080d8d3fbcd2c0c8f423165901327b33ed438febb",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    }
+  ]
+}

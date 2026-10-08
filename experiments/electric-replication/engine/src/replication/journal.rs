@@ -90,6 +90,7 @@ pub struct Journal {
     pub changed: tokio::sync::Notify,
     dir: PathBuf,
     maintenance: tokio::sync::Mutex<()>,
+    compact_pending: tokio::sync::Notify,
     snapshot_ready: tokio::sync::Notify,
     // Dropped last: stop + join the native fsync thread.
     _committer: CommitterHandle,
@@ -127,9 +128,21 @@ impl Journal {
             changed: tokio::sync::Notify::new(),
             dir,
             maintenance: tokio::sync::Mutex::new(()),
+            compact_pending: tokio::sync::Notify::new(),
             snapshot_ready: tokio::sync::Notify::new(),
             _committer: committer,
         }))
+    }
+
+    /// One worker per group, owned by the server lifecycle, not one task per
+    /// purge. A stored Notify permit coalesces work arriving during filesystem
+    /// I/O; consume it before capture, never after completing the old work.
+    pub async fn maintain(&self) -> io::Result<()> {
+        self.compact_pending.notify_one(); // Recover a notification lost at crash.
+        loop {
+            self.compact_pending.notified().await;
+            self.compact().await.map_err(storage_error)?;
+        }
     }
 
     async fn compact(&self) -> io::Result<()> {
@@ -378,7 +391,10 @@ impl RaftLogStorage<Types> for Arc<Journal> {
         // The native single-node checkpoint cannot know about consensus
         // metadata. Our complete durable index, not Purge alone, permits unlink.
         self.persist(Event::Purge(id)).await.map_err(storage_error)?;
-        self.compact().await.map_err(storage_error)
+        // Raft core awaits purge. Logical deletion is already durable; physical
+        // GC must not stop this group's heartbeats and request processing.
+        self.compact_pending.notify_one();
+        Ok(())
     }
 }
 
@@ -756,6 +772,8 @@ mod tests {
                     .filter(|p|p.extension().is_some_and(|e|e=="wal")).collect();
                 let purged = id(retained_from-1);
                 let mut journal = machine.journal.clone();
+                let worker = journal.clone();
+                let maintenance = tokio::spawn(async move {worker.maintain().await});
                 let mut reader = journal.clone();
                 let reading = tokio::spawn(async move {
                     for _ in 0..32 {
@@ -776,7 +794,15 @@ mod tests {
                 });
                 journal.purge(purged).await.unwrap();
                 reading.await.unwrap();
-                assert!(old_files.iter().any(|p|!p.exists()),"must physically reclaim segments");
+                tokio::time::timeout(Duration::from_secs(5),async {
+                    while old_files.iter().all(|p|p.exists()) {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                }).await.expect("must physically reclaim segments");
+                // Join before deliberate disk corruption/reopen. Cancellation
+                // cannot interrupt the synchronous publication/unlink region.
+                maintenance.abort();
+                assert!(maintenance.await.unwrap_err().is_cancelled());
                 journal.persist(Event::Entry(Entry {log_id:id(count+4),payload:EntryPayload::Normal(vec![Command {
                     method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xCD;payload],time:1002,
                 }].into())})).await.unwrap();
