@@ -91,7 +91,7 @@ not a substitute store or a model-only result.
 | --- | --- | --- |
 | 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 144 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 10 preserves terminal fork fences and original source defaults, rejecting earlier identities before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
 | 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions and 60/60 corrected read/fanout/mixed execution checks are retained below. Coalesced physical GC passes all 12 ninety-second/16-connection cells with zero errors/rejections and exact all-replica drain; one-member/native gap is 1.80–1.84×. Earlier failures remain. Replicated latency/memory, overload envelope and instrumentation overhead still need qualification. Keep commit markers; unsafe recovery-only removal is not a performance candidate. Continue storage lifecycle work without declaring performance acceptance complete. |
-| 3 | Storage lifecycle and bounded metadata | Terminal fork fences and bounded reply/decision retention pass TLA+, native-WAL generated/boundary tests and real-process churn/snapshot/crash histories. Matching-fork retries after parent deletion/outage are fixed and qualified (`fork-fault-020`); the original failure remains. Shared cold ownership now has a 451,702-state safety model and eight negative controls; filesystem object-key/concurrent-upload/directory-durability fixes pass generated and actual syscall-fault tests (`cold-foundation-001`). Replicated cold remains disabled pending implementation. High-cardinality, long-duration reclamation and cold-reader/transfer faults remain gates. |
+| 3 | Storage lifecycle and bounded metadata | Terminal fork fences and bounded reply/decision retention pass TLA+, native-WAL generated/boundary tests and real-process churn/snapshot/crash histories. Matching-fork retries after parent deletion/outage are fixed and qualified (`fork-fault-020`); the original failure remains. `ColdOwnership` now specifies Begin-ID/certified-inventory GC as well as participant recovery; the earlier one-object pass is not verification of this new algorithm. Filesystem object-key/concurrent-upload/directory-durability fixes pass generated and actual syscall-fault tests (`cold-foundation-001`). Replicated cold remains disabled pending implementation and qualification; high-cardinality, long-duration reclamation and cold-reader/transfer faults remain gates. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
 
@@ -181,6 +181,25 @@ tests, 63 TLC mutations plus the Lean negative control, and unchanged 332/332
 conformance. The local fixture uses a fresh layout, not a migration from the old
 ambiguous flat keys. Replicated cold is still disabled: the model is not an
 implemented ownership/GC protocol or independent object-storage qualification.
+
+The formal-first **certified-inventory GC** milestone extends `ColdOwnership.tla`,
+not the native runtime: all six new positive configurations and 20 new negative
+controls pass (`cold-inventory-001`). The full suite detects 83 TLC mutations
+plus the existing Lean negative control. The architecture requires committed
+singleton Begin IDs, an exact live+pending+active-inventory cut, completed durable
+snapshot/purge certificates, storage participants distinct from membership,
+learner registration before transfer and durable full-cluster restart authority.
+Inventory replacement cannot immediately delete the prior root. Repeated finite
+prefix scans collect late PUTs without resetting progress on every replacement.
+[The contract](CONTRACT.md#shared-cold-ownership-contract--modeled-not-yet-implemented)
+states the invariants, finite scenario bounds, listing/durability/fairness
+assumptions and unproved implementation gaps. Metadata proportional to current
+live/pending/participant state is the representation goal, not a TLC proof of
+unbounded growth control; indefinitely unreachable participants or delayed PUTs
+preclude an unconditional physical-space bound. No cold Rust behavior changes
+or new performance/conformance claim follow from this model. The next gate is
+native publication/pinning/certificate/recovery implementation plus real-engine
+generated and process/object-fault tests; cold offload remains disabled.
 
 The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
 **51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**

@@ -1,0 +1,106 @@
+{
+  "recorded_at": "2026-10-09T04:48:59.080758+00:00",
+  "full_run_command": "bash experiments/electric-replication/scripts/formal.sh",
+  "full_run_exit": 0,
+  "full_run_runner_sha256": "1db01143b846492a2fb12c3db9e8419938b16bf2bb3c2d549e069716e1e5601e",
+  "exit_hardened_runner_sha256": "509aeb8b429c746eb8f343ef98fffabe7a69c1bc4432b4c415bf9fc947801890",
+  "exit_hardened_loop_command": "set -euo pipefail\nroot=$(git rev-parse --show-toplevel)\nhere=\"$root/experiments/electric-replication\"\ntools=\"$root/.tmp/electric-tools\"\njar=\"$tools/tla2tools.jar\"\neval \"$(awk '/^for mutation in UnverifiedPublication / {copy=1} copy {print} copy && /^done$/ {exit}' ../scripts/formal.sh)\"",
+  "exit_hardened_loop_workdir": "experiments/electric-replication/formal",
+  "exit_hardened_loop_exit": 0,
+  "model_sha256": "fcea3b776e8ac1e192b600aa1540861e4ef3e1f57a5a2f180db27b869541c9f9",
+  "model_config_manifest_sha256": "aec362859b4a3dd15d5d470166e90bc8dfe005138f05c9988ffc0ba29082be4a",
+  "unchanged_source_check_sha256": "4ad3a403e9fed6ce12bc31dcda52032238d8597843d2a6f23b6fb70a78b0645b",
+  "post_enospc_source_check_sha256": "0cbf6e411e12730db13acd4f535c22edef3a17b6a0bec736bdb0e4e61b100ab4",
+  "tla2tools_sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
+  "tlc_version": "TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)",
+  "java_version": "openjdk version \"17.0.20.1\" 2026-08-18\nOpenJDK Runtime Environment (build 17.0.20.1+1-1-deb12u1-Debian)\nOpenJDK 64-Bit Server VM (build 17.0.20.1+1-1-deb12u1-Debian, mixed mode, sharing)\n",
+  "lean_version": "Lean (version 4.31.0, x86_64-unknown-linux-gnu, commit 68218e876d2a38b1985b8590fff244a83c321783, Release)\n",
+  "lean_toolchain_sha256": "efac0b94923b2d8b6840cd35be9177ad0fc5ab2332f4f4311c98712cee92fdee",
+  "positive_configuration_count": 37,
+  "total_tlc_mutations_detected": 83,
+  "new_tlc_mutation_exit_codes": {
+    "UnverifiedPublication": 12,
+    "DropPendingOnUnknown": 12,
+    "OmitPending": 12,
+    "IgnoreBirthCut": 12,
+    "EmptyOnInventoryError": 12,
+    "MixedInventoryCut": 12,
+    "AppliedCertificate": 12,
+    "RequestedPurge": 12,
+    "ReattachAbsentBegin": 12,
+    "MutableCapture": 12,
+    "OmitInventoryRoot": 12,
+    "DeletePreviousInventory": 12,
+    "IgnorePins": 12,
+    "ForgetRemoved": 12,
+    "UnregisteredTransfer": 12,
+    "ForgetRestartCertificate": 12,
+    "DeltaOnlyScan": 13,
+    "StopAfterCleanScan": 13,
+    "QuorumBootstrap": 13,
+    "ResetScan": 13
+  },
+  "cold_configurations": {
+    "cold-inventory": {
+      "generated_states": 7592555,
+      "distinct_states": 832964,
+      "config_sha256": "1945be994f252dfe84d50b05613e8733b4a147d9a0cb131b6555c80ecc130858",
+      "log_sha256": "ee44accd4a58c3388cbd473ede6669b1be8afe8ce53bbd903fcfb0b3ca49783e"
+    },
+    "cold-inventory-live": {
+      "generated_states": 538654,
+      "distinct_states": 116238,
+      "config_sha256": "2da4a4548764f8e0585493729eda2611cfcbb0ae804833035c30998028940dec",
+      "log_sha256": "a716dddd93785a9f9ea81ac6ac8a3e19c0305f7a067c436d360625448b803ad6"
+    },
+    "cold-scan-live": {
+      "generated_states": 771690,
+      "distinct_states": 153198,
+      "config_sha256": "47accba998e096d47c8a14c6ebd7f5cce5ea34525aa1f2ca77e434d1f7c2858e",
+      "log_sha256": "49f33af8c4b6aa23fe4e1812be3afd8c017a6f9f18aef3a124e43126228263c3"
+    },
+    "cold-participants": {
+      "generated_states": 16405057,
+      "distinct_states": 1677456,
+      "config_sha256": "7aa66e771764de3be01b76c56cb9afebca29ab061d2b0bf3fb3b09266b15c549",
+      "log_sha256": "e6d43a948c65344bae0e436e67dc7002aafff86df82bef96a0d6b6028975ae6f"
+    },
+    "cold-transfer": {
+      "generated_states": 123459073,
+      "distinct_states": 11970540,
+      "config_sha256": "d689995daf4888f71efc43f829fe34d13395fcfe0ca0a874de7eb36366c8291b",
+      "log_sha256": "cd1dbb2d83e0d76e71a0e71252a8ab8eceee7f633947c06cf7cc5b8ff52e3867"
+    },
+    "cold-restart": {
+      "generated_states": 2107823,
+      "distinct_states": 383292,
+      "config_sha256": "98495347e4e96234da70a52643dc503c83c288c31c627ea562228f85c552d91c",
+      "log_sha256": "430b13ec35072750e5c76d757351f2bdb81cb1d48423e2c1b72b546c44ebbaa7"
+    }
+  },
+  "preliminary_larger_search": {
+    "exit": 1,
+    "failure": "ENOSPC while writing TLC state pool; no safety/liveness verdict",
+    "pinned_final_source": false,
+    "log_sha256": "a631c4df6f725f5041cd0660cc55652f74e7beb09fcfaa04ca9879c60818689a",
+    "scratch_files_removed_after_process_exit": 2891,
+    "scratch_logical_bytes_removed": 8486155469
+  },
+  "provenance_capture_retry": "Initial log copy failed with ENOSPC; final evidence completeness and source hashes rechecked after reclaiming stopped TLC scratch state.",
+  "unchanged_engine_dependency_hash_count": 278,
+  "retained_conformance": "conformance-033",
+  "retained_conformance_counts": {
+    "numTotalTests": 332,
+    "numPassedTests": 332,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "numTodoTests": 0
+  },
+  "retained_release_binary_sha256": "118e1b2655b8be7ff56acc06f6730140a17ffdad3fe8b79f0b428297ac717962",
+  "replicated_cold_enabled": false,
+  "limits": [
+    "Finite scenario checking, including reachable suffixes; not all multi-node genesis histories.",
+    "No unbounded boundedness proof, Rust refinement, or provider/power-loss qualification.",
+    "Eventual recovery, fair stable-period successful I/O, finite old PUTs and eventually complete listings are assumed."
+  ]
+}

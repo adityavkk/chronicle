@@ -154,11 +154,80 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `publication-003` | Fail-fast lifecycle checkpoint audit PASS after finding review | 51 commits, 13,897 historical blobs, 6.69 GB decoded including gzip/zstd. Correct fixture audit: 255 Authorization matches, 68 retired-lab keys absent. Generic scanner exits 1 retained: 390 source hashes, two audit-report hashes and one unsigned local receipt independently verified; zero unexplained findings. All 278 source/dependency hashes, release binary and unchanged suite match `conformance-032`. Not production qualification or a main merge |
 | `formal/cold*` and eight named mutations | 451,702 safety states, 414 stable-period liveness states; all eight negative mutations rejected | Formal-first shared cold ownership: offline/removed storage participants, durable snapshot and completed purge, readers/transfers, registration before learner transfer, irreversible retirement and late-PUT reconciliation. Unregistered join must violate actual `DataSafe`, not just floor bookkeeping. Assumes honest durability and finite old uploads; not implemented replicated cold or a bounded-state growth proof |
 | `cold-foundation-001`, `conformance-033` | 147 replicated / 116 standalone Rust tests, 63 TLC mutations plus one Lean negative control, unchanged 332/332 conformance PASS | Native filesystem fixture key aliasing and concurrent temporary-file failures retained before fixes. Generated operation/reopen/range/reclamation tests, 24 concurrent immutable PUTs and six real ENOSPC/file-EIO/directory-EIO syscalls pass; unknown PUT/DELETE outcomes remain explicit. All 278 source/dependency hashes and release binary match three-process/two-partition default-strong conformance, with subscriptions and zero failures/skips/todo. Two unchanged Rust forensic helpers ignored. Fresh fixture layout; replicated cold still disabled |
+| `cold-inventory-001`, `formal/cold-inventory*`, `formal/cold-scan-live`, `formal/cold-participants`, `formal/cold-transfer`, `formal/cold-restart` | All six new positive configurations and 20 new negative controls pass; full runner detects 83 TLC mutations plus the existing Lean control | Begin IDs, exact live/pending inventories, unknown I/O, completed purge, snapshot/reader/transfer dependencies, inventory replacement, late PUTs and certified full restart. Final model/config hashes are pinned; see finite bounds and exact counts below. No replicated cold runtime, new Rust qualification or unbounded proof |
+| `cold-inventory-001/preliminary` | Five invalid modeling/tool runs and one ENOSPC exploration retained, not counted as verification | Duplicate definition; simultaneous TLC metadata-directory collision; undefined fairness variable; under-specified conditional; unsupported multiple next-state relations. A larger earlier full-genesis participant exploration exits 1 on scratch-disk exhaustion, with 8.9 million queued states at its last progress sample. Its stopped 8.49 GB scratch state was removed; the error log remains. Final source-pinned configurations and mutation checks completed before that failure and their evidence was rechecked |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full
 run. No assertions were weakened and no filters or custom skips added. Later
 ledgers also hash every suite JavaScript file, not only its entry point.
+
+## Cold inventory checks are finite architecture evidence, not runtime support
+
+`ColdOwnership.tla` extends the original recovery-certificate model; the earlier
+451,702-state one-object pass is not evidence for the newer inventory algorithm.
+The unchanged final model and configs produce these complete TLC graphs:
+
+| Config under `formal/` | Distinct states | Checked property |
+| --- | ---: | --- |
+| `cold-inventory.cfg` | 832,964 | Lifecycle from empty; `InvSafe`, `InvShape` |
+| `cold-inventory-live.cfg` | 116,238 | Stable-period permanent reclamation |
+| `cold-scan-live.cfg` | 153,198 | Reclamation despite abstract continuous inventory refresh; monotonic eligibility |
+| `cold-participants.cfg` | 1,677,456 | Removed-but-undrained participant's durable recovery roots |
+| `cold-transfer.cfg` | 11,970,540 | Registered learner, old snapshot transfer and source crash |
+| `cold-restart.cfg` | 383,292 | Full-cluster restart without quorum bootstrap; eventual reclamation |
+
+The primary lifecycle has six object identities and one participant. Removal and
+restart use two participants; transfer adds a learner to one established member.
+These three campaigns start at a reachable second-activation cut with older
+snapshot dependencies. They do not exhaust every multi-node history from empty.
+The continuous-refresh abstraction targets starvation of scanning an old retired
+prefix, not arbitrary future object generations. The contract states the
+unproved unboundedness, implementation and provider assumptions in full.
+
+Run from the repository root:
+
+```sh
+bash experiments/electric-replication/scripts/formal.sh
+```
+
+`cold-inventory-001/full-formal.txt` records the successful whole-suite invocation.
+The subsequently tightened exit-code gate is separately rerun over the actual
+20-mutation loop in `scripts/formal.sh`: `mutation-exit-checks.txt` requires TLC
+exit 12 for invariants or 13 for temporal violations, as well as the expected
+diagnostic. A timeout, parser exception or unfinished counterexample cannot count
+as a detected mutation. `formal/source-sha256.txt` and `source-check.txt` pin the
+models/configs; `cold-inventory-001` additionally records tool/runner provenance.
+The model/configs did not change between the full run and that stricter rerun.
+Lean was rerun with its existing negative control, but supplies no cold-specific
+proof or Rust refinement here.
+
+The new negative controls retain actual traces in `formal/<mutation>.txt`:
+
+* `UnverifiedPublication`, `DropPendingOnUnknown`, `OmitPending`, `IgnoreBirthCut`,
+  `EmptyOnInventoryError`, `MixedInventoryCut`, `MutableCapture`, and
+  `OmitInventoryRoot` reject unsafe publication or an incorrect exact inventory.
+* `AppliedCertificate`, `RequestedPurge`, `IgnorePins`, `ForgetRemoved`, and
+  `UnregisteredTransfer` reject false recovery certificates or missing owners.
+  The transfer trace loses real payload bytes needed by an in-flight snapshot
+  after the sender crashes, not merely an auxiliary membership assertion.
+* `ReattachAbsentBegin`, `DeletePreviousInventory`, and
+  `ForgetRestartCertificate` reject terminal reattachment, immediate deletion
+  of an old inventory root, and loss of durable restart authority.
+* `DeltaOnlyScan`, `StopAfterCleanScan`, `QuorumBootstrap`, and `ResetScan` violate
+  liveness: old garbage survives, a whole cluster cannot bootstrap, or inventory
+  churn prevents a finite scan round from finishing.
+
+These checks retain unknown external outcomes and distinguish requested from
+completed durable purge. Eventual reclamation requires finite delayed PUTs,
+drained/recovered participants, successful retries, fair scanning and eventually
+complete listings. Metadata without per-deletion tombstones is a representation
+claim, not an unbounded proof or unconditional physical-space bound. Cold offload
+remains disabled. All 278 native/dependency source hashes still match
+`conformance-033` (332 executed/passed, zero failures/skips/todo); that is the
+retained **hot-only** result, not a cold-GC conformance run.
+
+## Other retained histories and their limits
 
 `fork-fault-001` rejects two deliberately corrupted histories: truncated inherited
 bytes and false absence after a durable grant. Its checker reconstructs bytes

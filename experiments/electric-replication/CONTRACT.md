@@ -332,15 +332,36 @@ qualification is claimed by the hot-only conformance and benchmark results.
 
 ### Shared cold ownership contract — modeled, not yet implemented
 
-Use one immutable object namespace per cluster/group, with stream incarnation,
-range and checksum in each key. A verified durable PUT precedes a committed
-manifest publication; no payload is inserted into a second authoritative WAL.
-The native manifest/range resolver continues to distinguish remote ranges from
-the fd-backed hot tail. Publication and retirement are committed metadata;
-uploads, range reads and DELETE retries happen outside state-machine locks.
-Retirement is irreversible: a delayed publication cannot reattach a retired key.
-A late duplicate PUT can resurrect physical bytes after DELETE, so durable
-retirement must support repeated reconciliation, not one best-effort deletion.
+`ColdOwnership.tla` now has two complementary checks: the original focused
+participant/recovery model and the **new Begin-ID/certified-inventory model**.
+The earlier one-object pass does not verify the inventory algorithm. Neither
+model is a replicated cold runtime implementation; that path remains disabled.
+
+Use one immutable object namespace per cluster/group. Every upload first obtains
+an accepted **committed singleton Begin**, whose unique log position is its birth
+ID. Include that ID, stream incarnation, range and checksum in the key. A batch
+index alone cannot distinguish two accepted Begins; Begin is not a batched data
+append. A failed or unknown Begin response never authorizes guessing an ID and
+uploading. A matching pending Begin and a verified durable PUT are prerequisites
+for committed manifest publication. Retrying a PUT uses exactly the same bytes
+and identity; a checksum mismatch is an error, not an overwrite strategy.
+
+Publish consumes the pending descriptor and creates a live reference; Abort
+consumes it without publication. Retiring the final stream/ancestor/grant
+reference removes the live descriptor. **Absence is not permission to publish**:
+an old Publish must fail if its matching pending Begin is gone, even after all
+terminal reply records have been collected. Reusing an old object for a new
+stream requires a new Begin/key, not resurrection of the retired identity. Thus
+irreversibility does not require one permanent tombstone per historical object.
+
+The native manifest/range resolver remains the reuse boundary between remote
+ranges and the fd-backed hot tail. Publication, references and retirement cross
+consensus; payloads do not enter a second authoritative WAL. Uploads, range reads
+and DELETE retries run outside state-machine locks. A PUT/DELETE timeout or I/O
+error has an unknown outcome: it neither drops the pending Begin nor proves the
+object absent. Even after an Abort or successful DELETE, an already issued PUT
+may complete. Recovery and repeated inventory-based collection handle that
+physical resurrection without allowing logical reattachment.
 
 Track **storage participants independently of Raft voting membership**. Removing
 a voter does not discard its old snapshots, committed-but-not-applied journal
@@ -355,11 +376,12 @@ replay can still require that object. Issuing OpenRaft `trigger().purge_log`
 does not prove the storage purge has completed.
 
 The committed group GC floor cannot exceed any registered participant's floor.
-An unreachable removed-but-undrained participant therefore blocks collection;
-there is no timeout or unsafe force-GC in this contract. An object with no live
-stream/ancestor/grant references may be physically deleted only after its
-retirement position is covered by that group floor. This deliberately favors
-recoverability over reclaiming space during an indefinitely offline participant.
+An unreachable removed-but-undrained participant therefore blocks **advancement**
+beyond its last certificate; already certified old garbage may still be removed.
+There is no timeout or unsafe force-GC. Voting membership or applied progress is
+not a substitute for a storage-participant certificate. Administrative abandonment
+of a lost disk requires an independently qualified fencing/replacement protocol;
+it is not modeled as ordinary membership removal here.
 
 Register a fresh learner **before snapshot transfer** through an ordered group
 decision, pinning the floor observed by that registration. Waiting until install
@@ -371,18 +393,130 @@ before every member can replay would deadlock a full-cluster restart. A drained,
 uncertified or replacement identity must bootstrap from an authorized current
 snapshot before native replay or serving. A copied disk is not a new identity.
 
-`ColdOwnership.tla` checks this ordering for one object, two established
-participants and one learner: 451,702 safety states and 414 stable-period
-liveness states. Eight mutations cover early publication, applied-only
-certificates, requested-only purge, ignored readers, forgetting removed members,
-unregistered joins, reattachment and forgotten retirement. The join mutation
-must lose an actual cold dependency, not merely violate floor bookkeeping.
-Liveness assumes a finite old-upload set, drained readers, healthy participants
-and eventual storage responses. It does not promise GC during perpetual faults,
-bound real metadata growth, prove provider durability or refine the Rust code.
-Participant certificates, join fencing, replicated manifests, reader pins and
-durable retirement reconciliation remain implementation gates. Long-running
-bounded-state and real-process storage/transfer histories must qualify them.
+#### Certified inventories replace per-deletion tombstones
+
+At an exact applied cut `F`, capture **all live and pending keys**, including the
+currently active inventory object. Freeze that set; later retirement cannot
+change the captured bytes. Allocate the new inventory's own Begin **after** `F`,
+upload it durably, then commit activation only when every registered participant
+has certified recovery at/after `F`. The ordering avoids an inventory needing to
+contain itself. Registration and activation are serialized committed decisions,
+not a racing membership query followed by external deletion.
+
+An inventory descriptor binds its exact cut, immutable object identity, length
+and checksum. A physical key is deletable only when its birth is at/below that
+descriptor's certified cut **and** it is absent from that exact inventory.
+Combining a newer cutoff with an older protected set is unsafe. An unreadable,
+partial or checksum-invalid inventory grants no deletion authority; it is not
+an empty set. Newly born objects above the cut are ineligible even if absent.
+
+Replacement retires the previous inventory from current metadata, but does
+**not** immediately delete its bytes. The replacement captured that old root,
+and an older durable snapshot can still require it. A subsequent certified cut
+that excludes the old root can collect it. Inventory objects, including aborted
+or abandoned uploads, follow the same Begin, pending, retirement and GC rules
+as payload objects; there is no separate immortal chain of inventory manifests.
+
+Each scan pins a complete hash-verified inventory into an immutable local
+handle and fixes its finite birth-prefix bound for that round. The implementation
+must use bounded streaming buffers and, when necessary, a pinned local file;
+"complete" does not mean loading the entire inventory into RAM. Deletion of the
+remote inventory cannot invalidate an already verified local handle. Newer
+inventory activation must not continually reset the round's cursor. Finish the
+round, then wrap over the cumulative eligible prefix, not only births since the
+previous inventory or one apparently clean listing. Repeated cumulative scans
+catch old PUTs that arrive behind a cursor or after a previous DELETE.
+
+Recovery restores the active descriptor, participant registrations and durable
+certificates from the snapshot plus committed WAL before resuming scans. An
+incomplete scan can be discarded and restarted; retirement authority cannot.
+The full-cluster restart check permits local certified recovery without a quorum
+bootstrap dependency. It does not permit an uncertified stale disk to replay
+below its authorized floor, and does not solve production identity revocation.
+
+#### What the model checks, assumes and bounds
+
+The inventory invariants are:
+
+| Predicate | Obligation |
+| --- | --- |
+| `InvDataSafe` | Live objects, pinned readers, durable snapshot/replay roots and in-flight snapshot transfers retain physical bytes. |
+| `InvNoResurrection` | No terminal object becomes live again. |
+| `InvDeleteSafe` | No issued deletion targets a live or pending key. |
+| `InvAccounting` | Every accepted Begin is pending, live or terminal, including unknown upload outcomes. |
+| `InvCertificates` | A participant's certified floor never exceeds its durable snapshot or completed purge. |
+| `InvShape` | Ownership sets are disjoint; at most one pending and one live inventory descriptor, with a consistent active root. |
+| `InvMonotone` | Once eligible, an old key never becomes protected again. |
+| `InvReclaimed`, `InvRestarted` | During the specified stable period, covered retired keys become permanently absent, and a whole cluster can restart and finish the history. |
+
+The original component explores one object, two established participants and one
+learner. The inventory component explores six keys: two payloads, an aborted
+inventory, and three replacements. Its asymmetric history places live/pending
+keys at exact cuts and retires them between capture and activation. The primary
+inventory configurations start from empty with one storage participant; the
+two-participant removal/restart and learner-transfer configurations start from a
+reachable second-activation cut, with older snapshots still needing the prior
+payload/inventory. These are **bounded suffix checks**, not all multi-node
+interleavings from genesis. The scan configuration abstracts endless newer
+inventories by their unchanged protection of the already retired target prefix
+(`p`, `q`, `a`, `i1`). It is a scanner-starvation check, not a representation of
+every later inventory generation or a proof that the final `i2`/`i3` roots are
+eventually collected; that needs a later cut excluding them.
+
+Safety includes successful and unknown PUT/DELETE results, delayed uploads,
+reader pins, transfer-source crash, removal without drainage and loss of volatile
+scan/acknowledgement state at whole-cluster crash. Actual external I/O is not
+executed by TLC. Snapshots, completed purge and certificates are distinct atomic
+durable events; fsync, rename, WAL framing, consensus correctness and successful
+object-store durability are assumptions, not derived from the state count.
+The committed history and unique accepted Begin order are supplied to the model,
+not a second implementation of Raft. Historical `dead`, captures, object contents
+and delayed operations are ghost/server state, not mandated retained metadata.
+The stipulated replay dependency at cut 7 abstracts a committed JSON fork;
+this model does not execute its Rust handler or prove composition with the
+cross-group grant protocol and arbitrary reference multiplicities.
+
+Stable-period liveness assumes eventual participant recovery, no new indefinitely
+pinned readers/transfers, eventual successful retried I/O, finite old PUTs, and
+weak fairness of enabled commit, checkpoint, completed-purge, restart and scanner
+actions. Its stable configurations exclude recurring unknown I/O/failures; safety
+does not. Listings must eventually enumerate every surviving eligible key, with
+finite rounds and eventual visibility after the final late PUT. The model uses
+a sorted finite birth prefix, not a provider's actual pagination API. A provider
+with omissions, unreliable continuation, permanent retention locks, or endless
+new late PUTs does not satisfy this liveness contract. The runtime must establish
+these assumptions or weaken its reclamation claim explicitly.
+
+The intended authoritative cold-GC metadata bound is proportional to **current live
+references + admitted pending Begins + registered storage participants**, plus
+one active and at most one pending inventory descriptor; it is not proportional
+to all historical deletions. Inventory bytes scale with live/pending references
+at their represented cut. This follows from the proposed representation and
+the absence of terminal reattachment authority; TLC checks only its finite
+shape, **not an unbounded inductive proof or a Rust memory bound**. Per-request
+admission limits, stale capture cleanup and participant drainage still need
+implementation. Physical orphan bytes and old inventories have no unconditional
+count/time bound under stalled participants, arbitrarily delayed PUTs or storage
+failure. An arbitrary retired key is eventually collectible only after a later
+certified cut excludes it and fair cumulative scanning reaches it after its
+last upload. Continuous-growth reclamation rate versus upload rate is unproved.
+
+The fail-fast runner is `bash experiments/electric-replication/scripts/formal.sh`;
+configs are `formal/cold{,-live,-inventory,-inventory-live,-scan-live,-participants,
+-transfer,-restart}.cfg`. `evidence/formal/` retains exact TLC outputs,
+counterexamples and source hashes; the evidence ledger records completed results.
+New negative controls distinguish live/pending cuts, immutable captures, missing
+inventory reads, old-root preservation, unknown uploads, completed purge, reader
+and learner pins, restart certificates, quorum-bootstrap deadlock, and starvation
+or missed late PUTs in delta-only/one-pass/resetting scans. A timeout or parser
+failure is not a detected mutation.
+
+There is no TLA-to-Rust refinement proof, unbounded proof, cold-specific Lean
+proof, independent object-storage qualification or replicated cold conformance
+result. Implementing the native publication/manifest seam, persisted certificates,
+restart validation, pins, scans and bounded admission remains the next gate;
+generated real-engine tests and process/object fault histories must cover that
+gap before cold offload is enabled.
 
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same

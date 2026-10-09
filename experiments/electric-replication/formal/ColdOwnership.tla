@@ -2,10 +2,11 @@
 EXTENDS Naturals, FiniteSets, TLC
 CONSTANTS EarlyColdPublish, AppliedIsCheckpoint, RequestedIsPurged,
           IgnoreColdReaders, ForgetRemovedParticipant, UnregisteredJoin,
-          ReattachRetiredObject, ForgetColdRetirement
+          ReattachRetiredObject, ForgetColdRetirement,
+          InventoryCampaign, InventoryFault
 VARIABLES committed, blob, upload, deleted, attached, deletePending,
           participants, members, online, applied, snapshots, purged, requested,
-          floors, fences, readers, transfer, joining, joinFloor, retired
+          floors, fences, readers, transfer, joining, joinFloor, retired, g
 vars == <<committed, blob, upload, deleted, attached, deletePending,
           participants, members, online, applied, snapshots, purged, requested,
           floors, fences, readers, transfer, joining, joinFloor, retired>>
@@ -173,7 +174,6 @@ Next == Upload \/ Publish \/ Fork \/ Retire \/ Remove \/ Admit \/ StartTransfer
         \/ \E n \in Nodes : Apply(n) \/ Checkpoint(n) \/ RequestPurge(n)
            \/ CompletePurge(n) \/ Fence(n) \/ Certify(n) \/ Read(n)
            \/ FinishRead(n) \/ Crash(n) \/ Restart(n)
-SafetySpec == Init /\ [][Next]_vars
 DataSafe == /\ (attached => blob)
             /\ (readers # {} => blob)
             /\ (TransferCut \in {1, 2} => blob)
@@ -190,11 +190,259 @@ Safe == /\ DataSafe
 LiveNext == Upload \/ Publish \/ Fork \/ Retire \/ AdvanceGc \/ IssueDelete \/ CompleteDelete
             \/ LateUpload \/ \E n \in Initial : Apply(n) \/ Checkpoint(n)
                \/ RequestPurge(n) \/ CompletePurge(n) \/ Fence(n) \/ Certify(n)
-LiveSpec == Init /\ [][LiveNext]_vars /\ WF_vars(Upload) /\ WF_vars(Publish)
+BaseFairness == WF_vars(Upload) /\ WF_vars(Publish)
             /\ WF_vars(Fork) /\ WF_vars(Retire) /\ WF_vars(AdvanceGc) /\ WF_vars(IssueDelete)
             /\ WF_vars(CompleteDelete) /\ WF_vars(LateUpload)
             /\ \A n \in Initial : WF_vars(Apply(n)) /\ WF_vars(Checkpoint(n))
                /\ WF_vars(RequestPurge(n)) /\ WF_vars(CompletePurge(n))
                /\ WF_vars(Fence(n)) /\ WF_vars(Certify(n))
 Reclaimed == <> (deleted /\ ~blob /\ ~upload /\ ~deletePending)
+
+\* Certified-inventory extension. The earlier specification above remains the
+\* focused recovery-certificate model. This scenario composes those boundaries
+\* with multiple immutable Begins and THREE inventory replacements; it does not
+\* infer this algorithm's correctness from the earlier one-object state count.
+\*
+\* The committed history schema deliberately places pending/live/retired objects
+\* on different sides of inventory cuts. Consensus total order and unique accepted
+\* singleton Begin indices are assumed, not re-proved here. All g transitions that
+\* change pos/live/pending/active are atomic committed WAL metadata transitions.
+\* Captures, PUTs, DELETEs, snapshots, purge and scans interleave independently.
+\* births/content/dead/attempts are history/object-server ghost state, NOT retained
+\* terminal records in the implementation's authoritative state machine.
+Keys == {"p", "q", "a", "i1", "i2", "i3"}
+Inventories == {"a", "i1", "i2", "i3"}
+Birth(k) == CASE k = "p" -> 1 [] k = "a" -> 2 [] k = "i1" -> 4
+                [] k = "q" -> 7 [] k = "i2" -> 9 [] OTHER -> 12
+Cut(k) == CASE k = "a" -> 1 [] k = "i1" -> 3 [] k = "i2" -> 7 [] k = "i3" -> 11 [] OTHER -> 0
+InvInitial == IF InventoryCampaign \in {"removed", "restart"} THEN {1, 2} ELSE {1}
+InvNodes == {1, 2, 3}
+NoRoot == "none"
+RootsAt(cut) == CASE cut < 6 -> {} [] cut < 10 -> {"p", "i1"}
+                    [] cut < 13 -> {"i2"} [] OTHER -> {"i3"}
+SnapshotCutNow == CASE g.pos >= 13 -> 13 [] g.pos >= 11 -> 11
+                      [] g.pos >= 7 -> 7 [] g.pos >= 3 -> 3 [] g.pos >= 1 -> 1 [] OTHER -> 0
+Target == CASE g.pos >= 11 -> 11 [] g.pos >= 7 -> 7 [] g.pos >= 3 -> 3 [] OTHER -> 1
+CanCommit == Cardinality(g.online \cap g.members) * 2 > Cardinality(g.members)
+References == g.live \cup g.pending
+Needed(n) == RootsAt(g.node[n].snap) \cup
+             (IF g.pos >= 7 /\ g.node[n].snap < 7 THEN {"p"} ELSE {})
+\* The second term is a committed JSON-fork replay dependency. An applied-only
+\* certificate cannot discard it before a durable replacement recovery cut.
+InvEmpty == [pos |-> 0, live |-> {}, pending |-> {}, dead |-> {},
+            physical |-> {}, inflight |-> {}, known |-> {},
+            late |-> {"p", "a"}, deletes |-> {},
+            captured |-> {}, contents |-> [k \in Inventories |-> {}],
+            active |-> NoRoot, previous |-> NoRoot, scan |-> 0,
+            scanRoot |-> NoRoot, scanFrom |-> 0, refresh |-> FALSE,
+            participants |-> InvInitial, members |-> InvInitial, online |-> InvInitial,
+            node |-> [n \in InvNodes |-> [snap |-> 0, applied |-> 0, request |-> 0,
+                       purge |-> 0, floor |-> 0, pin |-> {}]],
+            joining |-> "Absent", joinFloor |-> 0,
+            transfer |-> 0, sourcePin |-> FALSE, crashed |-> FALSE]
+\* Multi-participant suffix starts at the reachable second activation, rather
+\* than repeating every earlier independent PUT interleaving for three nodes.
+\* Both initial participants certified cut 7; their snapshots still need p/i1.
+\* The inventory campaign checks the complete preceding lifecycle from empty.
+InvInit == IF InventoryCampaign \in {"removed", "transfer", "restart"}
+           THEN [InvEmpty EXCEPT !.pos = 10, !.live = {"i2"}, !.pending = {"q"},
+                 !.dead = {"p", "a", "i1"}, !.physical = Keys \ {"i3"},
+                 !.known = Keys \ {"i3"}, !.captured = {"a", "i1", "i2"},
+                 !.contents = [k \in Inventories |-> CASE k = "i2" -> {"p", "q", "i1"}
+                                    [] k = "i3" -> {} [] OTHER -> {"p"}],
+                 !.active = "i2", !.previous = "i1",
+                 !.node = [n \in InvNodes |-> IF n \in InvInitial
+                     THEN [snap |-> 7, applied |-> 10, request |-> 7, purge |-> 7, floor |-> 7, pin |-> {}]
+                     ELSE InvEmpty.node[n]]]
+           ELSE InvEmpty
+allvars == <<vars, g>>
+Bad(name) == InventoryFault = name
+
+Begin(k) == /\ CanCommit /\ g.pos = Birth(k) - 1
+            /\ (k \notin Inventories \/ k \in g.captured)
+            /\ g' = [g EXCEPT !.pos = @ + 1, !.pending = @ \cup {k}]
+Capture(k) == /\ k \in Inventories /\ g.pos = Cut(k) /\ k \notin g.captured
+              /\ g' = [g EXCEPT !.captured = @ \cup {k},
+                    !.contents[k] = IF Bad("OmitPending") THEN g.live
+                                   ELSE IF Bad("OmitInventoryRoot") THEN References \ Inventories
+                                   ELSE References]
+StartPut(k) == /\ k \in g.pending /\ k \notin g.inflight /\ k \notin g.known
+               /\ g' = [g EXCEPT !.inflight = @ \cup {k}]
+FinishPut(k) == /\ k \in g.inflight
+                /\ g' = [g EXCEPT !.physical = @ \cup {k}, !.inflight = @ \ {k},
+                         !.known = IF g.online # {} THEN @ \cup {k} ELSE @]
+UnknownPut(k) == /\ k \in g.inflight
+                 /\ \E effect \in {TRUE, FALSE} :
+                     g' = [g EXCEPT !.inflight = @ \ {k},
+                           !.pending = IF Bad("DropPendingOnUnknown") THEN @ \ {k} ELSE @,
+                           !.physical = IF effect THEN @ \cup {k} ELSE @]
+LatePut(k) == /\ k \in g.late /\ k \in g.dead
+             /\ g' = [g EXCEPT !.late = @ \ {k}, !.physical = @ \cup {k}]
+PublishP == /\ CanCommit /\ g.pos = 5 /\ "p" \in g.pending
+            /\ ("p" \in g.known \/ Bad("UnverifiedPublication"))
+            /\ g' = [g EXCEPT !.pos = 6, !.pending = @ \ {"p"}, !.live = @ \cup {"p"}]
+AbortInventory == /\ CanCommit /\ g.pos = 2
+                  /\ g' = [g EXCEPT !.pos = 3, !.pending = @ \ {"a"}, !.dead = @ \cup {"a"}]
+RetireP == /\ CanCommit /\ g.pos = 7 /\ "i2" \in g.captured
+           /\ g' = [g EXCEPT !.pos = 8, !.live = @ \ {"p"}, !.dead = @ \cup {"p"},
+                    !.contents["i2"] = IF Bad("MutableCapture") THEN References \ {"p"}
+                                          ELSE @]
+AbortQ == /\ CanCommit /\ g.pos = 10
+          /\ g' = [g EXCEPT !.pos = 11, !.pending = @ \ {"q"}, !.dead = @ \cup {"q"}]
+Certificate(n, cut) == g.node[n].floor >= cut
+Covered(cut) == \A n \in g.participants : Certificate(n, cut)
+Activate(k) == /\ CanCommit /\ k \in Inventories \ {"a"} /\ g.pos = Birth(k)
+               /\ k \in g.pending /\ (k \in g.known \/ Bad("UnverifiedPublication"))
+               /\ Covered(Cut(k))
+               /\ g' = [g EXCEPT !.pos = @ + 1, !.pending = @ \ {k},
+                    !.live = (@ \ {g.active}) \cup {k},
+                    !.dead = IF g.active = NoRoot THEN @ ELSE @ \cup {g.active},
+                    !.previous = g.active, !.active = k,
+                    !.scan = IF Bad("ResetScan") THEN 0 ELSE @,
+                    !.physical = IF Bad("DeletePreviousInventory") THEN @ \ {g.active} ELSE @]
+StalePublish(k) == /\ Bad("ReattachAbsentBegin") /\ k \in g.dead /\ k \notin g.live
+                  /\ g' = [g EXCEPT !.live = @ \cup {k}]
+
+ApplyNode(n) == /\ n \in g.online /\ g.node[n].applied < g.pos
+                /\ g' = [g EXCEPT !.node[n].applied = g.pos]
+CheckpointNode(n) == /\ n \in g.online /\ g.node[n].applied >= SnapshotCutNow
+                     /\ g.node[n].snap < SnapshotCutNow
+                     /\ g' = [g EXCEPT !.node[n].snap = SnapshotCutNow]
+RequestPurgeNode(n) == /\ n \in g.online /\ g.node[n].snap > g.node[n].request
+                       /\ g' = [g EXCEPT !.node[n].request = g.node[n].snap]
+FinishPurgeNode(n) == /\ n \in g.online /\ g.node[n].request > g.node[n].purge
+                      /\ g' = [g EXCEPT !.node[n].purge = g.node[n].request]
+CertifyNode(n) == /\ n \in g.online \cap g.participants /\ g.node[n].floor < Target
+                 /\ (IF Bad("AppliedCertificate") THEN g.node[n].applied >= Target
+                     ELSE g.node[n].snap >= Target)
+                 /\ (IF Bad("RequestedPurge") THEN g.node[n].request >= Target
+                     ELSE IF Bad("AppliedCertificate") THEN TRUE ELSE g.node[n].purge >= Target)
+                 /\ (Bad("IgnorePins") \/ (g.node[n].pin = {} /\ (n # 1 \/ ~g.sourcePin)))
+                 /\ g' = [g EXCEPT !.node[n].floor = Target]
+PinReader(n) == /\ n \in g.online /\ g.node[n].pin = {}
+                /\ g.node[n].snap >= g.node[n].floor /\ RootsAt(g.node[n].snap) # {}
+                /\ g' = [g EXCEPT !.node[n].pin = RootsAt(g.node[n].snap)]
+DrainReader(n) == /\ g.node[n].pin # {} /\ g' = [g EXCEPT !.node[n].pin = {}]
+RemoveNode == /\ InventoryCampaign = "removed" /\ 2 \in g.members
+              /\ g' = [g EXCEPT !.members = @ \ {2},
+                       !.participants = IF Bad("ForgetRemoved") THEN @ \ {2} ELSE @]
+AdmitLearner == /\ InventoryCampaign = "transfer" /\ g.joining = "Absent"
+                /\ g' = [g EXCEPT !.joining = "Pending", !.joinFloor = Cut(g.active),
+                   !.node[3].floor = Cut(g.active),
+                   !.participants = IF Bad("UnregisteredTransfer") THEN @ ELSE @ \cup {3}]
+InvStartTransfer == /\ g.joining = "Pending" /\ g.transfer = 0 /\ 1 \in g.online
+                 /\ g.node[1].snap > 0 /\ g.node[1].snap >= g.joinFloor
+                 /\ g.node[1].snap >= g.node[1].floor
+                 /\ g' = [g EXCEPT !.transfer = g.node[1].snap, !.sourcePin = TRUE]
+InvFinishTransfer == /\ g.joining = "Pending" /\ g.transfer > 0
+                  /\ g' = [g EXCEPT !.joining = "Ready", !.participants = @ \cup {3},
+                     !.online = @ \cup {3}, !.node[3].snap = g.transfer,
+                     !.node[3].purge = g.transfer, !.node[3].applied = g.transfer,
+                     !.transfer = 0, !.sourcePin = FALSE]
+CrashAll == /\ InventoryCampaign \in {"restart", "transfer"} /\ g.pos >= 10 /\ ~g.crashed
+            /\ g' = [g EXCEPT !.online = {}, !.crashed = TRUE, !.sourcePin = FALSE,
+                     !.node = [n \in InvNodes |-> [g.node[n] EXCEPT !.pin = {}]],
+                     !.known = {}, !.scanRoot = NoRoot, !.scanFrom = 0, !.scan = 0,
+                     !.active = IF Bad("ForgetRestartCertificate") THEN NoRoot ELSE @]
+RestartNode(n) == /\ n \in g.participants \ g.online /\ (n # 3 \/ g.joining = "Ready")
+                  /\ (~Bad("QuorumBootstrap") \/ CanCommit)
+                  /\ Needed(n) \subseteq g.physical
+                  /\ g' = [g EXCEPT !.online = @ \cup {n}, !.node[n].applied = g.pos]
+
+\* One sorted, finite birth-prefix round. New objects cannot extend its bound.
+\* The captured active identity supplies BOTH the cutoff and protected set.
+\* An empty or complete round always wraps: old PUTs can appear behind it.
+\* StartScan means the COMPLETE inventory was fetched and hash-verified into
+\* an immutable local handle. Object deletion cannot invalidate that handle.
+\* Hash/GET failure does not authorize absence or start a partial inventory.
+ScanKey(index) == CASE index = 1 -> "p" [] index = 2 -> "a" [] index = 3 -> "i1"
+                       [] index = 4 -> "q" [] index = 5 -> "i2" [] OTHER -> "i3"
+EligibleAt(k, root, lower) == /\ root # NoRoot
+                             /\ (Bad("IgnoreBirthCut") \/ Birth(k) <= IF Bad("MixedInventoryCut") THEN Target ELSE Cut(root))
+                             /\ (Bad("EmptyOnInventoryError") \/ k \notin g.contents[root])
+                             /\ (~Bad("DeltaOnlyScan") \/ Birth(k) > lower)
+DeleteEligible(k) == EligibleAt(k, g.active, Cut(g.previous))
+StartScan == /\ g.online # {} /\ g.active # NoRoot /\ g.scanRoot = NoRoot
+             /\ g' = [g EXCEPT !.scanRoot = g.active, !.scanFrom = Cut(g.previous), !.scan = 0]
+ScanLimit == IF Bad("IgnoreBirthCut") THEN 6
+             ELSE Cardinality({k \in Keys : Birth(k) <= IF Bad("MixedInventoryCut") THEN Target ELSE Cut(g.scanRoot)})
+Scan == /\ g.online # {} /\ g.scanRoot # NoRoot /\ g.scan < ScanLimit
+        /\ LET k == ScanKey(g.scan + 1) IN
+             g' = [g EXCEPT !.scan = @ + 1,
+                    !.deletes = IF k \in g.physical /\ EligibleAt(k, g.scanRoot, g.scanFrom)
+                                THEN @ \cup {k} ELSE @]
+WrapScan == /\ g.scanRoot # NoRoot /\ g.scan = ScanLimit /\ ~Bad("StopAfterCleanScan")
+            /\ g' = [g EXCEPT !.scanRoot = NoRoot, !.scanFrom = 0, !.scan = 0]
+FinishDelete(k) == /\ k \in g.deletes
+                  /\ g' = [g EXCEPT !.deletes = @ \ {k}, !.physical = @ \ {k}]
+UnknownDelete(k) == /\ k \in g.deletes
+                   /\ \E effect \in {TRUE, FALSE} :
+                        g' = [g EXCEPT !.deletes = @ \ {k},
+                                  !.physical = IF effect THEN @ \ {k} ELSE @]
+
+\* Abstract further strictly-newer inventory generations after the finite
+\* history: their projection on these old keys is unchanged. They must not
+\* restart an in-progress prefix scan indefinitely. The bit represents fresh
+\* work, NOT reuse of an object identity or rollback of a committed cut.
+RefreshInventory == /\ InventoryCampaign = "scan" /\ g.pos = 13
+                    /\ g' = [g EXCEPT !.refresh = ~@,
+                             !.scan = IF Bad("ResetScan") THEN 0 ELSE @]
+InvCommands == (\E k \in Keys : Begin(k)) \/ (\E k \in Inventories : Capture(k) \/ Activate(k))
+               \/ PublishP \/ AbortInventory \/ RetireP \/ AbortQ
+InvStorage == \E k \in Keys : StartPut(k) \/ FinishPut(k) \/ UnknownPut(k)
+                  \/ LatePut(k) \/ FinishDelete(k) \/ UnknownDelete(k) \/ StalePublish(k)
+InvParticipants == (\E n \in InvNodes : ApplyNode(n) \/ CheckpointNode(n)
+                      \/ RequestPurgeNode(n) \/ FinishPurgeNode(n) \/ CertifyNode(n)
+                      \/ PinReader(n) \/ DrainReader(n) \/ RestartNode(n))
+                   \/ RemoveNode \/ AdmitLearner \/ InvStartTransfer \/ InvFinishTransfer \/ CrashAll
+InvNext == InvCommands \/ InvStorage \/ InvParticipants \/ StartScan \/ Scan \/ WrapScan \/ RefreshInventory
+InvSafetySpec == Init /\ g = InvInit /\ [][InvNext /\ UNCHANGED vars]_allvars
+
+InvDataSafe == /\ g.live \subseteq g.physical
+               /\ \A n \in InvInitial \cup (IF g.joining = "Ready" THEN {3} ELSE {}) :
+                    /\ g.node[n].pin \subseteq g.physical
+                    /\ Needed(n) \subseteq g.physical
+               /\ (g.transfer > 0 => RootsAt(g.transfer) \subseteq g.physical)
+InvNoResurrection == g.live \cap g.dead = {}
+InvDeleteSafe == g.deletes \cap (g.live \cup g.pending) = {}
+InvAccounting == g.live \cup g.pending \cup g.dead = {k \in Keys : Birth(k) <= g.pos}
+InvCertificates == \A n \in g.participants :
+                     (n # 3 \/ g.joining = "Ready") =>
+                          g.node[n].floor <= g.node[n].snap /\ g.node[n].floor <= g.node[n].purge
+InvSafe == InvDataSafe /\ InvNoResurrection /\ InvDeleteSafe /\ InvCertificates /\ InvAccounting
+EligibleSet == {k \in Keys : DeleteEligible(k)}
+InvMonotone == [][EligibleSet \subseteq EligibleSet']_g
+\* No historical terminal record is counted as implementation state here.
+\* Captures/contents represent immutable object bytes plus model history. The
+\* required real implementation has at most one active and one pending inventory
+\* descriptor; payload descriptors are only live or currently pending Begins.
+InvShape == /\ Cardinality(g.pending \cap Inventories) <= 1
+            /\ Cardinality(g.live \cap Inventories) <= 1
+            /\ g.pending \cap g.live = {} /\ g.pending \cap g.dead = {}
+            /\ (g.active = NoRoot <=> g.live \cap Inventories = {})
+            /\ (g.active # NoRoot => g.active \in g.live)
+
+\* Stable period: eventual successful object/snapshot/purge operations; no new
+\* reader/learner/remove arrivals. Restart campaign includes one whole-cluster
+\* crash. Fair retries and finite delayed PUTs, not timeouts, imply reclamation.
+InvLiveNext == InvCommands \/ (\E k \in Keys : StartPut(k) \/ FinishPut(k) \/ LatePut(k)
+                    \/ FinishDelete(k))
+               \/ (\E n \in InvNodes : ApplyNode(n) \/ CheckpointNode(n) \/ RequestPurgeNode(n)
+                    \/ FinishPurgeNode(n) \/ CertifyNode(n) \/ DrainReader(n) \/ RestartNode(n))
+               \/ CrashAll \/ StartScan \/ Scan \/ WrapScan \/ RefreshInventory
+InvLiveSpec == Init /\ g = InvInit /\ [][InvLiveNext /\ UNCHANGED vars]_allvars
+               /\ WF_g(InvCommands) /\ WF_g(StartScan) /\ WF_g(Scan) /\ WF_g(WrapScan)
+               /\ WF_g(CrashAll) /\ WF_g(RefreshInventory)
+               /\ \A k \in Keys : WF_g(StartPut(k)) /\ WF_g(FinishPut(k))
+                    /\ WF_g(LatePut(k)) /\ WF_g(FinishDelete(k))
+               /\ \A n \in InvNodes : WF_g(ApplyNode(n)) /\ WF_g(CheckpointNode(n))
+                    /\ WF_g(RequestPurgeNode(n)) /\ WF_g(FinishPurgeNode(n))
+                    /\ WF_g(CertifyNode(n)) /\ WF_g(DrainReader(n)) /\ WF_g(RestartNode(n))
+InvReclaimed == <>[] ({"p", "q", "a", "i1"} \cap g.physical = {} /\ g.pos = 13)
+InvRestarted == <> (g.crashed /\ g.participants \subseteq g.online /\ g.pos = 13)
+
+\* Keep the earlier certificate checks reproducible without unconstrained new
+\* variables. These wrappers freeze the inventory scenario, not its assertions.
+SafetySpec == Init /\ g = InvInit /\ [][Next /\ UNCHANGED g]_allvars
+LiveSpec == Init /\ g = InvInit /\ [][LiveNext /\ UNCHANGED g]_allvars /\ BaseFairness
 =============================================================================

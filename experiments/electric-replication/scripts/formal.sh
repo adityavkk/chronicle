@@ -7,6 +7,7 @@ mkdir -p "$tools" "$here/evidence/formal"
 jar="$tools/tla2tools.jar"
 test -f "$jar" || curl -fLsS https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar -o "$jar"
 cd "$here/formal"
+sha256sum -- *.tla *.cfg *.lean > "$here/evidence/formal/source-sha256.txt"
 for mode in safety liveness; do
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" Publication.tla > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
@@ -20,7 +21,7 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live snapshot snapshot-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live cold cold-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live snapshot snapshot-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live cold cold-live cold-inventory cold-inventory-live cold-scan-live cold-participants cold-transfer cold-restart; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
@@ -36,7 +37,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live fences fence
   [[ "$mode" != epochs* ]] || model=AdmissionEpoch
   [[ "$mode" != fsync* ]] || model=FsyncGroups
   [[ "$mode" != cold* ]] || model=ColdOwnership
-  java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
+  timeout 900 java -XX:+UseParallelGC -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
 for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UnpinnedReader UnpinnedPath UnboundedCopy LateMetadata OverlapInstall EarlyReference EarlyCleanup UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut EarlyColdPublish AppliedIsCheckpoint RequestedIsPurged IgnoreColdReaders ForgetRemovedParticipant UnregisteredJoin ReattachRetiredObject; do
@@ -84,6 +85,28 @@ for mutation in StuckTimer LostWake ForgetColdRetirement; do
   test "$result" -ne 0
   grep -q 'Temporal properties were violated' "$here/evidence/formal/$mutation.txt"
 done
+for mutation in UnverifiedPublication DropPendingOnUnknown OmitPending IgnoreBirthCut EmptyOnInventoryError MixedInventoryCut AppliedCertificate RequestedPurge ReattachAbsentBegin MutableCapture OmitInventoryRoot DeletePreviousInventory IgnorePins ForgetRemoved UnregisteredTransfer ForgetRestartCertificate DeltaOnlyScan StopAfterCleanScan QuorumBootstrap ResetScan; do
+  config=cold-inventory
+  expected='Invariant (InvSafe|InvShape) is violated'
+  expected_status=12
+  case "$mutation" in
+    ForgetRemoved) config=cold-participants ;;
+    UnregisteredTransfer) config=cold-transfer ;;
+    ForgetRestartCertificate) config=cold-restart ;;
+    DeltaOnlyScan|StopAfterCleanScan) config=cold-inventory-live; expected='Temporal properties were violated'; expected_status=13 ;;
+    QuorumBootstrap) config=cold-restart; expected='Temporal properties were violated'; expected_status=13 ;;
+    ResetScan) config=cold-scan-live; expected='Temporal properties were violated'; expected_status=13 ;;
+  esac
+  sed "s/InventoryFault = \"\"/InventoryFault = \"$mutation\"/" "$config.cfg" > "$tools/$mutation.cfg"
+  set +e
+  timeout 900 java -XX:+UseParallelGC -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/$mutation.cfg" ColdOwnership.tla > "$here/evidence/formal/$mutation.txt" 2>&1
+  result=$?
+  set -e
+  # A timeout, parser error or under-specified action is NOT a detected bug.
+  test "$result" -eq "$expected_status"
+  grep -Eq "$expected" "$here/evidence/formal/$mutation.txt"
+  printf 'TLC %s: expected counterexample, exit %s\n' "$mutation" "$result"
+done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
 sed 's/name == "accept"/name == "host"/' Contracts.lean > "$tools/DiscardHost.lean"
@@ -93,4 +116,5 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync/cold safety, stable-period liveness, 63 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+sha256sum --check "$here/evidence/formal/source-sha256.txt" > "$here/evidence/formal/source-check.txt"
+printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync/cold safety, stable-period liveness, 83 negative mutations; Lean and one header-projection negative mutation: PASS\n'
