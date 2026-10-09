@@ -1,0 +1,139 @@
+{
+  "verdict": "PASS",
+  "audited_revision": "HEAD",
+  "runs": [
+    {
+      "run": "subscription-fault-001",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-002",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-003",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-004",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-005",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-006",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-007",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-008",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-009",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-010",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-011",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-012",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-013",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-014",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-015",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-016",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-017",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    }
+  ],
+  "validator_sha256": "297fce2fe30fe0d1678d9c1eb3f5ba18094c7981143521d1bafc0216f6425568",
+  "authorization_matches": 255,
+  "unique_token_values": 153,
+  "retired_recorded_pids_absent": 51,
+  "reused_recorded_pids_unrelated": 0,
+  "distinct_private_lab_keys_checked": 68,
+  "historical_blobs_scanned": 13897,
+  "gzip_blobs_decompressed": 2518,
+  "zstd_blobs_decompressed": 29,
+  "private_lab_key_matches": 0,
+  "token_format": "base64url(JSON claims).base64url(HMAC-SHA256)",
+  "issuer": "per-group getrandom-generated Keys; replicated Action::Keys; persisted only in local lab WAL/snapshots",
+  "consumer": "loopback lab subscription ack/release/callback; signature plus path/incarnation/generation/wake/lease fencing",
+  "limitations": "Specific retained-fixture signature audit plus finite key-encoding scan; not proof against arbitrary encodings. Retired untracked lab data remains local, not for deployment reuse."
+}
