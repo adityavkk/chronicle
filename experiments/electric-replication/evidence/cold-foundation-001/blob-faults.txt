@@ -1,0 +1,29 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1861:1
+     |
+1861 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.67s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-b533bf90f3b40820)
+
+running 4 tests
+test blobstore::tests::local_blobstore_roundtrip ... ok
+test blobstore::tests::concurrent_immutable_puts_do_not_share_temporary_files ... ok
+enospc-write: unknown PUT plus unknown DELETE checked; two real failing syscalls
+eio-sync: unknown PUT plus unknown DELETE checked; two real failing syscalls
+eio-dir-sync: unknown PUT plus unknown DELETE checked; two real failing syscalls
+test blobstore::tests::local_storage_errors_never_acknowledge_durability ... ok
+test blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 145 filtered out; finished in 2.03s
+

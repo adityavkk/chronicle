@@ -1,0 +1,451 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1861:1
+     |
+1861 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.85s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-b533bf90f3b40820)
+
+running 3 tests
+
+thread 'tokio-rt-worker' (3637159) panicked at src/blobstore.rs:318:79:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tokio-rt-worker' (3637158) panicked at src/blobstore.rs:318:79:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+
+thread 'blobstore::tests::concurrent_immutable_puts_do_not_share_temporary_files' (3637155) panicked at src/blobstore.rs:321:68:
+called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(16), "called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: \"No such file or directory\" }", ...)
+test blobstore::tests::local_blobstore_roundtrip ... ok
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+test blobstore::tests::concurrent_immutable_puts_do_not_share_temporary_files ... FAILED
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:279:17:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+proptest: Saving this and future failures in /home/user/workspace/repo/experiments/electric-replication/engine/proptest-regressions/blobstore.txt
+proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file. (You may need to create it.)
+cc c6d77b15fce032f1859645de7c0f50727bc1389b7ca8cf9889f6021b3c82170e
+
+thread 'blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen' (3637157) panicked at src/blobstore.rs:258:5:
+Test failed: assertion `left == right` failed
+  left: Some(1)
+ right: Some(3).
+minimal failing input: prefix = "0", operations = [
+    (
+        0,
+        0,
+        [],
+    ),
+]
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+test blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen ... FAILED
+
+failures:
+
+failures:
+    blobstore::tests::concurrent_immutable_puts_do_not_share_temporary_files
+    blobstore::tests::opaque_keys_ranges_and_reclamation_survive_reopen
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 145 filtered out; finished in 0.22s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

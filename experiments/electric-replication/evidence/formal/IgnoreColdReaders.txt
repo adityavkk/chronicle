@@ -1,0 +1,574 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 76 and seed -6770674379276100875 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 3672946] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/ColdOwnership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ColdOwnership
+Starting... (2026-10-09 03:20:14)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-09 03:20:14.
+Progress(22) at 2026-10-09 03:20:17: 1,034,258 states generated (1,034,258 s/min), 175,736 distinct states found (175,736 ds/min), 44,897 states left on queue.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 2: <Upload line 35, col 11 to line 38, col 77 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = TRUE
+
+State 3: <Publish line 39, col 12 to line 43, col 70 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 1
+/\ participants = {1, 2}
+/\ attached = TRUE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = TRUE
+
+State 4: <Fork line 44, col 9 to line 47, col 75 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 2
+/\ participants = {1, 2}
+/\ attached = TRUE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = TRUE
+
+State 5: <Retire line 48, col 11 to line 52, col 60 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 6: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<1, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 7: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<2, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 8: <Read line 89, col 12 to line 93, col 88 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<2, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 9: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 10: <Fence line 74, col 13 to line 78, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 11: <Checkpoint line 58, col 18 to line 62, col 95 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 12: <RequestPurge line 63, col 20 to line 67, col 94 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 13: <CompletePurge line 68, col 21 to line 73, col 52 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 14: <Certify line 79, col 15 to line 88, col 92 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 15: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 1, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 16: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 2, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 17: <Apply line 53, col 13 to line 57, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 0, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 18: <Checkpoint line 58, col 18 to line 62, col 95 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 19: <RequestPurge line 63, col 20 to line 67, col 94 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 20: <Fence line 74, col 13 to line 78, col 90 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = FALSE
+/\ purged = <<3, 0, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 21: <CompletePurge line 68, col 21 to line 73, col 52 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = FALSE
+/\ purged = <<3, 3, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 22: <Certify line 79, col 15 to line 88, col 92 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 3 @@ 2 :> 3 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = FALSE
+/\ purged = <<3, 3, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 23: <AdvanceGc line 146, col 14 to line 149, col 91 of module ColdOwnership>
+/\ floors = (0 :> 3 @@ 1 :> 3 @@ 2 :> 3 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = FALSE
+/\ purged = <<3, 3, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 24: <IssueDelete line 150, col 16 to line 154, col 82 of module ColdOwnership>
+/\ floors = (0 :> 3 @@ 1 :> 3 @@ 2 :> 3 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = FALSE
+/\ purged = <<3, 3, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = TRUE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = TRUE
+
+State 25: <CompleteDelete line 155, col 19 to line 160, col 76 of module ColdOwnership>
+/\ floors = (0 :> 3 @@ 1 :> 3 @@ 2 :> 3 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {1}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {1, 2}
+/\ deleted = TRUE
+/\ purged = <<3, 3, 0>>
+/\ applied = <<3, 3, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 3
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<3, 3, 0>>
+/\ requested = {1, 2}
+/\ retired = TRUE
+/\ blob = FALSE
+
+2257391 states generated, 333717 distinct states found, 49509 states left on queue.
+The depth of the complete state graph search is 25.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 9 and the 95th percentile is 3).
+Finished in 05s at (2026-10-09 03:20:20)

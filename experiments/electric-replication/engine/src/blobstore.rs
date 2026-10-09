@@ -60,9 +60,9 @@ fn checked_range(start: u64, len: u64) -> io::Result<std::ops::Range<usize>> {
 
 // ---------------- local filesystem adapter ----------------
 
-/// A BlobStore backed by a local directory. Each object is a file whose name is
-/// the key with `/` replaced by `_` (keys are flat segment keys, so this is
-/// unambiguous). Used for tests and `--tier local`.
+/// Filesystem object-store fixture. Hex path components preserve opaque keys
+/// without slash/underscore aliases, traversal or NAME_MAX-sized components.
+/// This layout intentionally does not open the old, ambiguous flat test layout.
 pub struct LocalFsBlobStore {
     dir: std::path::PathBuf,
 }
@@ -70,27 +70,75 @@ pub struct LocalFsBlobStore {
 impl LocalFsBlobStore {
     pub fn new(dir: std::path::PathBuf) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
+        let dir = std::fs::canonicalize(dir)?;
+        // The configured root may itself have newly created ancestors. Complete
+        // their durability before any successful PUT can rely on this namespace.
+        for ancestor in dir.ancestors() {
+            std::fs::File::open(ancestor)?.sync_all()?;
+        }
         Ok(LocalFsBlobStore { dir })
     }
 
     fn path_for(&self, key: &str) -> std::path::PathBuf {
-        self.dir.join(key.replace('/', "_"))
+        use std::fmt::Write;
+        let mut path = self.dir.clone();
+        for chunk in key.as_bytes().chunks(60) {
+            let mut component = String::with_capacity(chunk.len() * 2);
+            for byte in chunk {
+                write!(component, "{byte:02x}").unwrap();
+            }
+            path.push(component);
+        }
+        path.join("blob")
+    }
+
+    fn sync_directories(root: &std::path::Path, from: &std::path::Path) -> io::Result<()> {
+        for dir in from.ancestors() {
+            std::fs::File::open(dir)?.sync_all()?;
+            if dir == root {
+                return Ok(());
+            }
+        }
+        Err(io::Error::other("object path escaped its root"))
     }
 }
 
 impl BlobStore for LocalFsBlobStore {
     fn put<'a>(&'a self, key: &'a str, body: Bytes) -> BoxFuture<'a, io::Result<()>> {
         let path = self.path_for(key);
+        let root = self.dir.clone();
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
                 use std::io::Write;
-                let tmp = path.with_extension("tmp");
-                {
-                    let mut f = std::fs::File::create(&tmp)?;
-                    f.write_all(&body)?;
-                    f.sync_all()?;
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+                let parent = path.parent().unwrap();
+                std::fs::create_dir_all(parent)?;
+                // Unique across concurrent requests/processes; create_new also
+                // prevents PID reuse after a crash from truncating a leftover.
+                let (tmp, mut file) = loop {
+                    let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+                    let tmp = parent.join(format!(".put-{}-{n}", std::process::id()));
+                    match std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&tmp)
+                    {
+                        Ok(file) => break (tmp, file),
+                        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                        Err(e) => return Err(e),
+                    }
+                };
+                let result = (|| {
+                    file.write_all(&body)?;
+                    file.sync_all()?;
+                    std::fs::rename(&tmp, &path)?;
+                    Self::sync_directories(&root, parent)
+                })();
+                if result.is_err() {
+                    let _ = std::fs::remove_file(tmp);
                 }
-                std::fs::rename(&tmp, &path)
+                result
             })
             .await
             .map_err(io::Error::other)?
@@ -133,11 +181,29 @@ impl BlobStore for LocalFsBlobStore {
 
     fn delete<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
         let path = self.path_for(key);
+        let root = self.dir.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || match std::fs::remove_file(&path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
+            tokio::task::spawn_blocking(move || {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
+                }
+                // Reclaim empty key directories, not only payload bytes. A
+                // sibling object or active upload stops the prune. A missing
+                // object still needs its closest existing parent synced: another
+                // deleter may have unlinked it but not completed durability yet.
+                let mut parent = path.parent().unwrap();
+                while parent != root {
+                    match std::fs::remove_dir(parent) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                        Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => break,
+                        Err(e) => return Err(e),
+                    }
+                    parent = parent.parent().unwrap();
+                }
+                Self::sync_directories(&root, parent)
             })
             .await
             .map_err(io::Error::other)?
@@ -154,8 +220,8 @@ pub use s3::S3BlobStore;
 mod s3 {
     use super::*;
     use object_store::aws::AmazonS3Builder;
-    use object_store::{GetOptions, GetRange, ObjectStore};
     use object_store::path::Path as ObjPath;
+    use object_store::{GetOptions, GetRange, ObjectStore};
 
     /// A generic S3-compatible BlobStore over `object_store`. Configured with a
     /// custom endpoint + path-style addressing so it targets any S3-compatible
@@ -185,7 +251,9 @@ mod s3 {
                 b = b.with_allow_http(true);
             }
             if let (Some(k), Some(s)) = (&cfg.access_key_id, &cfg.secret_access_key) {
-                b = b.with_access_key_id(k.clone()).with_secret_access_key(s.clone());
+                b = b
+                    .with_access_key_id(k.clone())
+                    .with_secret_access_key(s.clone());
             }
             let inner = b.build().map_err(io::Error::other)?;
             Ok(S3BlobStore { inner })
@@ -253,6 +321,187 @@ mod s3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(48))]
+        #[test]
+        fn opaque_keys_ranges_and_reclamation_survive_reopen(
+            prefix in "[a-zA-Z0-9]{1,15}",
+            operations in prop::collection::vec(
+                (0usize..6, 0u8..4, prop::collection::vec(any::<u8>(), 0..1024)), 1..40),
+        ) {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let root = tempfile::tempdir().unwrap();
+                let dir = root.path().join("objects");
+                let keys = [format!("{prefix}/s_a"), format!("{prefix}_s/a"),
+                    format!("{prefix}/s.bin/1"), format!("{prefix}/s.bin/2"),
+                    format!("../{prefix}/./λ?"), format!("{prefix}/{}", "λ".repeat(180))];
+                let mut expected = std::collections::BTreeMap::from([
+                    (0usize,vec![17,3,7]), (1usize,vec![59])]);
+                let mut bs = LocalFsBlobStore::new(dir.clone()).unwrap();
+                for (&index,data) in &expected {
+                    bs.put(&keys[index],Bytes::copy_from_slice(data)).await.unwrap();
+                }
+                // Different keys must not alias even when '/' and '_' move.
+                assert_eq!(bs.head(&keys[0]).await.unwrap(),Some(3));
+                for (index,action,data) in operations {
+                    match action {
+                        0 | 1 => {
+                            bs.put(&keys[index],Bytes::copy_from_slice(&data)).await.unwrap();
+                            expected.insert(index,data);
+                        }
+                        2 => { bs.delete(&keys[index]).await.unwrap(); expected.remove(&index); }
+                        _ => { bs = LocalFsBlobStore::new(dir.clone()).unwrap(); }
+                    }
+                    for (i,key) in keys.iter().enumerate() {
+                        assert_eq!(bs.head(key).await.unwrap(),expected.get(&i).map(|d|d.len() as u64));
+                        if let Some(data) = expected.get(&i) {
+                            let start = data.len()/3;
+                            assert_eq!(bs.get_range(key,start as u64,(data.len()-start) as u64)
+                                .await.unwrap().as_ref(),&data[start..]);
+                            assert!(bs.get_range(key,data.len() as u64,1).await.is_err());
+                        }
+                    }
+                }
+                for key in &keys {
+                    bs.delete(key).await.unwrap();
+                    bs.delete(key).await.unwrap();
+                }
+                assert_eq!(std::fs::read_dir(&dir).unwrap().count(),0,
+                    "retired keys must reclaim temporary files and empty key directories");
+            });
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_immutable_puts_do_not_share_temporary_files() {
+        let root = tempfile::tempdir().unwrap();
+        let bs = Arc::new(LocalFsBlobStore::new(root.path().join("objects")).unwrap());
+        let mut writes = tokio::task::JoinSet::new();
+        for i in 0..24usize {
+            let bs = bs.clone();
+            writes.spawn(async move {
+                let key = format!("shared/stream.bin/{:016}", i % 3);
+                bs.put(&key, Bytes::from(vec![31 + (i % 3) as u8; 1027 + i % 3]))
+                    .await
+                    .unwrap();
+            });
+        }
+        while let Some(result) = writes.join_next().await {
+            result.unwrap();
+        }
+        for i in 0..3usize {
+            let key = format!("shared/stream.bin/{i:016}");
+            assert_eq!(bs.head(&key).await.unwrap(), Some((1027 + i) as u64));
+            assert_eq!(
+                bs.get_range(&key, 13, (1014 + i) as u64)
+                    .await
+                    .unwrap()
+                    .as_ref(),
+                vec![31 + i as u8; 1014 + i]
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn local_storage_errors_never_acknowledge_durability() {
+        // Real syscalls in a fresh process: no global environment mutation or
+        // fake BlobStore. A returned PUT/DELETE error is an unknown outcome,
+        // never permission for the caller to discard its last durable copy.
+        if let Ok(mode) = std::env::var("DS_BLOB_FAULT_CHILD") {
+            let root = std::path::PathBuf::from(std::env::var("DS_TEST_DATA_ROOT").unwrap());
+            let flag = std::path::PathBuf::from(std::env::var("DS_TEST_FAULT_FILE").unwrap());
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let bs = LocalFsBlobStore::new(root.join("objects")).unwrap();
+                let key = "group/17/immutable.42";
+                let old = Bytes::from_static(b"old committed bytes");
+                let new = Bytes::from_static(b"a different complete immutable object");
+                bs.put(key, old.clone()).await.unwrap();
+                std::fs::write(&flag, format!("{mode} objects\n")).unwrap();
+                assert!(
+                    bs.put(key, new.clone()).await.is_err(),
+                    "failed storage must not acknowledge PUT"
+                );
+                std::fs::remove_file(&flag).unwrap();
+                let bs = LocalFsBlobStore::new(root.join("objects")).unwrap();
+                let len = bs.head(key).await.unwrap().unwrap();
+                let actual = bs.get_range(key, 0, len).await.unwrap();
+                if mode == "eio-dir-sync" {
+                    assert!(
+                        actual == old || actual == new,
+                        "unknown rename outcome is still atomic"
+                    );
+                } else {
+                    assert_eq!(
+                        actual, old,
+                        "failed staging must not damage the prior object"
+                    );
+                }
+                std::fs::write(&flag, "eio-dir-sync objects\n").unwrap();
+                assert!(
+                    bs.delete(key).await.is_err(),
+                    "failed directory sync must not acknowledge DELETE"
+                );
+                std::fs::remove_file(&flag).unwrap();
+                bs.delete(key).await.unwrap();
+                assert_eq!(bs.head(key).await.unwrap(), None);
+            });
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let interposer = temp.path().join("storage_faults.so");
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("scripts/storage_faults.c");
+        assert!(std::process::Command::new("cc")
+            .args(["-shared", "-fPIC", "-O2", "-Wall", "-Wextra", "-Werror"])
+            .arg("-o")
+            .arg(&interposer)
+            .arg(source)
+            .args(["-ldl", "-pthread"])
+            .status()
+            .unwrap()
+            .success());
+        for mode in ["enospc-write", "eio-sync", "eio-dir-sync"] {
+            let root = temp.path().join(mode);
+            std::fs::create_dir(&root).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "blobstore::tests::local_storage_errors_never_acknowledge_durability",
+                    "--nocapture",
+                ])
+                .env("LD_PRELOAD", &interposer)
+                .env("DS_BLOB_FAULT_CHILD", mode)
+                .env("DS_TEST_DATA_ROOT", &root)
+                .env("DS_TEST_FAULT_FILE", root.join("fault"))
+                .env("DS_TEST_FAULT_LOG", root.join("syscalls.jsonl"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let faults = std::fs::read_to_string(root.join("syscalls.jsonl")).unwrap();
+            let rows: Vec<serde_json::Value> = faults
+                .lines()
+                .map(|s| serde_json::from_str(s).unwrap())
+                .collect();
+            assert_eq!(
+                rows.len(),
+                2,
+                "both PUT and DELETE must hit real storage errors"
+            );
+            assert_eq!(rows[0]["fault"], mode);
+            assert_eq!(rows[1]["fault"], "eio-dir-sync");
+            println!("{mode}: unknown PUT plus unknown DELETE checked; two real failing syscalls");
+        }
+    }
 
     #[tokio::test]
     async fn local_blobstore_roundtrip() {
@@ -290,9 +539,7 @@ mod tests {
             kind: crate::tier::TierKind::S3,
             endpoint: Some("http://127.0.0.1:9000".into()),
             region: Some("us-east-1".into()),
-            bucket: Some(
-                std::env::var("DS_S3_BUCKET").unwrap_or_else(|_| "ds-tier-test".into()),
-            ),
+            bucket: Some(std::env::var("DS_S3_BUCKET").unwrap_or_else(|_| "ds-tier-test".into())),
             path_style: true,
             allow_http: true,
             access_key_id: std::env::var("DS_S3_ACCESS_KEY_ID").ok(),
@@ -303,7 +550,10 @@ mod tests {
         let key = "stream-test/0000000000000042";
         let payload = Bytes::from_static(b"the quick brown fox jumps over the lazy dog");
         bs.put(key, payload.clone()).await.expect("put");
-        assert_eq!(bs.head(key).await.expect("head"), Some(payload.len() as u64));
+        assert_eq!(
+            bs.head(key).await.expect("head"),
+            Some(payload.len() as u64)
+        );
         let got = bs.get_range(key, 4, 5).await.expect("get_range");
         assert_eq!(&got[..], b"quick");
         bs.delete(key).await.expect("delete");

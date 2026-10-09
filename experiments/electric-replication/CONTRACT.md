@@ -313,15 +313,76 @@ not permission to enable its standalone offloader unchanged:
   delete errors. A slow or indeterminate PUT can finish after that deletion;
   process death is not proof that an external request never completes. Durable
   retry/reconciliation and explicit retired-owner fencing are required.
-* `LocalFsBlobStore::put` fsyncs the temporary file and renames it, but does not
-  fsync the parent directory. It is not yet an honest crash-durable object-store
-  fixture for dropping the last local copy.
+* The imported filesystem object fixture used lossy slash-to-underscore keys,
+  one shared temporary name and no directory fsync after rename. The local
+  adaptation now encodes opaque keys injectively, uses create-new temporary
+  files, and fsyncs the file and complete directory chain before PUT succeeds.
+  DELETE reclaims empty key directories and fsyncs surviving ancestors, including
+  missing-object retries. A failed PUT/DELETE is still an unknown outcome. The
+  fresh fixture layout intentionally does not read old flat fixture directories.
+  Generated reopen/range/reclamation tests, concurrent uploads and real
+  ENOSPC/file-EIO/directory-EIO tests cover these boundaries, not independent
+  object-server power loss or provider durability.
 
 The native wire/range and bounded streaming paths remain the intended reuse
 boundary. Object publication, read/snapshot pins, delayed uploads, ownership
 transfer and reclamation need a formal contract and actual file/object fault
 tests before any replicated cold-tier flag is accepted. No cold durability or GC
 qualification is claimed by the hot-only conformance and benchmark results.
+
+### Shared cold ownership contract — modeled, not yet implemented
+
+Use one immutable object namespace per cluster/group, with stream incarnation,
+range and checksum in each key. A verified durable PUT precedes a committed
+manifest publication; no payload is inserted into a second authoritative WAL.
+The native manifest/range resolver continues to distinguish remote ranges from
+the fd-backed hot tail. Publication and retirement are committed metadata;
+uploads, range reads and DELETE retries happen outside state-machine locks.
+Retirement is irreversible: a delayed publication cannot reattach a retired key.
+A late duplicate PUT can resurrect physical bytes after DELETE, so durable
+retirement must support repeated reconciliation, not one best-effort deletion.
+
+Track **storage participants independently of Raft voting membership**. Removing
+a voter does not discard its old snapshots, committed-but-not-applied journal
+or cold readers. Every participant holds a monotonic recovery floor. Advancing
+it requires a complete durable snapshot at/after the floor, **completed durable
+logical purge** through that floor, an admission fence against older reads or
+transfers, and drainage of earlier readers, builders and snapshot transfers.
+Applied progress alone is insufficient: replaying a JSON-fork command can need
+an object's bytes even when subsequent committed deletion removed all live
+references. Snapshot publication alone is insufficient while retained log
+replay can still require that object. Issuing OpenRaft `trigger().purge_log`
+does not prove the storage purge has completed.
+
+The committed group GC floor cannot exceed any registered participant's floor.
+An unreachable removed-but-undrained participant therefore blocks collection;
+there is no timeout or unsafe force-GC in this contract. An object with no live
+stream/ancestor/grant references may be physically deleted only after its
+retirement position is covered by that group floor. This deliberately favors
+recoverability over reclaiming space during an indefinitely offline participant.
+
+Register a fresh learner **before snapshot transfer** through an ordered group
+decision, pinning the floor observed by that registration. Waiting until install
+finishes is unsafe: the sender may crash and lose its in-memory transfer pin
+while the receiver retains an old snapshot. Reject snapshots below that learner's
+registered floor. A continuously registered identity may restart using its
+durable recovery certificate without an online quorum lookup; requiring quorum
+before every member can replay would deadlock a full-cluster restart. A drained,
+uncertified or replacement identity must bootstrap from an authorized current
+snapshot before native replay or serving. A copied disk is not a new identity.
+
+`ColdOwnership.tla` checks this ordering for one object, two established
+participants and one learner: 451,702 safety states and 414 stable-period
+liveness states. Eight mutations cover early publication, applied-only
+certificates, requested-only purge, ignored readers, forgetting removed members,
+unregistered joins, reattachment and forgotten retirement. The join mutation
+must lose an actual cold dependency, not merely violate floor bookkeeping.
+Liveness assumes a finite old-upload set, drained readers, healthy participants
+and eventual storage responses. It does not promise GC during perpetual faults,
+bound real metadata growth, prove provider durability or refine the Rust code.
+Participant certificates, join fencing, replicated manifests, reader pins and
+durable retirement reconciliation remain implementation gates. Long-running
+bounded-state and real-process storage/transfer histories must qualify them.
 
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same

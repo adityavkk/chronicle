@@ -1,0 +1,37 @@
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1861:1
+     |
+1861 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-b533bf90f3b40820)
+
+running 16 tests
+test store::tier_tests::compaction_respects_threshold ... ok
+test store::tier_tests::manifest_survives_recovery ... ok
+test store::tier_tests::reader_tail_tracks_durable_not_writer_tail ... ok
+test store::tier_tests::hard_delete_reclaims_offloaded_segments ... ok
+test store::tier_tests::json_seal_lands_on_value_boundary ... ok
+test store::tier_tests::concurrent_reads_during_seal_are_consistent ... ok
+test store::tier_tests::compaction_reclaims_live_file ... ok
+test store::tier_tests::fork_reads_compacted_parent ... ok
+test store::tier_tests::seal_bails_after_hard_delete_flag ... ok
+test store::tier_tests::recovery_pending_intent_after_rename ... ok
+test store::tier_tests::sealed_local_offload_failure_is_readable ... ok
+test store::tier_tests::recovery_pending_intent_before_rename ... ok
+test store::tier_tests::round_trip_through_cold_storage ... ok
+test store::tier_tests::recovery_pending_intent_prefers_fsynced_temp_when_old_file_short ... ok
+test store::tier_tests::recovery_after_real_compaction ... ok
+test store::tier_tests::concurrent_append_seal_compact_no_deadlock ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 0.61s
+

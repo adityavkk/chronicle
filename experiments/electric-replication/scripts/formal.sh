@@ -20,7 +20,7 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live snapshot snapshot-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live fences fences-live links links-live apply apply-live reclaim reclaim-live snapshot snapshot-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live fsync fsync-live cold cold-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
@@ -35,10 +35,11 @@ for mode in subscriptions subscriptions-live timed forks forks-live fences fence
   [[ "$mode" != backlog* ]] || model=AsyncBacklog
   [[ "$mode" != epochs* ]] || model=AdmissionEpoch
   [[ "$mode" != fsync* ]] || model=FsyncGroups
+  [[ "$mode" != cold* ]] || model=ColdOwnership
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UnpinnedReader UnpinnedPath UnboundedCopy LateMetadata OverlapInstall EarlyReference EarlyCleanup UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant UnsafeRange ReplaceFence ForgetFence StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UnpinnedReader UnpinnedPath UnboundedCopy LateMetadata OverlapInstall EarlyReference EarlyCleanup UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue IgnoreLeaseAtAssignment DropAcceptedOnExpiry EarlyNotify LateCut EarlyColdPublish AppliedIsCheckpoint RequestedIsPurged IgnoreColdReaders ForgetRemovedParticipant UnregisteredJoin ReattachRetiredObject; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -58,8 +59,12 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     ReleaseOnAccepted|AllowRecoveredAdmission) model=AsyncBacklog; config=backlog ;;
     CacheAcrossTerm|UnguardedEnqueue|IgnoreLeaseAtAssignment|DropAcceptedOnExpiry) model=AdmissionEpoch; config=epochs ;;
     EarlyNotify|LateCut) model=FsyncGroups; config=fsync ;;
+    EarlyColdPublish|AppliedIsCheckpoint|RequestedIsPurged|IgnoreColdReaders|ForgetRemovedParticipant|UnregisteredJoin|ReattachRetiredObject) model=ColdOwnership; config=cold ;;
   esac
-  sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
+  # Require the join mutation to lose an actual cold dependency, not just break
+  # the auxiliary certificate-order invariant earlier in the same bad history.
+  test "$mutation" != UnregisteredJoin || invariant=DataSafe
+  sed -e "s/$mutation = FALSE/$mutation = TRUE/" -e "s/INVARIANT Safe/INVARIANT $invariant/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/$mutation.cfg" "$model.tla" > "$here/evidence/formal/$mutation.txt" 2>&1
   result=$?
@@ -67,9 +72,10 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
   test "$result" -ne 0
   grep -q "Invariant $invariant is violated" "$here/evidence/formal/$mutation.txt"
 done
-for mutation in StuckTimer LostWake; do
+for mutation in StuckTimer LostWake ForgetColdRetirement; do
   config=fsync-live; model=FsyncGroups
   if test "$mutation" = LostWake; then config=reclaim-live; model=JournalReclaim; fi
+  if test "$mutation" = ForgetColdRetirement; then config=cold-live; model=ColdOwnership; fi
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/$mutation.cfg" "$model.tla" > "$here/evidence/formal/$mutation.txt" 2>&1
@@ -87,4 +93,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync safety, stable-period liveness, 55 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/fences/links/apply/reclaim/snapshot/reads/batches/receipts/backlog/epochs/fsync/cold safety, stable-period liveness, 63 negative mutations; Lean and one header-projection negative mutation: PASS\n'
