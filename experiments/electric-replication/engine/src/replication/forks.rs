@@ -5,12 +5,16 @@ use crate::handlers::{create_prepared, prepare_create, PreparedCreate};
 use crate::store::{CreateResult, StreamConfig};
 
 pub const CHUNK: usize = 64 * 1024;
+pub const MAX_TRANSACTIONS: usize = 4096;
+pub const MAX_RESULTS: usize = 256;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Grant {
     pub source: String,
     pub incarnation: u64,
     pub config: StreamConfig,
+    /// Original inheritance defaults, distinct from child overrides and mirrors.
+    pub source_config: StreamConfig,
     pub end: u64,
     pub time: u64,
 }
@@ -45,6 +49,11 @@ pub struct State {
     pub decisions: BTreeMap<String, Decision>,
     /// Mirrors are soft-deleted native parents, hidden from public catalogs.
     pub mirrors: BTreeMap<String, u64>,
+    /// Inclusive, disjoint, nonadjacent retired reservation-index intervals.
+    /// Scope is destination group inside the immutable cluster identity.
+    pub fences: BTreeMap<usize, Vec<(u64, u64)>>,
+    /// Bounded terminal replies, never an ownership or idempotency authority.
+    pub results: BTreeMap<u64, (String, Reply)>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -84,6 +93,19 @@ pub enum Action {
     Released {
         tx: String,
     },
+    Compact {
+        destination_group: usize,
+        start: u64,
+        end: u64,
+    },
+    Collect {
+        source_group: usize,
+        start: u64,
+        end: u64,
+    },
+    Reconfirm {
+        headers: Vec<(String, String)>,
+    },
 }
 
 /// Headers that define native PUT configuration, in deterministic order. Host
@@ -111,9 +133,57 @@ fn corrupt(message: &str) -> io::Error {
     io::Error::other(message)
 }
 
+fn position(tx: &str) -> Option<(usize, u64)> {
+    let (group, index) = tx.split_once(':')?;
+    let (group, index) = (group.parse().ok()?, index.parse().ok()?);
+    (group < 64 && tx == format!("{group}:{index}")).then_some((group, index))
+}
+
 impl State {
     pub fn pending(&self, path: &str) -> bool {
         self.reservations.contains_key(path)
+    }
+
+    pub fn result(&self, tx: &str) -> Option<&Reply> {
+        self.destinations.get(tx).and_then(|d| d.result.as_ref())
+            .or_else(|| self.results.get(&position(tx)?.1)
+                .filter(|(id, _)| id == tx).map(|(_, reply)| reply))
+    }
+
+    fn fenced(&self, group: usize, index: u64) -> bool {
+        self.fences.get(&group).is_some_and(|ranges| {
+            let next = ranges.partition_point(|(_, end)| *end < index);
+            ranges.get(next).is_some_and(|(start, _)| *start <= index)
+        })
+    }
+
+    /// Capture under the applied-view lock. Later reservations have larger IDs;
+    /// later releases only enlarge this safe complement. No wall-clock timeout.
+    pub fn certificate(&self, tx: &str, cut: u64) -> Option<(usize, u64, u64)> {
+        let dest = self.destinations.get(tx)?;
+        if !dest.released { return None; }
+        let (_, index) = position(tx)?;
+        if index > cut { return None; }
+        let (mut start, mut end) = (0, cut);
+        for (other, d) in &self.destinations {
+            if d.source_group == dest.source_group && !d.released {
+                let (_, active) = position(other).expect("reserved transaction ID");
+                if active < index { start = start.max(active + 1); }
+                if active > index { end = end.min(active - 1); }
+            }
+        }
+        Some((dest.source_group, start, end))
+    }
+
+    /// Counts only: safe for operational inspection without paths or payloads.
+    pub fn stats(&self) -> serde_json::Value {
+        serde_json::json!({"schema":1,"destinations":self.destinations.len(),
+            "pending":self.reservations.len(),"decisions":self.decisions.len(),
+            "terminal_destinations":self.destinations.values().filter(|d|d.released).count(),
+            "terminal_decisions":self.decisions.values().filter(|d|!matches!(d,Decision::Granted(_))).count(),
+            "retired_ranges":self.fences.values().map(Vec::len).sum::<usize>(),
+            "results":self.results.len(),"mirrors":self.mirrors.len(),
+            "transaction_limit":MAX_TRANSACTIONS,"result_limit":MAX_RESULTS})
     }
 
     pub async fn apply(
@@ -124,6 +194,22 @@ impl State {
         index: u64,
     ) -> io::Result<Resp> {
         Ok(match action {
+            Action::Reconfirm { headers } => {
+                if let Some(tx) = self.reservations.get(path) {
+                    if identity(&headers) != identity(&self.destinations[tx].headers) {
+                        return Ok(response(409, "destination reserved with different configuration"));
+                    }
+                    return Ok(Resp { status: 202, ..json(tx) });
+                }
+                let existing = store.get(path);
+                let grant = existing.as_ref().and_then(|s| self.destinations.values()
+                    .find(|d| d.path == path && d.created == Some(s.id)))
+                    .and_then(|d| d.grant.as_ref());
+                let request = Req { method: Method::Put, path: path.into(), query: None,
+                    headers, body: Default::default() };
+                crate::handlers::existing_create(store, &request, grant.map(|g| &g.source_config))
+                    .unwrap_or_else(|| response(404, "fork destination absent"))
+            }
             Action::Reserve {
                 group,
                 source_group,
@@ -161,6 +247,9 @@ impl State {
                 if self.reservations.len() >= 32 {
                     return Ok(response(429, "pending fork bound reached"));
                 }
+                if self.destinations.len() >= MAX_TRANSACTIONS {
+                    return Ok(response(429, "retained fork bound reached; release or restore peer progress"));
+                }
                 let tx = format!("{group}:{index}");
                 self.reservations.insert(path.into(), tx.clone());
                 self.destinations.insert(
@@ -190,8 +279,17 @@ impl State {
                 headers,
                 expected,
             } => {
+                let Some((group, index)) = position(&tx) else {
+                    return Ok(response(400, "invalid fork transaction ID"));
+                };
+                if self.fenced(group, index) {
+                    return Ok(response(410, "fork transaction permanently retired"));
+                }
                 if let Some(decision) = self.decisions.get(&tx) {
                     return Ok(json(decision));
+                }
+                if self.decisions.len() >= MAX_TRANSACTIONS {
+                    return Ok(response(429, "retained fork decision bound reached"));
                 }
                 if self.pending(path) {
                     return Ok(response(409, "source fork is still materializing"));
@@ -222,6 +320,7 @@ impl State {
                                 source: path.into(),
                                 incarnation: source_id,
                                 config: prepared.config,
+                                source_config: source.config.clone(),
                                 end: prepared.base_offset,
                                 time: clock::millis(store.clock.now()),
                             })
@@ -392,6 +491,9 @@ impl State {
                 Resp::new(204)
             }
             Action::Release { tx } => {
+                if position(&tx).is_some_and(|(g, i)| self.fenced(g, i)) {
+                    return Ok(Resp::new(204));
+                }
                 match self.decisions.get(&tx) {
                     Some(Decision::Granted(grant)) => {
                         let source = store
@@ -418,6 +520,42 @@ impl State {
                     return Ok(missing());
                 }
                 dest.released = true;
+                Resp::new(204)
+            }
+            Action::Compact { destination_group, mut start, mut end } => {
+                if destination_group >= 64 || start > end {
+                    return Ok(response(400, "invalid fork retirement interval"));
+                }
+                let covered = |tx: &str| position(tx).is_some_and(|(g, i)|
+                    g == destination_group && (start..=end).contains(&i));
+                if self.decisions.iter().any(|(tx, d)| covered(tx) && matches!(d, Decision::Granted(_))) {
+                    return Ok(response(409, "retirement interval covers a retained grant"));
+                }
+                self.decisions.retain(|tx, _| !covered(tx));
+                let ranges = self.fences.entry(destination_group).or_default();
+                let first = ranges.partition_point(|(_, hi)| hi.saturating_add(1) < start);
+                let last = ranges.partition_point(|(lo, _)| *lo <= end.saturating_add(1));
+                if first < last {
+                    start = start.min(ranges[first].0);
+                    end = end.max(ranges[last - 1].1);
+                }
+                ranges.splice(first..last, [(start, end)]);
+                Resp::new(204)
+            }
+            Action::Collect { source_group, start, end } => {
+                // Only submitted after a durable source Compact acknowledgement.
+                // Recheck terminal state, so a stale worker cannot remove live work.
+                self.destinations.retain(|tx, d| {
+                    if d.source_group == source_group && d.released
+                        && position(tx).is_some_and(|(_, i)| (start..=end).contains(&i))
+                    {
+                        self.results.insert(position(tx).unwrap().1,
+                            (tx.clone(), d.result.clone().expect("terminal fork result")));
+                        if self.results.len() > MAX_RESULTS { self.results.pop_first(); }
+                        false
+                    } else { true }
+                });
+                self.mirrors.retain(|path, _| store.streams.contains_key(path));
                 Resp::new(204)
             }
         })

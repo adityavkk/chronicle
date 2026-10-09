@@ -338,10 +338,10 @@ impl Cluster {
         if req.path == "/health" {
             return response(200, "experimental electric replica");
         }
-        if req.path.starts_with("/_raft/") {
-            return response(409, "incompatible consensus protocol; this node requires identity 8");
+        if req.path.starts_with("/_raft/") || req.path.starts_with("/_raft8/") || req.path.starts_with("/_raft9/") {
+            return response(409, "incompatible consensus protocol; this node requires identity 10");
         }
-        if req.path.starts_with("/_raft8/") || req.path.starts_with("/_admin/") {
+        if req.path.starts_with("/_raft10/") || req.path.starts_with("/_admin/") {
             return match tokio::time::timeout(Duration::from_secs(10), self.internal(req)).await {
                 Ok(resp) => resp,
                 Err(_) => response(503, "admin/RPC timeout: outcome unknown"),
@@ -549,12 +549,16 @@ impl Cluster {
             };
         }
         match (parts[1], parts[3]) {
-            ("_raft8", "append") => rpc(&raft.append_entries(decode!()).await),
-            ("_raft8", "vote") => rpc(&raft.vote(decode!()).await),
-            ("_raft8", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
+            ("_raft10", "append") => rpc(&raft.append_entries(decode!()).await),
+            ("_raft10", "vote") => rpc(&raft.vote(decode!()).await),
+            ("_raft10", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
             ("_admin", "metrics") => json(&raft.metrics().borrow_watched().clone()),
             ("_admin", "keys") => self.public_group_keys(parts[2].parse().unwrap()).await,
             ("_admin", "fork") => self.fork_control(parts[2].parse().unwrap(), req).await,
+            ("_admin", "fork-stats") => {
+                let view = group.machine.view.read().await;
+                json(&serde_json::json!({"applied":view.applied.map(|i|i.index),"forks":view.forks.stats()}))
+            }
             ("_admin", "fork-state") if self.config.fault_testing => {
                 let view = group.machine.view.read().await;
                 let transactions: Vec<_> = view
@@ -681,7 +685,7 @@ pub fn run() {
             "data directory already owned"
         );
         let identity = serde_json::to_vec(&(
-            8u32, // Stock 0.10 APIs/wire semantics; no implicit 0.9 data migration.
+            10u32, // Grants retain original source defaults; no implicit migration.
             &config.cluster,
             config.node,
             config.partitions,

@@ -64,11 +64,14 @@ Replication reads are likewise capped at 64 entries. `ReadPolicy::ReadIndex`
 remains explicit; the new admission lease is **not** a switch to lease reads.
 The upstream legacy network adapter preserves 64 KiB file-backed snapshot chunks.
 
-Candidate data identity is **8** and consensus RPC paths start `/_raft8/`.
-Identity-7 directories are rejected before native recovery; old `/_raft/` RPCs
-are rejected before decoding or assigning a log entry. A 0.9 receiver does not
-recognize the new consensus path. There is **no mixed-version rolling upgrade,
-automatic data migration or 0.9 snapshot import**. The 0.9 checkout/binary and
+Candidate data identity is **10** and consensus RPC paths start `/_raft10/`.
+Identity-9 and earlier directories are rejected before native recovery; old
+`/_raft/`, `/_raft8/` and `/_raft9/` RPCs are rejected before decoding or assigning
+a log entry. Earlier receivers do not recognize the new consensus path. Identity
+10 and snapshot envelope `ERSP0007` preserve retirement fences and the original
+source configuration needed for existing-fork retries in [FORKS.md](FORKS.md).
+There is **no mixed-version rolling upgrade, automatic data migration or older
+snapshot import**. The 0.9 checkout/binary and
 its directories remain the rollback baseline; candidate qualification uses fresh
 directories. The separately approved lease-admission difference is specified in
 [ASYNC.md](ASYNC.md). Supported production migration remains an open gate.
@@ -322,19 +325,23 @@ qualification is claimed by the hot-only conformance and benchmark results.
 
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
-journal and snapshot as stream data. Experimental node identity 8 retains the
+journal and snapshot as stream data. Experimental node identity 10 retains the
 command-count ceiling and node/cluster/partition binding introduced in identity 7,
-and fences the 0.10 consensus representation. It rejects earlier data, including
+the 0.10 consensus representation fence in identity 8, retirement intervals in
+identity 9, and adds the original source configuration to each fork grant.
+It rejects earlier data, including
 the version-6 experiment that allowed 128-command batches:
 restoring the 64-command ceiling must not silently invalidate its receipt
-ordinals. Snapshot envelope format remains 5 with bounded receipt outcomes (see
-`ASYNC.md`). No data migration or mixed-version operation is supplied; editing
+ordinals. Snapshot envelope format is 7, retaining bounded receipt outcomes (see
+`ASYNC.md`) and bounded terminal fork results. No data migration or mixed-version operation is supplied; editing
 `IDENTITY` by hand is not a migration. Use a fresh experimental cluster or retain
 the matching earlier binary to inspect its existing data.
 Physical WAL reclamation and obsolete-snapshot cleanup now have native-file
-property and real-process syscall-fault qualifications. Cold-tier ownership,
-terminal-fence compaction and production auth/TLS remain gates. No Internet
-exposure is qualified here.
+property and real-process syscall-fault qualifications. Terminal fork compaction
+also has TLA+, generated native-WAL recovery and real-process qualifications;
+its fixed admission limits and remaining scale boundary are in `FORKS.md`.
+Cold-tier ownership and production auth/TLS remain gates. No Internet exposure
+is qualified here.
 
 ## Formal and empirical boundaries
 

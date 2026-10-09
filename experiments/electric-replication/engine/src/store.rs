@@ -1267,7 +1267,7 @@ impl Store {
     }
 }
 
-fn config_matches(existing: &StreamState, requested: &StreamConfig) -> bool {
+pub(crate) fn config_matches(existing: &StreamState, requested: &StreamConfig) -> bool {
     let ex = &existing.config;
     let closed_now = existing.shared.read().unwrap().closed;
     media_type(&ex.content_type) == media_type(&requested.content_type)

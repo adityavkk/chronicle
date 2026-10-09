@@ -373,34 +373,75 @@ pub(crate) struct PreparedCreate {
 }
 
 async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
+    if let Some(response) = existing_create(&store, &req, None) {
+        return response;
+    }
     match prepare_create(&store, &req).await {
         Ok(prepared) => create_prepared(store, path, prepared).await,
         Err(response) => response,
     }
 }
 
-pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<PreparedCreate, Resp> {
+/// Reconfirm an existing incarnation without resolving or creating its source.
+/// Remote forks supply the original source defaults from their durable grant;
+/// local forks already retain them on the native parent. None means absent,
+/// never permission to create a fork with a missing parent.
+pub(crate) fn existing_create(store: &Store, req: &Req, source: Option<&StreamConfig>) -> Option<Resp> {
+    let existing = store.get(&req.path)?;
+    let source = source.or_else(|| existing.parent.as_ref()
+        .filter(|p| req.header(H_FORKED_FROM) == Some(p.path.as_str()))
+        .map(|p| &p.config));
+    let config = match create_config(req, source) {
+        Ok(config) => config,
+        Err(response) => return Some(response),
+    };
+    if config.forked_from.is_some() && parse_offset(config.fork_offset_raw.as_deref()).is_err() {
+        return Some(text_response(400, "malformed fork offset"));
+    }
+    let deleted = existing.shared.read().unwrap().soft_deleted;
+    Some(if deleted || !config_matches(&existing, &config) {
+        text_response(409, "stream exists with different configuration")
+    } else {
+        existing_response(&existing)
+    })
+}
+
+fn existing_response(st: &StreamState) -> Resp {
+    st.touch();
+    let t = st.tail();
+    let mut b = ResponseBuilder::new(200)
+        .h("content-type", st.config.content_type.clone())
+        .h(H_NEXT_OFFSET, format_offset(t.bytes));
+    if t.closed {
+        b = b.hs(H_CLOSED, "true");
+    }
+    b.body(empty())
+}
+
+/// Parse native PUT configuration independently of resolving a source's bytes.
+/// A retained source descriptor supplies the same inheritance rules after deletion.
+pub(crate) fn create_config(req: &Req, source: Option<&StreamConfig>) -> Result<StreamConfig, Resp> {
     // Read Content-Type ONCE: `content_type_hdr` carries presence (used for fork
     // inheritance / match below); `content_type` is the resolved value with the
     // octet-stream default.
     let content_type_hdr = header_str(&req, "content-type").map(|s| s.to_string());
-    let content_type = content_type_hdr
+    let mut content_type = content_type_hdr
         .as_deref()
         .unwrap_or("application/octet-stream")
         .to_string();
     let ttl_raw = header_str(&req, H_TTL).map(|s| s.to_string());
-    let exp_raw = header_str(&req, H_EXPIRES_AT).map(|s| s.to_string());
+    let mut exp_raw = header_str(&req, H_EXPIRES_AT).map(|s| s.to_string());
     if ttl_raw.is_some() && exp_raw.is_some() {
         return Err(text_response(400, "Stream-TTL conflicts with Stream-Expires-At"));
     }
-    let ttl_seconds = match &ttl_raw {
+    let mut ttl_seconds = match &ttl_raw {
         Some(v) => match parse_ttl(v) {
             Ok(t) => Some(t),
             Err(_) => return Err(text_response(400, "invalid Stream-TTL")),
         },
         None => None,
     };
-    let expires_at = match &exp_raw {
+    let mut expires_at = match &exp_raw {
         Some(v) => match parse_rfc3339(v) {
             Ok(t) => Some(t),
             Err(_) => return Err(text_response(400, "invalid Stream-Expires-At")),
@@ -408,7 +449,6 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
         None => None,
     };
     let create_closed = header_is_true(&req, H_CLOSED);
-    let host = header_str(&req, "host").map(|s| s.to_string());
 
     // ---- fork header parsing & validation ----
     let forked_from = header_str(&req, H_FORKED_FROM).map(|s| s.to_string());
@@ -444,14 +484,39 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
         ));
     }
 
+    if let Some(source) = source {
+        match &content_type_hdr {
+            None => content_type = source.content_type.clone(),
+            Some(ct) if media_type(ct) != media_type(&source.content_type) => {
+                return Err(text_response(409, "fork content-type mismatch"));
+            }
+            Some(_) => {}
+        }
+        // TTL/expiry inheritance applies only when the request supplies neither.
+        if ttl_seconds.is_none() && exp_raw.is_none() {
+            ttl_seconds = source.ttl_seconds;
+            expires_at = source.expires_at;
+            exp_raw = source.expires_at_raw.clone();
+        }
+    }
+    Ok(StreamConfig {
+        content_type,
+        ttl_seconds,
+        expires_at,
+        expires_at_raw: exp_raw,
+        create_closed,
+        forked_from,
+        fork_offset_raw,
+        fork_sub_offset: sub_offset,
+    })
+}
+
+pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<PreparedCreate, Resp> {
+    let mut config = create_config(req, None)?;
     // Resolve the fork source and the fork point (logical byte offset).
     let mut parent: Option<Arc<StreamState>> = None;
     let mut base_offset: u64 = 0;
-    let mut content_type = content_type;
-    let mut ttl_seconds = ttl_seconds;
-    let mut expires_at = expires_at;
-    let mut exp_raw = exp_raw;
-    if let Some(src_path) = &forked_from {
+    if let Some(src_path) = &config.forked_from {
         let src = match store.get(src_path) {
             Some(s) => s,
             None => return Err(text_response(404, "fork source not found")),
@@ -459,24 +524,17 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
         if src.shared.read().unwrap().soft_deleted {
             return Err(text_response(409, "fork source is deleted"));
         }
-        match &content_type_hdr {
-            None => content_type = src.config.content_type.clone(),
-            Some(ct) => {
-                if media_type(ct) != media_type(&src.config.content_type) {
-                    return Err(text_response(409, "fork content-type mismatch"));
-                }
-            }
-        }
+        config = create_config(req, Some(&src.config))?;
         let src_tail = src.tail().bytes;
-        if sub_offset_raw.is_some() && src_tail == 0 {
+        if config.fork_sub_offset.is_some() && src_tail == 0 {
             return Err(text_response(
                 400,
                 "sub-offset on empty source stream",
             ));
         }
         // Fork-Offset omitted → divergence at the source's current tail.
-        let anchor = match parse_offset(fork_offset_raw.as_deref()) {
-            Ok(ParsedOffset::Start) if fork_offset_raw.is_none() => src_tail,
+        let anchor = match parse_offset(config.fork_offset_raw.as_deref()) {
+            Ok(ParsedOffset::Start) if config.fork_offset_raw.is_none() => src_tail,
             Ok(ParsedOffset::Start) => 0,
             Ok(ParsedOffset::Now) => src_tail,
             Ok(ParsedOffset::At(b)) => {
@@ -490,7 +548,7 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
             }
             Err(_) => return Err(text_response(400, "malformed fork offset")),
         };
-        let fork_point = match sub_offset.unwrap_or(0) {
+        let fork_point = match config.fork_sub_offset.unwrap_or(0) {
             0 => anchor,
             sub if src.is_json => json_fork_point(&src, anchor, src_tail, sub).await?,
             sub => {
@@ -503,30 +561,12 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
                 anchor + sub
             }
         };
-        // TTL/expiry inheritance: only when the fork specifies neither.
-        if ttl_seconds.is_none() && exp_raw.is_none() {
-            ttl_seconds = src.config.ttl_seconds;
-            expires_at = src.config.expires_at;
-            exp_raw = src.config.expires_at_raw.clone();
-        }
         base_offset = fork_point;
         parent = Some(src);
     }
 
     let body = req.body.clone();
-
-    let config = StreamConfig {
-        content_type: content_type.clone(),
-        ttl_seconds,
-        expires_at,
-        expires_at_raw: exp_raw,
-        create_closed,
-        forked_from,
-        fork_offset_raw,
-        fork_sub_offset: sub_offset,
-    };
-
-    let is_json = is_json_content_type(&content_type);
+    let is_json = is_json_content_type(&config.content_type);
     // Validate / transform initial body before creating.
     let wire: Option<Bytes> = if body.is_empty() {
         None
@@ -537,7 +577,10 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
         }
     };
 
-    Ok(PreparedCreate { config, parent, base_offset, wire, host })
+    Ok(PreparedCreate {
+        config, parent, base_offset, wire,
+        host: header_str(req, "host").map(str::to_owned),
+    })
 }
 
 /// Native wire input is validated JSON values, each followed by a comma.
@@ -607,17 +650,7 @@ pub(crate) async fn create_prepared(store: Arc<Store>, path: String, prepared: P
     };
     match result {
         CreateResult::Conflict => text_response(409, "stream exists with different configuration"),
-        CreateResult::Exists(st) => {
-            st.touch();
-            let t = st.tail();
-            let mut b = ResponseBuilder::new(200)
-                .h("content-type", st.config.content_type.clone())
-                .h(H_NEXT_OFFSET, format_offset(t.bytes));
-            if t.closed {
-                b = b.hs(H_CLOSED, "true");
-            }
-            b.body(empty())
-        }
+        CreateResult::Exists(st) => existing_response(&st),
         CreateResult::Created(st) => {
             if let Some(wire) = wire {
                 let lock_t0 = crate::telemetry::Timer::start();

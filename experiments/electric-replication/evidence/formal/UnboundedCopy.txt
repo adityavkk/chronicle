@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 71 and seed 4291116508475123300 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 663596] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 103 and seed 6315836621622314247 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 91550] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/SnapshotCut.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module SnapshotCut
-Starting... (2026-10-08 22:03:17)
+Starting... (2026-10-09 01:35:33)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 22:03:17.
+Finished computing initial states: 1 distinct state generated at 2026-10-09 01:35:33.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -72,7 +72,7 @@ State 5: <Copy line 30, col 9 to line 40, col 78 of module SnapshotCut>
 /\ files = <<<<1, 2>>, <<>>>>
 /\ candidate = [index |-> 1, incarnation |-> 1, data |-> <<1, 2>>, meta |-> 1]
 
-66 states generated, 54 distinct states found, 27 states left on queue.
-The depth of the complete state graph search is 5.
+73 states generated, 59 distinct states found, 27 states left on queue.
+The depth of the complete state graph search is 6.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 4).
-Finished in 00s at (2026-10-08 22:03:17)
+Finished in 00s at (2026-10-09 01:35:33)

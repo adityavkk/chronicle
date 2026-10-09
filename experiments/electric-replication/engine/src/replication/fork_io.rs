@@ -37,8 +37,8 @@ impl Cluster {
         };
         let reply = match call {
             Call::Apply { path, action } => match action {
-                // These two operations have durable transaction-ID deduplication.
-                Action::Grant { .. } | Action::Release { .. } => {
+                // Source ownership changes are transaction-fenced and durable.
+                Action::Grant { .. } | Action::Release { .. } | Action::Compact { .. } => {
                     match self.fork_propose(group, &path, action).await {
                         Ok(reply) => reply,
                         Err(status) => return response(status, "fork decision outcome unknown"),
@@ -122,19 +122,16 @@ impl Cluster {
     }
 
     pub async fn remote_fork(&self, group: usize, req: Req) -> Resp {
-        let pending = {
-            let view = self.groups[group].machine.view.read().await;
-            view.forks
-                .reservations
-                .get(&req.path)
-                .map(|tx| (tx.clone(), view.forks.destinations[tx].headers.clone()))
+        // This is a committed PUT/configuration check (including TTL touch),
+        // not a possibly stale local lookup or a source-availability check.
+        let reconfirm = || self.fork_propose(group, &req.path, Action::Reconfirm {
+            headers: forks::identity(&req.headers),
+        });
+        let mut outcome = match reconfirm().await {
+            Ok(reply) => reply,
+            Err(status) => return response(status, "fork reconfirmation unavailable"),
         };
-        let tx = if let Some((tx, headers)) = pending {
-            if forks::identity(&req.headers) != forks::identity(&headers) {
-                return response(409, "destination reserved with different configuration");
-            }
-            tx
-        } else {
+        if outcome.status == 404 {
             let source_group =
                 partition(req.header("stream-forked-from").unwrap(), self.groups.len());
             let probe = match self
@@ -146,51 +143,45 @@ impl Cluster {
                 )
                 .await
             {
-                Ok(reply) if reply.status == 200 => reply,
-                Ok(reply) => return reply.into_resp(),
-                Err(status) => {
-                    return response(status, "source owner unavailable; fork not reserved")
-                }
+                Ok(reply) => reply,
+                Err(status) => Reply::from_resp(response(status, "source owner unavailable; fork not reserved")),
             };
-            let (source_id, config): (u64, crate::store::StreamConfig) =
-                match serde_json::from_slice(&probe.body) {
-                    Ok(info) => info,
-                    Err(_) => return response(503, "invalid source descriptor"),
+            if probe.status != 200 {
+                // Another creator may have published/reserved the destination
+                // while the probe was in flight and before source deletion.
+                outcome = match reconfirm().await {
+                    Ok(reply) => reply,
+                    Err(status) => return response(status, "fork reconfirmation unavailable"),
                 };
-            let wire = if req.body.is_empty() {
-                vec![]
+                if outcome.status == 404 { return probe.into_resp(); }
             } else {
-                match crate::handlers::encode_wire(
-                    &req.body,
-                    crate::store::is_json_content_type(&config.content_type),
-                    true,
-                ) {
-                    Ok(wire) => wire.to_vec(),
-                    Err(message) => return response(400, message),
-                }
-            };
-            match self
-                .fork_propose(
-                    group,
-                    &req.path,
-                    Action::Reserve {
-                        group,
-                        source_group,
-                        source_id,
-                        config,
-                        headers: req.headers,
-                        wire,
-                    },
-                )
-                .await
-            {
-                Ok(reply) if reply.status == 202 => {
-                    serde_json::from_slice::<String>(&reply.body).unwrap()
-                }
-                Ok(reply) => return self.fork_response(group, reply).await,
-                Err(status) => return response(status, "fork reservation outcome unknown"),
+                let (source_id, config): (u64, crate::store::StreamConfig) =
+                    match serde_json::from_slice(&probe.body) {
+                        Ok(info) => info,
+                        Err(_) => return response(503, "invalid source descriptor"),
+                    };
+                let wire = if req.body.is_empty() {
+                    vec![]
+                } else {
+                    match crate::handlers::encode_wire(
+                        &req.body,
+                        crate::store::is_json_content_type(&config.content_type),
+                        true,
+                    ) {
+                        Ok(wire) => wire.to_vec(),
+                        Err(message) => return response(400, message),
+                    }
+                };
+                outcome = match self.fork_propose(group, &req.path, Action::Reserve {
+                    group, source_group, source_id, config, headers: req.headers, wire,
+                }).await {
+                    Ok(reply) => reply,
+                    Err(status) => return response(status, "fork reservation outcome unknown"),
+                };
             }
-        };
+        }
+        if outcome.status != 202 { return self.fork_response(group, outcome).await; }
+        let tx = serde_json::from_slice::<String>(&outcome.body).unwrap();
         // The durable worker continues after the request deadline. It does not
         // cancel a grant or infer abort from a failed connection.
         let finish = async {
@@ -202,9 +193,10 @@ impl Cluster {
                 }
                 {
                     let view = self.groups[group].machine.view.read().await;
-                    if let Some(reply) = &view.forks.destinations[&tx].result {
+                    if let Some(reply) = view.forks.result(&tx) {
                         return Some(reply.clone());
                     }
+                    if !view.forks.destinations.contains_key(&tx) { return None; }
                 }
                 if self.fork_step(group, &tx).await.is_err() {
                     return None;
@@ -215,7 +207,7 @@ impl Cluster {
             Ok(Some(reply)) => self.fork_response(group, reply).await,
             _ => self.unavailable(
                 group,
-                "fork outcome unknown; durable materialization continues",
+                "fork outcome unknown; inspect destination or retry PUT",
             ),
         }
     }
@@ -238,13 +230,22 @@ impl Cluster {
             let Some(dest) = view.forks.destinations.get(tx) else {
                 return Ok(());
             };
-            if dest.released {
-                return Ok(());
-            }
             dest.clone()
         };
         let source = dest.config.forked_from.as_ref().unwrap();
-        let action = if dest.retired {
+        let action = if dest.released {
+            let certificate = {
+                let view = self.groups[group].machine.view.read().await;
+                view.applied.and_then(|cut| view.forks.certificate(tx, cut.index))
+            };
+            let Some((source_group, start, end)) = certificate else { return Ok(()) };
+            let reply = self.fork_remote(source_group, Call::Apply {
+                path: String::new(),
+                action: Action::Compact { destination_group: group, start, end },
+            }).await?;
+            if reply.status != 204 { return Err(reply.status); }
+            Action::Collect { source_group, start, end }
+        } else if dest.retired {
             let reply = self
                 .fork_remote(
                     dest.source_group,
@@ -275,8 +276,8 @@ impl Cluster {
             }
             let start = {
                 let view = self.groups[group].machine.view.read().await;
-                // Another worker may have published and collected this mirror.
-                if view.forks.destinations[tx].result.is_some() {
+                // Another worker may have published and collected this record.
+                if view.forks.destinations.get(tx).is_none_or(|d| d.result.is_some()) {
                     return Ok(());
                 }
                 let tail = view.store.streams.get(source).ok_or(503u16)?.tail().bytes;

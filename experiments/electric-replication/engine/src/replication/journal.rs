@@ -522,6 +522,74 @@ mod tests {
         machine::Machine::open(dir, journal).await.unwrap()
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fork_backlog_bounds_reclaim_without_forgetting_pending_work() {
+        use forks::{Action, Decision, MAX_RESULTS, MAX_TRANSACTIONS};
+        let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+        let dir = tempfile::tempdir().unwrap();
+        let mut source = machine::Machine::open(dir.path().join("s/state"),
+            Journal::open(dir.path().join("s/wal"),256*1024).unwrap()).await.unwrap();
+        let mut target = machine::Machine::open(dir.path().join("d/state"),
+            Journal::open(dir.path().join("d/wal"),256*1024).unwrap()).await.unwrap();
+        assert_eq!(issue(&mut source,"PUT","/source",1000,vec![],vec![]).await.status,201);
+        let headers = vec![("stream-forked-from".into(),"/source".into())];
+        let config = crate::handlers::prepare_create(&source.view.read().await.store,
+            &Req {method:Method::Put,path:"/child".into(),query:None,headers:headers.clone(),body:Default::default()})
+            .await.ok().unwrap().config;
+        let reserve = Action::Reserve {group:1,source_group:0,source_id:0,
+            config:config.clone(),headers:headers.clone(),wire:vec![]};
+        let grant = |tx:String|Action::Grant {tx,source_id:0,headers:headers.clone(),expected:config.clone()};
+        let first = fork_control(&mut target,"/pending",reserve.clone()).await;
+        let pending: String = serde_json::from_slice(&first.body).unwrap();
+        // Model a source disappearing after validation but before its Grant.
+        assert_eq!(issue(&mut source,"DELETE","/source",1001,vec![],vec![]).await.status,204);
+        let mut ids = Vec::new();
+        for i in 0..MAX_TRANSACTIONS-1 {
+            let path = format!("/aborted/{i}");
+            let reserved = fork_control(&mut target,&path,reserve.clone()).await;
+            assert_eq!(reserved.status,202);
+            let tx: String = serde_json::from_slice(&reserved.body).unwrap();
+            let decision = fork_control(&mut source,"/source",grant(tx.clone())).await;
+            assert_eq!(decision.status,200);
+            let decision: Decision = serde_json::from_slice(&decision.body).unwrap();
+            assert!(matches!(decision,Decision::Aborted(_)));
+            assert_eq!(fork_control(&mut target,&path,Action::Accept {tx:tx.clone(),decision}).await.status,204);
+            ids.push(tx);
+        }
+        // Fill source independently; the pending destination is an active hole.
+        assert_eq!(fork_control(&mut source,"/source",grant(pending.clone())).await.status,200);
+        assert_eq!(fork_control(&mut target,"/over-limit",reserve.clone()).await.status,429);
+        assert_eq!(fork_control(&mut source,"/source",grant("1:1000000".into())).await.status,429);
+        assert_eq!(fork_control(&mut source,"/source",grant(ids[0].clone())).await.status,200,
+            "duplicate decisions remain resolvable at the bound");
+        source = reopen(source,true).await;
+        target = reopen(target,true).await;
+        let (source_group,start,end) = {
+            let view = target.view.read().await;
+            view.forks.certificate(&ids[0],view.applied.unwrap().index).unwrap()
+        };
+        assert!(start > pending.split_once(':').unwrap().1.parse::<u64>().unwrap());
+        assert_eq!(fork_control(&mut source,"",Action::Compact {destination_group:1,start,end}).await.status,204);
+        source = reopen(source,true).await; // A lost ACK cannot drop the destination backlog.
+        assert_eq!(target.view.read().await.forks.destinations.len(),MAX_TRANSACTIONS);
+        assert_eq!(fork_control(&mut source,"",Action::Compact {destination_group:1,start,end}).await.status,204);
+        assert_eq!(fork_control(&mut target,"",Action::Collect {source_group,start,end}).await.status,204);
+        target = reopen(target,true).await;
+        {
+            let view = target.view.read().await;
+            assert!(view.forks.pending("/pending"));
+            assert_eq!(view.forks.destinations.len(),1);
+            assert_eq!(view.forks.results.len(),MAX_RESULTS);
+            for (i,tx) in ids.iter().enumerate() {
+                assert_eq!(view.forks.result(tx).map(|r|r.status),
+                    (i >= ids.len()-MAX_RESULTS).then_some(404));
+            }
+        }
+        assert_eq!(fork_control(&mut target,"/new",reserve).await.status,202);
+        assert_eq!(fork_control(&mut source,"/source",grant(ids[0].clone())).await.status,410);
+        assert_eq!(fork_control(&mut source,"/source",grant("1:1000000".into())).await.status,200);
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
         #[test]
@@ -920,6 +988,7 @@ mod tests {
         fn remote_fork_native_import_retries_and_descendant_retention_survive_restart(
             len in 1usize..150000, cut_seed in 0usize..150001,
             checkpoint in 0u8..5, salt in any::<u8>(),
+            override_ttl in any::<bool>(),
         ) {
             use forks::{Action, Decision};
             let _mode = crate::handlers::test_support::DurabilityGuard::memory();
@@ -932,10 +1001,11 @@ mod tests {
                     Journal::open(dir.path().join("d/wal"),256*1024).unwrap()).await.unwrap();
                 let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(salt)).collect();
                 let cut = cut_seed % (len+1);
-                assert_eq!(issue(&mut source,"PUT","/source",1000,vec![],data.clone()).await.status,201);
-                let headers = vec![("stream-forked-from".into(),"/source".into()),
-                    ("stream-fork-offset".into(),crate::store::format_offset(cut as u64)),
-                    ("stream-ttl".into(),"2".into())];
+                assert_eq!(issue(&mut source,"PUT","/source",1000,
+                    vec![("stream-ttl","1".into())],data.clone()).await.status,201);
+                let mut headers = vec![("stream-forked-from".into(),"/source".into()),
+                    ("stream-fork-offset".into(),crate::store::format_offset(cut as u64))];
+                if override_ttl { headers.push(("stream-ttl".into(),"2".into())); }
                 let prepared = crate::handlers::prepare_create(&source.view.read().await.store,
                     &Req { method:Method::Put,path:"/child".into(),query:None,headers:headers.clone(),body:Default::default() })
                     .await.ok().unwrap();
@@ -950,7 +1020,7 @@ mod tests {
                 assert_eq!(issue(&mut target,"PUT","/child",1000,vec![],vec![9]).await.status,409);
                 if checkpoint == 0 { target = reopen(target,true).await; }
                 assert!(target.view.read().await.forks.pending("/child"));
-                let grant = Action::Grant {tx:tx.clone(),source_id:0,headers,expected:config};
+                let grant = Action::Grant {tx:tx.clone(),source_id:0,headers:headers.clone(),expected:config};
                 let granted = fork_control(&mut source,"/source",grant.clone()).await;
                 let decision: Decision = serde_json::from_slice(&granted.body).unwrap();
                 assert!(matches!(decision, Decision::Granted(_)));
@@ -988,9 +1058,23 @@ mod tests {
                 let mut expected = data[..cut].to_vec(); expected.extend_from_slice(&[249,11,73]);
                 assert_eq!(bytes(&target,"/child").await,(200,expected.clone()));
                 assert_eq!(clock::millis(target.view.read().await.store.streams.get("/child").unwrap().shared.read().unwrap().last_access),1005);
+                let reconfirm = Action::Reconfirm { headers: headers.clone() };
+                assert_eq!(fork_control(&mut target,"/child",reconfirm.clone()).await.status,200);
+                let mut equivalent = headers.clone();
+                equivalent.retain(|(k,_)| k != "stream-ttl");
+                equivalent.extend([("stream-ttl".into(),if override_ttl { "2" } else { "1" }.into()),
+                    ("content-type".into(),"APPLICATION/OCTET-STREAM; charset=binary".into()),
+                    ("stream-fork-sub-offset".into(),"0".into())]);
+                assert_eq!(fork_control(&mut target,"/child",Action::Reconfirm {headers:equivalent}).await.status,200);
+                let mut different = headers.clone();
+                different.retain(|(k,_)| k != "stream-ttl");
+                if !override_ttl { different.push(("stream-ttl".into(),"2".into())); }
+                assert_eq!(fork_control(&mut target,"/child",Action::Reconfirm {headers:different}).await.status,409);
+                assert_eq!(bytes(&target,"/child").await,(200,expected.clone()));
                 assert_eq!(issue(&mut target,"PUT","/desc",1006,
                     vec![("stream-forked-from","/child".into())],vec![177]).await.status,201);
                 assert_eq!(issue(&mut target,"DELETE","/child",1006,vec![],vec![]).await.status,204);
+                assert_eq!(fork_control(&mut target,"/child",reconfirm.clone()).await.status,409);
                 assert_eq!(fork_control(&mut target,"/child",Action::Retire {tx:tx.clone()}).await.status,409);
                 target = reopen(target,true).await;
                 expected.push(177);
@@ -1004,11 +1088,79 @@ mod tests {
                     assert_eq!(bytes(&source,"/source").await.0,404);
                 }
                 // A delayed duplicate grant cannot resurrect a terminal pin.
-                let late = fork_control(&mut source,"/source",grant).await;
+                let late = fork_control(&mut source,"/source",grant.clone()).await;
                 assert!(matches!(serde_json::from_slice::<Decision>(&late.body).unwrap(),Decision::Released));
-                assert_eq!(fork_control(&mut target,"/child",Action::Released {tx}).await.status,204);
+                assert!(target.view.read().await.forks.certificate(&tx,u64::MAX).is_none(),
+                    "source release without destination confirmation is not a certificate");
+                assert_eq!(fork_control(&mut target,"/child",Action::Released {tx:tx.clone()}).await.status,204);
+                let (source_group,start,end) = {
+                    let view = target.view.read().await;
+                    view.forks.certificate(&tx,view.applied.unwrap().index).unwrap()
+                };
+                assert_eq!(fork_control(&mut source,"",Action::Compact {destination_group:1,start,end}).await.status,204);
+                source = reopen(source,true).await; // Lost certificate acknowledgement.
+                assert_eq!(fork_control(&mut source,"",Action::Compact {destination_group:1,start,end}).await.status,204);
+                assert_eq!(fork_control(&mut target,"",Action::Collect {source_group,start,end}).await.status,204);
+                target = reopen(target,true).await;
+                {
+                    let view = target.view.read().await;
+                    assert!(view.forks.destinations.is_empty());
+                    assert!(view.forks.mirrors.is_empty());
+                    assert_eq!(view.forks.result(&tx).unwrap().status,201);
+                }
+                assert!(source.view.read().await.forks.decisions.is_empty());
+                // Forgotten records must remain fenced after snapshot-only recovery.
+                assert_eq!(fork_control(&mut source,"/source",grant.clone()).await.status,410);
+                assert_eq!(fork_control(&mut source,"/source",Action::Release {tx:tx.clone()}).await.status,204);
+                assert_eq!(fork_control(&mut target,"/child",Action::Publish {tx}).await.status,409);
+                assert_eq!(fork_control(&mut target,"/child",reconfirm.clone()).await.status,404);
+                assert_eq!(issue(&mut target,"PUT","/child",1008,vec![],vec![23]).await.status,201);
+                assert_eq!(fork_control(&mut target,"/child",reconfirm).await.status,409);
+                assert_eq!(bytes(&target,"/child").await,(200,vec![23]));
                 assert_eq!(issue(&mut source,"PUT","/source",1008,vec![],vec![85]).await.status,201);
+                assert_eq!(fork_control(&mut source,"/source",grant).await.status,410);
                 assert_eq!(bytes(&source,"/source").await,(200,vec![85]));
+            });
+        }
+
+        #[test]
+        fn retired_fork_intervals_are_monotonic_group_scoped_and_recoverable(
+            certificates in prop::collection::vec((1usize..3,0u64..64,0u64..64),2..30),
+            snapshot in any::<bool>(),
+        ) {
+            use forks::Action;
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut machine,"PUT","/source",1000,vec![],vec![]).await.status,201);
+                let headers = vec![("stream-forked-from".into(),"/source".into())];
+                let config = crate::handlers::prepare_create(&machine.view.read().await.store,
+                    &Req {method:Method::Put,path:"/unused".into(),query:None,headers:headers.clone(),body:Default::default()})
+                    .await.ok().unwrap().config;
+                // Include both ends of u64; adjacent ranges must not wrap at MAX.
+                let position = |i:u64| if i<32 {i} else {u64::MAX-(63-i)};
+                let ranges: Vec<_> = certificates.iter().map(|&(g,a,b)|
+                    (g,position(a).min(position(b)),position(a).max(position(b)))).collect();
+                for &(destination_group,start,end) in ranges.iter().chain(ranges.iter().rev()) {
+                    assert_eq!(fork_control(&mut machine,"",Action::Compact {destination_group,start,end}).await.status,204);
+                }
+                machine = reopen(machine,snapshot).await;
+                for group in 0..3 {
+                    for i in 0..64 {
+                        let index = position(i);
+                        let retired = ranges.iter().any(|&(g,lo,hi)|g==group && lo<=index && index<=hi);
+                        let grant = Action::Grant {tx:format!("{group}:{index}"),source_id:0,
+                            headers:headers.clone(),expected:config.clone()};
+                        assert_eq!(fork_control(&mut machine,"/source",grant).await.status,
+                            if retired {410} else {200},"group={group}, index={index}");
+                    }
+                }
+                let expected = (0..3).flat_map(|g|(0..64).map(move |i|(g,position(i))))
+                    .filter(|&(g,i)|!ranges.iter().any(|&(owner,lo,hi)|g==owner && lo<=i && i<=hi)).count();
+                assert_eq!(machine.view.read().await.store.streams.get("/source").unwrap()
+                    .shared.read().unwrap().ref_count,expected as u32);
             });
         }
 
@@ -1209,6 +1361,7 @@ mod tests {
             a in prop::collection::vec(any::<u8>(), 1..35),
             b in prop::collection::vec(any::<u8>(), 1..27),
             split in 0usize..100, time in 1001u64..1999,
+            override_ttl in any::<bool>(), delete_source in any::<bool>(),
         ) {
             let _mode = crate::handlers::test_support::DurabilityGuard::memory();
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1223,9 +1376,11 @@ mod tests {
                     ("producer-id", "p".into()), ("producer-epoch", "3".into()), ("producer-seq", "0".into())];
                 assert_eq!(issue(&mut machine, "POST", "/source", time+10, producer(), b.clone()).await.status, 200);
                 assert_eq!(issue(&mut machine, "POST", "/source", time+20, producer(), b).await.status, 204);
+                let mut headers = vec![("stream-forked-from", "/source".into()),
+                    ("stream-fork-offset", format!("0000000000000000_{cut:016}"))];
+                if override_ttl { headers.push(("stream-ttl", "2".into())); }
                 assert_eq!(issue(&mut machine, "PUT", "/fork", time+30,
-                    vec![("stream-forked-from", "/source".into()), ("stream-fork-offset", format!("0000000000000000_{cut:016}")),
-                         ("stream-ttl", "2".into())], vec![241, 17, 94]).await.status, 201);
+                    headers.clone(), vec![241, 17, 94]).await.status, 201);
                 let mut fork = expected[..cut].to_vec(); fork.extend_from_slice(&[241, 17, 94]);
                 machine.build_snapshot().await.unwrap();
                 drop(machine); drop(journal);
@@ -1233,15 +1388,44 @@ mod tests {
                 let mut machine = machine::Machine::open(dir.path().join("state"), journal).await.unwrap();
                 assert_eq!(bytes(&machine, "/source").await, (200, expected));
                 assert_eq!(bytes(&machine, "/fork").await, (200, fork.clone()));
-                issue(&mut machine, "TICK", "/source", time+1010, vec![], vec![]).await;
-                assert_eq!(bytes(&machine, "/source").await.0, 200); // exact TTL edge is live
-                issue(&mut machine, "TICK", "/source", time+1011, vec![], vec![]).await;
-                assert_eq!(bytes(&machine, "/source").await.0, 410); // parent retained by fork
-                drop(machine);
-                let journal = Journal::open(dir.path().join("wal"), 4096).unwrap();
-                let machine = machine::Machine::open(dir.path().join("state"), journal).await.unwrap();
+                if delete_source {
+                    assert_eq!(issue(&mut machine, "DELETE", "/source", time+40, vec![], vec![]).await.status,204);
+                } else {
+                    issue(&mut machine, "TICK", "/source", time+1010, vec![], vec![]).await;
+                    assert_eq!(bytes(&machine, "/source").await.0, 200); // exact TTL edge is live
+                    issue(&mut machine, "TICK", "/source", time+1011, vec![], vec![]).await;
+                }
+                machine = reopen(machine, true).await;
                 assert_eq!(bytes(&machine, "/source").await.0, 410);
+                // Existing-child equality does not require a live parent. The
+                // original parent's defaults, not the child's overrides, apply.
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    headers.clone(), vec![13, 59]).await.status,200);
+                let mut equivalent = headers.clone();
+                equivalent.retain(|(k,_)| *k != "stream-ttl");
+                equivalent.extend([("stream-ttl", if override_ttl { "2" } else { "1" }.into()),
+                    ("content-type", "APPLICATION/OCTET-STREAM; charset=binary".into()),
+                    ("stream-fork-sub-offset", "0".into())]);
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    equivalent.clone(), vec![37]).await.status,200);
+                let mut different = headers.clone();
+                different.retain(|(k,_)| *k != "stream-ttl");
+                if !override_ttl { different.push(("stream-ttl", "2".into())); }
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    different, vec![]).await.status,409);
+                assert_eq!(bytes(&machine, "/fork").await, (200, fork.clone()));
+                assert_eq!(issue(&mut machine, "POST", "/fork", time+1011,
+                    vec![("stream-closed", "true".into())],vec![]).await.status,204);
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    equivalent.clone(),vec![]).await.status,409);
+                equivalent.push(("stream-closed", "true".into()));
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    equivalent,vec![]).await.status,200);
+                machine = reopen(machine, true).await;
                 assert_eq!(bytes(&machine, "/fork").await, (200, fork));
+                assert_eq!(issue(&mut machine, "DELETE", "/fork", time+1011,vec![],vec![]).await.status,204);
+                assert_eq!(issue(&mut machine, "PUT", "/fork", time+1011,
+                    headers,vec![]).await.status,404);
             });
         }
 

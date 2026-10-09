@@ -1,0 +1,25 @@
+{
+  "cluster": "async-fault-014",
+  "node": 3,
+  "listen": "127.0.0.1:19803",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/async-fault-014/3",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": true,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:19801"
+    },
+    "2": {
+      "addr": "127.0.0.1:19802"
+    },
+    "3": {
+      "addr": "127.0.0.1:19803"
+    }
+  },
+  "stats_secs": 1,
+  "pending_commands": 16,
+  "pending_bytes": 2097152,
+  "append_durability": "local-fsync"
+}

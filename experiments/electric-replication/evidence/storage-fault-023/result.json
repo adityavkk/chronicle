@@ -1,0 +1,170 @@
+{
+  "verdict": "PASS",
+  "checker": {
+    "verdict": "PASS",
+    "operations": 29,
+    "streams": 1,
+    "scope": "append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum"
+  },
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/state/snapshot-1791506306907137291",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 4,
+          "node_id": 3
+        },
+        "index": 16
+      }
+    },
+    {
+      "kind": "identity-v6",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/IDENTITY",
+      "original_sha256": "641f97e736f8d6c7b77ffc98f84cb9ef635c16d5e33a85aacc882f326f5b7f8e",
+      "mutated_sha256": "e6ee8464fb3abb4261063ab05e586898c4a545dadd437be6f08cc145c9651e23",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-v7",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/IDENTITY",
+      "original_sha256": "641f97e736f8d6c7b77ffc98f84cb9ef635c16d5e33a85aacc882f326f5b7f8e",
+      "mutated_sha256": "645ca685dee702548b6de873150126ad25709e48ee546f1de9d5f9f637d6c28c",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-v8",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/IDENTITY",
+      "original_sha256": "641f97e736f8d6c7b77ffc98f84cb9ef635c16d5e33a85aacc882f326f5b7f8e",
+      "mutated_sha256": "ba94eb88d062e16846f29732a9c33ee8b1dff3c985089259d9bace6aed070eb7",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-batch128",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/IDENTITY",
+      "original_sha256": "641f97e736f8d6c7b77ffc98f84cb9ef635c16d5e33a85aacc882f326f5b7f8e",
+      "mutated_sha256": "ed9d838ecb09d69cd41f651cb224ec26f424f47946fd58a06f584257e4b084db",
+      "expected_error": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "node/cluster/partition identity mismatch"
+      ],
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "authoritative-tail-selection",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/wal/1.wal",
+      "offset": 7153,
+      "end": 7220
+    },
+    {
+      "kind": "wal-header-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/wal/1.wal",
+      "original_sha256": "5389a361a490cdd618bfe17bf567caafce12395a7a5b10c541a64a2755da2aff",
+      "mutated_sha256": "195ee1891fecc5c85c1c23acce142242ff9000f7d4889ee8316edf338b568507",
+      "expected_error": [
+        "corrupt or non-consensus journal frame",
+        "indexed WAL read failed CRC/identity"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "corrupt or non-consensus journal frame"
+      ],
+      "rejected": true
+    },
+    {
+      "kind": "wal-payload-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/wal/1.wal",
+      "original_sha256": "5389a361a490cdd618bfe17bf567caafce12395a7a5b10c541a64a2755da2aff",
+      "mutated_sha256": "dab1eafc115a68b34671b85e239c0837a43f33ba7bf4dc38b0aabd1e42757c86",
+      "expected_error": [
+        "corrupt or non-consensus journal frame",
+        "indexed WAL read failed CRC/identity"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "corrupt or non-consensus journal frame"
+      ],
+      "rejected": true
+    },
+    {
+      "kind": "wal-zero-hole",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/wal/1.wal",
+      "original_sha256": "5389a361a490cdd618bfe17bf567caafce12395a7a5b10c541a64a2755da2aff",
+      "mutated_sha256": "5d4f8f8c38a296850e18eff9763cbd2f1598e25dbd41a84222f5603f48a7fd4f",
+      "expected_error": [
+        "nonzero suffix behind journal hole",
+        "indexed WAL read failed CRC/identity"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "nonzero suffix behind journal hole"
+      ],
+      "rejected": true
+    },
+    {
+      "kind": "wal-torn-tail",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/wal/1.wal",
+      "original_sha256": "5389a361a490cdd618bfe17bf567caafce12395a7a5b10c541a64a2755da2aff",
+      "mutated_sha256": "eae2abfaadc85ddd412af38fc4209755424f39a8d6efe540059e99ccc70edd80",
+      "expected_error": [
+        "truncated/oversize journal record",
+        "failed to fill whole buffer"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "truncated/oversize journal record"
+      ],
+      "rejected": true
+    },
+    {
+      "kind": "snapshot-digest",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/state/snapshot-1791506306803550770",
+      "original_sha256": "779499d2afd5811ccbb7ef61db06352ac2e4a220917201cdb0afb470dbdf308b",
+      "mutated_sha256": "e9b0bdec9e472f03006e109f40d6fd5fc9aa0eb009157b57c5d8708851d0aa35",
+      "expected_error": [
+        "snapshot digest mismatch"
+      ],
+      "exit_code": 101,
+      "observed_errors": [
+        "snapshot digest mismatch"
+      ],
+      "rejected": true
+    },
+    {
+      "kind": "hot-rebuilt",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-023/3/0/state/hot/streams/+storage+0~2",
+      "bytes": 148
+    }
+  ],
+  "intercepted_syscalls": 7,
+  "unknown_outcomes": 3,
+  "scope": "single-host actual native storage syscall faults and offline corruption; not power-loss durability"
+}

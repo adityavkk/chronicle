@@ -89,9 +89,9 @@ not a substitute store or a model-only result.
 
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
-| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 142 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 8 rejects identity 7 before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 144 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 10 preserves terminal fork fences and original source defaults, rejecting earlier identities before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
 | 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions and 60/60 corrected read/fanout/mixed execution checks are retained below. Coalesced physical GC passes all 12 ninety-second/16-connection cells with zero errors/rejections and exact all-replica drain; one-member/native gap is 1.80–1.84×. Earlier failures remain. Replicated latency/memory, overload envelope and instrumentation overhead still need qualification. Keep commit markers; unsafe recovery-only removal is not a performance candidate. Continue storage lifecycle work without declaring performance acceptance complete. |
-| 3 | Storage lifecycle and bounded metadata | Open: native cold ownership/offload/recovery/GC, terminal fences and tombstone compaction. Require generated/state-machine or independently checked histories for readers, retries, transfers, crashes and sustained growth/reclamation. |
+| 3 | Storage lifecycle and bounded metadata | Terminal fork fences and bounded reply/decision retention pass TLA+, native-WAL generated/boundary tests and real-process churn/snapshot/crash histories. Matching-fork retries after parent deletion/outage are fixed and qualified (`fork-fault-020`); the original failure remains. Native cold ownership/offload/recovery/GC is next. High-cardinality, long-duration reclamation and cold-reader/transfer faults remain gates. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
 
@@ -105,11 +105,12 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-030` executes **332/332 passing, zero failures/skips/todo**,
-with subscriptions enabled, three processes and two partitions. All 142 Rust
+The candidate's `conformance-032` executes **332/332 passing, zero failures/skips/todo**,
+with subscriptions enabled, three processes and two partitions. All 144 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-022` checks seven real failing/short
-syscalls and retains three unknown HTTP outcomes. `async-fault-013` checks 311
+conformance exclusions. `storage-fault-024` checks seven real failing/short
+syscalls, rejects old data identities without changing stored bytes, and retains
+three unknown HTTP outcomes. `async-fault-015` checks 311
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
 six unknown requests retained. Its isolated leader rejects new assignment on
 lease expiry despite spare backlog capacity, without changing WAL bytes or
@@ -138,9 +139,38 @@ Stock recovery-wait alone is not a safe replacement across conflicting snapshot
 truncation and repeated crashes. No marker-removal or changed restart contract
 is implemented in this checkpoint; [BATCHING.md](BATCHING.md) records the
 source-derived failure sequence and the extra qualification a future candidate
-would need. Terminal-fence compaction is the next implementation task, followed
-by native cold ownership/recovery/GC. Production security/operations and native
+would need. Native cold ownership/recovery/GC is the next implementation task.
+Production security/operations and native
 telemetry integration remain queued, beyond the diagnostic instruments below.
+
+Terminal-fence compaction now passes its local gate (`fork-fault-019`): 1,718
+checked operations, 323 fork resources, four delayed retired Grants rejected,
+eight reclamation observations, and one preserved unknown mutation. After 320
+retirement cycles around an older live fork, each peer group's fences coalesce
+to one interval; source/destination records and dead mirror indices are gone,
+and terminal replies remain bounded at 256. Fresh-learner snapshot installation,
+full-cluster crashes and recreation preserve those results. TLA+ precedes the
+implementation (12,526 safety states, 349 liveness states, three mutations);
+native-WAL generated and 4,096-record boundary tests cover the encoding/recovery
+gap. [FORKS.md](FORKS.md) documents the fixed admission limits and count-only
+diagnostics. Identity 9 is incompatible with prior data; there is no migration.
+The performance matrices below qualify the earlier identity-8 implementation,
+not a new performance measurement of terminal compaction.
+
+Additional testing after `conformance-031` found a protocol gap outside that
+suite: a readable fork incorrectly returns 409 to a matching PUT after its parent
+is deleted. `fork-retry-001` retains the actual three-process failure; the native
+generated regression failed before the fix. Identity 10 now retains the original
+source configuration in the grant and reconfirms the current child at its owner,
+without a live source lookup. `fork-fault-020` checks 1,728 operations, 323 forks,
+ten reconfirmations, four delayed Grants and eight reclamation observations;
+two unknown mutations remain. Six negative history mutations are rejected.
+Inherited/overridden TTL comparisons survive source-only outage and destination
+snapshot/restart. The source fixture temporarily has one voter while the
+destination retains three; this is an availability test, not independent-disk
+durability evidence. All 144 replicated and 113 standalone Rust tests pass,
+along with the full formal and storage/async/subscription/reclamation reruns.
+Snapshot `ERSP0007` and RPC `/_raft10/` reject older formats; no migration exists.
 
 The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
 **51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**
@@ -343,10 +373,10 @@ campaign injects checkpoint write/fsync/directory-fsync errors before reclaim,
 then verifies physical deletion and complete restart against 38,010,880 payload bytes.
 The 004 measurements above include this lifecycle change.
 
-Cold-tier ownership/GC and terminal transaction-fence compaction remain
-unimplemented. Catalog repair
-scans and subscription/fork cardinality need scale qualification. Snapshots pause
-one group's apply while copying its files; the cost must be measured. Native
+Cold-tier ownership/GC remains unimplemented. Catalog repair scans and
+subscription/fork cardinality need scale qualification. Snapshot metadata capture
+pauses one group's apply; pinned-descriptor copy/hash/fsync runs outside that
+lock, with its measured memory cost retained above. Native
 JSON sub-offset resolution now scans bounded 64 KiB windows with lexical state
 across chunk boundaries; generated native-WAL/snapshot/restart cases cover nested
 values, quoted commas, escapes and large values. Pure Lean chunk-composition

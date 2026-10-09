@@ -1,0 +1,80 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1828:1
+     |
+1828 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.08s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-b533bf90f3b40820)
+
+running 1 test
+test replication::journal::tests::native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay ... FAILED
+
+failures:
+
+---- replication::journal::tests::native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay stdout ----
+
+thread 'replication::journal::tests::native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay' (3562902) panicked at src/replication/journal.rs:1382:17:
+assertion `left == right` failed
+  left: 409
+ right: 200
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'replication::journal::tests::native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay' (3562902) panicked at src/replication/journal.rs:593:5:
+Test failed: assertion `left == right` failed
+  left: 409
+ right: 200.
+minimal failing input: a = [
+    51,
+    164,
+    68,
+    50,
+    91,
+    48,
+    105,
+    6,
+    23,
+    156,
+    252,
+    91,
+    10,
+    183,
+    123,
+    109,
+    218,
+    109,
+    117,
+    172,
+    26,
+    29,
+], b = [
+    37,
+    189,
+    88,
+    185,
+    206,
+    58,
+    96,
+    14,
+], split = 97, time = 1133, override_ttl = false, delete_source = false
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+
+failures:
+    replication::journal::tests::native_fork_dedup_and_millisecond_expiry_survive_snapshot_and_replay
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 145 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

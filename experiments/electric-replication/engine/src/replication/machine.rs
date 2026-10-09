@@ -460,7 +460,7 @@ impl SnapshotCut {
         writer.flush()?;
         drop(writer);
         let mut out = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(path)?;
-        out.write_all(b"ERSP0005")?;
+        out.write_all(b"ERSP0007")?;
         let header = serde_json::to_vec(&(self.meta, self.files.len() + self.metadata.len() + 1, self.time))
             .map_err(io::Error::other)?;
         out.write_all(&(header.len() as u64).to_le_bytes())?;
@@ -504,7 +504,7 @@ fn unpack(
     input.rewind()?;
     let mut magic = [0; 8];
     input.read_exact(&mut magic)?;
-    if &magic != b"ERSP0005" {
+    if &magic != b"ERSP0007" {
         return Err(io::Error::other("snapshot version"));
     }
     let mut length = [0; 8];

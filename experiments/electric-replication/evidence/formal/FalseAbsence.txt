@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 102 and seed -3021351651864437147 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 458100] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 120 and seed 1662114889707413443 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 89274] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Forks.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/TLC.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Forks
-Starting... (2026-10-08 22:03:01)
+Starting... (2026-10-09 01:35:19)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 22:03:01.
+Finished computing initial states: 1 distinct state generated at 2026-10-09 01:35:20.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -41,13 +41,25 @@ State 2: <Grant line 12, col 10 to line 15, col 64 of module Forks>
 /\ observedAbsent = FALSE
 /\ sourcePresent = TRUE
 
-State 3: <Read line 56, col 9 to line 59, col 75 of module Forks>
+State 3: <Copy line 23, col 9 to line 26, col 76 of module Forks>
 /\ descendants = 0
 /\ everGranted = TRUE
 /\ sourceAlive = TRUE
 /\ published = FALSE
 /\ decision = "granted"
-/\ copied = 0
+/\ copied = 1
+/\ destination = "reserved"
+/\ pinned = TRUE
+/\ observedAbsent = FALSE
+/\ sourcePresent = TRUE
+
+State 4: <Read line 56, col 9 to line 59, col 75 of module Forks>
+/\ descendants = 0
+/\ everGranted = TRUE
+/\ sourceAlive = TRUE
+/\ published = FALSE
+/\ decision = "granted"
+/\ copied = 1
 /\ destination = "reserved"
 /\ pinned = TRUE
 /\ observedAbsent = TRUE
@@ -56,4 +68,4 @@ State 3: <Read line 56, col 9 to line 59, col 75 of module Forks>
 24 states generated, 13 distinct states found, 3 states left on queue.
 The depth of the complete state graph search is 4.
 The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
-Finished in 00s at (2026-10-08 22:03:01)
+Finished in 00s at (2026-10-09 01:35:20)

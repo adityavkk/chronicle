@@ -15,11 +15,28 @@ def decode(value):
     return base64.b64decode(value, validate=True)
 
 
+def configuration(headers, source=None):
+    """Wire rules, derived from requests rather than server descriptors."""
+    content_type = headers.get("content-type", source[0] if source else "application/octet-stream")
+    ttl = int(headers["stream-ttl"]) if "stream-ttl" in headers else None
+    expiry = headers.get("stream-expires-at")
+    if ttl is None and expiry is None and source:
+        ttl, expiry = source[1:3]
+    return (content_type.split(";")[0].strip().lower(), ttl, expiry,
+            headers.get("stream-forked-from"), headers.get("stream-fork-offset"),
+            int(headers.get("stream-fork-sub-offset", 0)), headers.get("stream-closed") == "true")
+
+
 def check(events):
     resources = {}
+    transactions = {}
+    fork_resources = []
     checked = 0
     forks = 0
     pending_reads = 0
+    retired_grants = 0
+    reclamation_observations = 0
+    reconfirmations = 0
 
     def retained(resource):
         return any(child["granted"] and (not child["deleted"] or retained(child))
@@ -31,15 +48,35 @@ def check(events):
             for transaction in json.loads(decode(event["result"]))["transactions"]:
                 if transaction["path"] in resources and transaction["granted"]:
                     resources[transaction["path"]]["granted"] = True
+                    transactions.setdefault(transaction["tx"], resources[transaction["path"]])
             continue
-        if op not in ("create", "append", "fork", "delete", "read"):
+        if op == "retired-grant":
+            call = json.loads(decode(event["body"]))["Apply"]["action"]["Grant"]
+            resource = transactions[call["tx"]]
+            assert resource["deleted"] and not retained(resource), "grant tested before retirement"
+            assert status == 200 and json.loads(decode(event["result"]))["status"] == 410, \
+                "compacted transaction reacquired a grant or forgot its terminal fence"
+            retired_grants += 1
+            continue
+        if op == "retention":
+            assert all(r["deleted"] and not retained(r) for r in fork_resources), "premature quiescence claim"
+            assert status == 200
+            stats = json.loads(decode(event["result"]))["forks"]
+            assert stats["schema"] == 1 and stats["transaction_limit"] == 4096 and stats["result_limit"] == 256
+            assert all(stats[k] == 0 for k in ("destinations", "decisions", "pending", "mirrors",
+                                              "terminal_destinations", "terminal_decisions")), "unreclaimed fork records"
+            assert stats["results"] <= 256 and stats["retired_ranges"] <= 1, "history-sized terminal state"
+            reclamation_observations += 1
+            continue
+        if op not in ("create", "append", "fork", "delete", "read", "reput"):
             continue
         checked += 1
         path = event["path"].split("?")[0]
         resource = resources.get(path)
         if op == "create" and status == 201:
             assert not resource or (resource["deleted"] and not retained(resource)), "recreated retained path"
-            resources[path] = dict(data=decode(event["body"]), deleted=False, children=[], granted=True)
+            resources[path] = dict(data=decode(event["body"]), deleted=False, children=[], granted=True,
+                                   config=configuration(event["headers"]), source_config=None)
         elif op == "append" and status in (200, 204):
             assert resource and not resource["deleted"], "append to absent/deleted stream"
             resource["data"] += decode(event["body"])
@@ -51,10 +88,25 @@ def check(events):
                 assert resource["data"].startswith(source["data"][:cut]), "retry changed inherited prefix"
             else:
                 resource = dict(data=source["data"][:cut] + decode(event["body"]),
-                                deleted=False, children=[], granted=status in (200, 201))
+                                deleted=False, children=[], granted=status in (200, 201),
+                                config=configuration(event["headers"], source["config"]),
+                                source_config=source["config"])
                 resources[path] = resource
                 source["children"].append(resource)
+                fork_resources.append(resource)
                 forks += 1
+        elif op == "reput":
+            assert resource, "reconfirmation fixture has no prior incarnation"
+            if resource["deleted"]:
+                assert status not in (200, 201), "reconfirmation resurrected deleted child"
+            else:
+                matching = configuration(event["headers"], resource["source_config"]) == resource["config"]
+                assert status == (200 if matching else 409), "existing child configuration/availability mismatch"
+                if matching:
+                    assert not decode(event["result"]), "reconfirmation must not return initial data"
+                    offset = event["response_headers"]["stream-next-offset"].split("_")[-1]
+                    assert int(offset) == len(resource["data"]), "retry changed child tail"
+            reconfirmations += 1
         elif op == "delete" and status == 204:
             assert resource and not resource["deleted"], "successful delete of absent stream"
             resource["deleted"] = True
@@ -76,7 +128,11 @@ def check(events):
                 pending_reads += 1
     assert forks > 0 and checked > 0, "empty fork history"
     return dict(verdict="PASS", operations=checked, fork_resources=forks, unavailable_reads=pending_reads,
-                scope="ordered binary fixture: exact fork bytes, retry identity, pending visibility, descendant retention")
+                retired_grants=retired_grants, reclamation_observations=reclamation_observations,
+                reconfirmations=reconfirmations,
+                unknown_mutations=sum(e["op"] in ("create", "append", "fork", "delete", "reput") and e.get("status") in (0,503)
+                                      for e in events),
+                scope="ordered binary fixture: exact fork bytes, retry identity, pending visibility, descendant retention, terminal fences")
 
 
 if __name__ == "__main__":

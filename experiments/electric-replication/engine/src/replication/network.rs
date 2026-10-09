@@ -54,7 +54,7 @@ impl Network {
             bincode::serialize(&request).map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
         let response = self
             .client
-            .post(format!("http://{}/_raft8/{}/{rpc}", node.addr, self.group))
+            .post(format!("http://{}/_raft10/{}/{rpc}", node.addr, self.group))
             .header("x-electric-cluster", &self.cluster)
             .body(body)
             .send()

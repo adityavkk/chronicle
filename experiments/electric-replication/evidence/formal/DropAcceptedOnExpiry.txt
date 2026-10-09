@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 117 and seed 3333598243791783211 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 673582] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 75 and seed 7394972374514030288 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 93155] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/AdmissionEpoch.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module AdmissionEpoch
-Starting... (2026-10-08 22:03:36)
+Starting... (2026-10-09 01:35:52)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-08 22:03:36.
+Finished computing initial states: 1 distinct state generated at 2026-10-09 01:35:52.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -47,52 +47,67 @@ State 2: <Admit line 13, col 10 to line 16, col 106 of module AdmissionEpoch>
 /\ charged = {1}
 /\ lease = TRUE
 
-State 3: <Enqueue line 17, col 15 to line 20, col 116 of module AdmissionEpoch>
-/\ offered = 1
+State 3: <Admit line 13, col 10 to line 16, col 106 of module AdmissionEpoch>
+/\ offered = 2
 /\ expiredStage = FALSE
 /\ term = 0
 /\ foreign = {}
-/\ queued = {}
+/\ queued = {1, 2}
+/\ prepared = 0
+/\ ticket = <<0, 0, 0>>
+/\ retained = {}
+/\ api = {}
+/\ unsafeStage = FALSE
+/\ imports = 0
+/\ charged = {1, 2}
+/\ lease = TRUE
+
+State 4: <Enqueue line 17, col 15 to line 20, col 116 of module AdmissionEpoch>
+/\ offered = 2
+/\ expiredStage = FALSE
+/\ term = 0
+/\ foreign = {}
+/\ queued = {2}
 /\ prepared = 0
 /\ ticket = <<0, 0, 0>>
 /\ retained = {}
 /\ api = {1}
 /\ unsafeStage = FALSE
 /\ imports = 0
-/\ charged = {1}
+/\ charged = {1, 2}
 /\ lease = TRUE
 
-State 4: <Stage line 21, col 13 to line 26, col 94 of module AdmissionEpoch>
-/\ offered = 1
+State 5: <Stage line 21, col 13 to line 26, col 94 of module AdmissionEpoch>
+/\ offered = 2
 /\ expiredStage = FALSE
 /\ term = 0
 /\ foreign = {}
-/\ queued = {}
+/\ queued = {2}
 /\ prepared = 0
 /\ ticket = <<0, 0, 0>>
 /\ retained = {1}
 /\ api = {}
 /\ unsafeStage = FALSE
 /\ imports = 0
-/\ charged = {1}
+/\ charged = {1, 2}
 /\ lease = TRUE
 
-State 5: <Expire line 45, col 11 to line 47, col 116 of module AdmissionEpoch>
-/\ offered = 1
+State 6: <Expire line 45, col 11 to line 47, col 116 of module AdmissionEpoch>
+/\ offered = 2
 /\ expiredStage = FALSE
 /\ term = 0
 /\ foreign = {}
-/\ queued = {}
+/\ queued = {2}
 /\ prepared = 0
 /\ ticket = <<0, 0, 0>>
 /\ retained = {1}
 /\ api = {}
 /\ unsafeStage = FALSE
 /\ imports = 0
-/\ charged = {}
+/\ charged = {2}
 /\ lease = FALSE
 
-125 states generated, 73 distinct states found, 41 states left on queue.
+131 states generated, 78 distinct states found, 45 states left on queue.
 The depth of the complete state graph search is 6.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 5).
-Finished in 00s at (2026-10-08 22:03:36)
+Finished in 00s at (2026-10-09 01:35:52)
