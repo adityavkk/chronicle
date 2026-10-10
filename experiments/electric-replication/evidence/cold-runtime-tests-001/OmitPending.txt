@@ -1,0 +1,48 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1865:1
+     |
+1865 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.69s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-485865a18929f236)
+
+running 1 test
+test replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement ... FAILED
+
+failures:
+
+---- replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement stdout ----
+
+thread 'replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement' (3824952) panicked at src/replication/journal.rs:681:21:
+exact cut must include pending keys
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement' (3824952) panicked at src/replication/journal.rs:620:5:
+Test failed: exact cut must include pending keys.
+minimal failing input: sizes = [
+    1154,
+    1140,
+    3736,
+], json = true, replay_fork = true
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+
+failures:
+    replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

@@ -348,7 +348,8 @@ async fn write_response(
             // always terminate cleanly.
             stream.write_all(b"0\r\n\r\n").await?;
         }
-        Body::Channel(crate::api::StreamBody { mut rx, failed }) => {
+        Body::Channel(mut body) => {
+            // Keep the response's cold ownership pin through the final write.
             stream.write_all(&head).await?;
             debug_assert!(body_len.is_none());
             // Small initial capacity: this buffer lives for the whole streaming
@@ -357,12 +358,12 @@ async fn write_response(
             // larger frame, so this only trades one reallocation for a large event
             // against ~7.5 KiB saved on every idle long-lived subscriber.
             let mut frame: Vec<u8> = Vec::with_capacity(512);
-            while let Some(b) = rx.recv().await {
+            while let Some(b) = body.rx.recv().await {
                 frame.clear();
                 http1::frame_chunk(&mut frame, &b);
                 stream.write_all(&frame).await?;
             }
-            if failed.load(std::sync::atomic::Ordering::Acquire) {
+            if body.failed.load(std::sync::atomic::Ordering::Acquire) {
                 // The body ended early due to a backend error. Abort: omit the
                 // terminating chunk and return an error so the connection drops —
                 // the client sees an incomplete transfer, never a clean-but-

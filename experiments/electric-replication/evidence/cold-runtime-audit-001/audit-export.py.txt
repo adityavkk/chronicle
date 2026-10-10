@@ -1,0 +1,103 @@
+"""Read-only checkpoint audit; export decoded text for stock Gitleaks.
+
+No secrets are printed. Output excludes values on any finding. The original
+retired-fixture validator separately checks historical claims against local WALs.
+"""
+from pathlib import Path
+import base64
+import collections
+import gzip
+import hashlib
+import json
+import re
+import subprocess
+
+ROOT = Path('/home/user/workspace/repo')
+OUT = ROOT / '.tmp/cold-runtime-audit'
+EXP = 'experiments/electric-replication/'
+
+
+def git(*args):
+    return subprocess.check_output(['/usr/bin/git', *args], cwd=ROOT)
+
+
+base = git('rev-parse', 'origin/experiment/electric-replication').decode().strip()
+head = git('rev-parse', 'HEAD').decode().strip()
+commits = git('rev-list', base+'..'+head).decode().splitlines()
+for commit in commits:
+    fields = git('show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', commit).decode().split('\0')
+    assert fields[:4] == ['Aditya Kumarakrishnan', 'adityavkk@users.noreply.github.com']*2, ('identity', commit)
+    assert not re.search(r'(?im)^(?:Co-Authored-By|Amp-Thread-ID|Claude-Session|Agent-Session):', fields[4]), ('attribution', commit)
+
+paths = set(git('diff', '--name-only', 'HEAD').decode().splitlines())
+paths.update(git('ls-files', '--others', '--exclude-standard', EXP).decode().splitlines())
+assert all(p.startswith(EXP) for p in paths)
+assert not git('diff', '--name-only', 'HEAD', '--', EXP+'engine/Cargo.toml', EXP+'engine/Cargo.lock', EXP+'engine/LICENSE', EXP+'UPSTREAM-TREE.txt')
+assert hashlib.sha256((ROOT/EXP/'engine/LICENSE').read_bytes()).hexdigest() == '0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594'
+
+# Existing historical fixtures retain per-run keys only in private local WALs.
+# Independently scan their finite encodings in this unpublished increment too.
+keys = set()
+for directory in (ROOT/'.tmp/electric-labs').glob('subscription-fault-*'):
+    for wal in directory.glob('[123]/[01]/wal/*.wal'):
+        for match in re.finditer(rb'\{"Keys":\{"signing":\[[0-9,]+\],"token":\[[0-9,]+\]\}\}', wal.read_bytes()):
+            pair = json.loads(match[0])['Keys']
+            keys.update(bytes(pair[k]) for k in ('signing', 'token'))
+assert len(keys) == 68
+needles = set()
+for key in keys:
+    forms = {key, key.hex().encode(), key.hex().upper().encode(), base64.b64encode(key),
+             base64.urlsafe_b64encode(key), base64.b64encode(key).rstrip(b'='), base64.urlsafe_b64encode(key).rstrip(b'='),
+             json.dumps(list(key)).encode(), json.dumps(list(key), separators=(',', ':')).encode()}
+    for form in list(forms):
+        if form.startswith(b'['):
+            forms.add(json.dumps(list(form)).encode())
+            forms.add(json.dumps(list(form), separators=(',', ':')).encode())
+    needles.update(forms)
+
+bad_path = re.compile(r'(?:^|/)(?:\.copybara|\.env(?:\..*)?|credentials(?:\.json)?|perf\.data.*|target|node_modules|\.aws|\.ssh)(?:/|$)|\.(?:sqlite3?|db|wal|pem|p12|pfx|core|dmp)$')
+private_endpoint = re.compile(rb'https?://[^\s<>"()]*?(?:gecgithub01|walmart\.(?:com|net)|wal-mart\.com|homeoffice|wmlink)', re.I)
+infra = re.compile(rb'(?:\.iam\.gserviceaccount\.com|workloadIdentityPools/|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY)', re.I)
+rows = []
+export = OUT/'decoded'
+export.mkdir(exist_ok=False)
+
+
+def inspect(path, data, origin):
+    assert path.startswith(EXP) and not bad_path.search(path), ('path', path)
+    stored = len(data)
+    assert stored < 50*1024**2, ('large file', path, stored)
+    compression = None
+    if path.endswith('.gz'):
+        data = gzip.decompress(data)
+        compression = 'gzip'
+    elif path.endswith('.zst'):
+        data = subprocess.check_output(['zstd', '-dq', '-c'], input=data)
+        compression = 'zstd'
+    assert not data.startswith((b'SQLite format 3\0', b'PERFILE2', b'\x7fELF')), ('raw payload', path)
+    assert not private_endpoint.search(data), ('private endpoint', path)
+    assert not infra.search(data), ('private infrastructure or key', path)
+    assert not any(n in data for n in needles), ('retired fixture private key', path)
+    digest = hashlib.sha256(data).hexdigest()
+    (export/(digest+'.txt')).write_bytes(data)
+    rows.append(dict(path=path, origin=origin, stored_bytes=stored, decoded_bytes=len(data),
+                     compression=compression, decoded_sha256=digest))
+
+
+for p in sorted(paths):
+    path = ROOT/p
+    assert path.is_file() and not path.is_symlink()
+    inspect(p, path.read_bytes(), 'working tree')
+for row in git('rev-list', '--objects', base+'..'+head).decode().splitlines():
+    sha, _, path = row.partition(' ')
+    if git('cat-file', '-t', sha).strip() == b'blob':
+        inspect(path, git('cat-file', 'blob', sha), sha)
+result = dict(verdict='PASS_INCREMENT_STATIC_AUDIT', base=base, head=head, unpublished_commits=len(commits),
+              working_files=len(paths), inspected_versions=len(rows), decoded_bytes=sum(r['decoded_bytes'] for r in rows),
+              compressed=collections.Counter(r['compression'] or 'none' for r in rows),
+              private_fixture_keys_checked=len(keys), private_key_matches=0, identity='human author and committer; no AI trailers',
+              largest_stored=sorted(rows,key=lambda r:r['stored_bytes'],reverse=True)[:5],
+              scope='Unpublished branch increment plus entire current working diff; published ancestors use the separate full retained-fixture audit. Not a guarantee of absence under arbitrary secret encodings.')
+(OUT/'inventory.json').write_text(json.dumps(result,indent=2)+'\n')
+(OUT/'map.json').write_text(json.dumps(rows,indent=2)+'\n')
+print(json.dumps({k:v for k,v in result.items() if k!='largest_stored'},indent=2))

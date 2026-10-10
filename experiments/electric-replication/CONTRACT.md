@@ -330,12 +330,14 @@ transfer and reclamation need a formal contract and actual file/object fault
 tests before any replicated cold-tier flag is accepted. No cold durability or GC
 qualification is claimed by the hot-only conformance and benchmark results.
 
-### Shared cold ownership contract — modeled, not yet implemented
+### Shared cold ownership contract
 
 `ColdOwnership.tla` now has two complementary checks: the original focused
 participant/recovery model and the **new Begin-ID/certified-inventory model**.
 The earlier one-object pass does not verify the inventory algorithm. Neither
-model is a replicated cold runtime implementation; that path remains disabled.
+model proves the runtime. The native implementation below is opt-in and remains
+qualification-only (`cold` requires `fault_testing: true`); the evidence ledger
+distinguishes its executed local checks from production acceptance.
 
 Use one immutable object namespace per cluster/group. Every upload first obtains
 an accepted **committed singleton Begin**, whose unique log position is its birth
@@ -356,8 +358,13 @@ irreversibility does not require one permanent tombstone per historical object.
 
 The native manifest/range resolver remains the reuse boundary between remote
 ranges and the fd-backed hot tail. Publication, references and retirement cross
-consensus; payloads do not enter a second authoritative WAL. Uploads, range reads
-and DELETE retries run outside state-machine locks. A PUT/DELETE timeout or I/O
+consensus; payloads do not enter a second authoritative WAL. Offloader uploads,
+ordinary range reads and DELETE retries run outside state-machine locks.
+**Native JSON-fork apply/replay can resolve remote bytes under the apply lock.**
+Provider failure there fail-stops the replica; it cannot become a deterministic
+rejection with different effects on different replicas. An object outage can
+therefore block recovery or availability, not just cold reads. This preserves
+native fork semantics but is a significant availability cost. A PUT/DELETE timeout or I/O
 error has an unknown outcome: it neither drops the pending Begin nor proves the
 object absent. Even after an Abort or successful DELETE, an already issued PUT
 may complete. Recovery and repeated inventory-based collection handle that
@@ -491,15 +498,35 @@ The intended authoritative cold-GC metadata bound is proportional to **current l
 references + admitted pending Begins + registered storage participants**, plus
 one active and at most one pending inventory descriptor; it is not proportional
 to all historical deletions. Inventory bytes scale with live/pending references
-at their represented cut. This follows from the proposed representation and
+at their represented cut. This follows from the implemented representation and
 the absence of terminal reattachment authority; TLC checks only its finite
-shape, **not an unbounded inductive proof or a Rust memory bound**. Per-request
-admission limits, stale capture cleanup and participant drainage still need
-implementation. Physical orphan bytes and old inventories have no unconditional
+shape, **not an unbounded inductive proof or a Rust memory bound**. The runtime
+bounds pending Begins at 64, registered participants at 64, payload objects at
+8 MiB and each inventory at 256 MiB. Admission fails rather than dropping state
+at these bounds. Spools are unlinked immediately and held by descriptors;
+completed scans release their verified local files. Permanent participant
+drainage/revocation is not implemented: removed nodes must rejoin and certify.
+Physical orphan bytes and old inventories have no unconditional
 count/time bound under stalled participants, arbitrarily delayed PUTs or storage
 failure. An arbitrary retired key is eventually collectible only after a later
 certified cut excludes it and fair cumulative scanning reaches it after its
 last upload. Continuous-growth reclamation rate versus upload rate is unproved.
+
+An SSE response conservatively holds its original pin until disconnect; there
+is no advancing cursor watermark yet. An indefinitely connected reader can
+therefore intentionally prevent newer certified cuts and physical reclamation.
+Large JSON values without a boundary inside 8 MiB stay hot rather than being
+split unsafely or silently rejected by the stream protocol. Hot-file reclamation
+does not imply all older native WAL segments have already been physically
+collected; their independent durable checkpoint/reclamation rules still apply.
+
+Inventory uploads use bounded multipart buffers. A crash can leave incomplete
+provider uploads that ordinary object listing cannot enumerate. The bucket
+must have an incomplete-multipart abort policy; Chronicle does not currently
+install or verify it. Completed late uploads still enter cumulative GC. Do not
+configure object expiration or out-of-band deletion for live cold keys. The
+local campaign exercises late real multipart completion across uploader crash,
+not the provider's eventual incomplete-upload lifecycle enforcement.
 
 The fail-fast runner is `bash experiments/electric-replication/scripts/formal.sh`;
 configs are `formal/cold{,-live,-inventory,-inventory-live,-scan-live,-participants,
@@ -512,11 +539,78 @@ or missed late PUTs in delta-only/one-pass/resetting scans. A timeout or parser
 failure is not a detected mutation.
 
 There is no TLA-to-Rust refinement proof, unbounded proof, cold-specific Lean
-proof, independent object-storage qualification or replicated cold conformance
-result. Implementing the native publication/manifest seam, persisted certificates,
-restart validation, pins, scans and bounded admission remains the next gate;
-generated real-engine tests and process/object fault histories must cover that
-gap before cold offload is enabled.
+proof or independent provider/disk qualification. The runtime's correspondence
+and local tests below narrow that gap; they do not remove those limitations.
+
+#### Native implementation and correspondence
+
+Cold clusters use identity **11**, RPC `/_raft11/` and snapshot envelope
+`ERSP0008`. Hot-only identity 10/`ERSP0007` is unchanged. Cold snapshots retain
+ownership descriptors, pending Begins, participant floors and the high node ID
+alongside native manifests and hot tails. Existing formats are not migrated;
+mixed hot/cold membership and editing the identity marker are unsupported.
+All nodes in a group must address the same durable object namespace. The
+serialized identity binds public provider configuration, never credentials.
+
+| Model action/obligation | Runtime boundary | Executed-test responsibility |
+| --- | --- | --- |
+| `Begin`, verified PUT, `PublishP`; `InvAccounting` | `cold::State::apply`, `cold_io::cold_seal`/`cold_finish`; singleton consensus commands and mandatory native commit marker | Held upload across majority/minority split; retry the original short range after append; never publish an absent Begin. |
+| `Capture`, `Activate`; `InvDeleteSafe` | `State::capture` merges live+pending+old root into sorted fixed-width records; new Begin follows capture; activation checks every participant | Native-WAL generated exact-cut, previous-root, immutable capture and retry tests; omit-pending implementation mutation. |
+| Snapshot, completed purge, `CertifyNode` | `Machine::certify_cold`, `Journal::recovery_covers`, `Runtime::save` | Snapshot alone fails certification; `recovery_covers` joins the native LSN because the index updates at staging; native fsync failure/restart checks. |
+| Reader/transfer pins | View-locked HTTP admission, `protect_response`, `SnapshotFile`, snapshot builder/current-snapshot APIs | Real lazy HTTP reader and actual OpenRaft snapshot transfer span retirement; ignoring pins fails the native-WAL property. |
+| `AdmitLearner`, removal, `RestartNode` | Committed `Register` precedes bootstrap/add-learner; locally fsynced identity-bound certificate; snapshot-floor validation | Receiver must actually install a snapshot and read cold bytes during JSON-fork replay; removed node restart/rejoin and full-cluster restart. |
+| `StartScan`, `Scan`, `WrapScan`; `InvMonotone` | Complete hash-verified local inventory; ordered `list_page`, fixed round/cut, cumulative restart of scanning | Corrupt inventory grants no deletion; unknown DELETE and PUT arriving after earlier scans; repeated generations and restart. |
+| `InvNoResurrection` | `Publish` requires the still-pending descriptor; `Retire` checks native stream/ancestor ownership | After abort/retirement and subsequent inventory replacement, stale resume fails even if bytes physically reappear. |
+
+Certification checks known pins before requesting snapshot/purge work, then
+rechecks under the exclusive view lock at the actual durable certificate seam.
+The preflight only avoids work that cannot yet earn a certificate; it is not a
+substitute for the final check. Without it, a newer snapshot/purge could make
+OpenRaft deliver a newer snapshot instead of replaying the originally held
+suffix; `cold-runtime-008` retains that failed coverage assertion. The passing
+`009`, `011` and final `012` observe actual remote GETs during the learner's
+JSON-fork replay. `010` retains a live-feed fixture error, not a passing run.
+
+`VerifiedBlob` verifies a complete payload object's SHA-256 before exposing a
+range. This costs a full object fetch (at most 8 MiB) for an uncached subrange;
+it is not a cold-path sendfile or performance-parity claim. Inventories stream
+to files and use binary-search membership, rather than a history-sized hash set.
+The native local tail still uses fd-backed reads/sendfile. Native compaction
+copies the remaining tail in 64 KiB windows. Standalone sealing/offloading/remote
+deletion is disabled on consensus-managed tiers, so it cannot race the owner.
+
+Cold inline SSE bounds binary/text reads at 64 KiB, carrying an incomplete UTF-8
+suffix to the next frame. JSON windows grow only until a complete top-level value
+fits, never beyond 8 MiB; the replicated command admission cap is 1 MiB. The
+control offset advances by emitted wire bytes, not the observed full tail, and
+up-to-date/closed flags wait for that tail. The previous whole-prefix allocation
+failed the generated native-WAL/reopen regression; the final property checks
+binary, Unicode and nested/escaped JSON at both sides of the window boundary.
+The real MinIO campaign separately reconstructs an actual three-window cold SSE
+feed followed by committed append/closure. This is a bounded per-read allocation,
+not bounded aggregate connection count, fast remote subranges, advancing pin
+watermarks or a cold fanout performance claim.
+
+`/_admin/{group}/cold` exposes bounded, versioned status, named counters and
+qualification controls. The counters include publication, blocked certificates,
+scan/delete outcomes, inventory failures and HTTP cold bodies; offloader
+verification GETs are not counted as HTTP cold reads. This is diagnostic
+observability, not completed production metrics/tracing, authenticated admin
+access, TLS or tenant isolation. The whole experimental listener remains
+loopback-only. S3 credentials come from `ELECTRIC_COLD_ACCESS_KEY_ID` and
+`ELECTRIC_COLD_SECRET_ACCESS_KEY`, not node JSON or consensus state.
+
+The local object campaign uses a separate, unmodified MinIO process built from
+`minio/minio` tag `RELEASE.2025-04-22T22-12-26Z`, commit
+`0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` (AGPL-3.0). Its source and binary
+are not vendored or linked into this Apache-2.0 engine. Provenance records source,
+server binary, driver, MinIO binary and configs. Loopback proxies forward actual
+S3 requests; faults do not substitute filesystem fixtures for the provider.
+Random per-run credentials and raw stores stay in disposable `.tmp` directories;
+the launcher deletes the credential file on cleanup. Evidence keeps synthetic
+client bytes, object hashes, failed histories and unknown outcomes, not secrets.
+These tests use one host/disk and do not establish MinIO/cloud durability,
+power-loss behavior, independent-host recovery or an unbounded reclamation rate.
 
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
@@ -535,8 +629,8 @@ Physical WAL reclamation and obsolete-snapshot cleanup now have native-file
 property and real-process syscall-fault qualifications. Terminal fork compaction
 also has TLA+, generated native-WAL recovery and real-process qualifications;
 its fixed admission limits and remaining scale boundary are in `FORKS.md`.
-Cold-tier ownership and production auth/TLS remain gates. No Internet exposure
-is qualified here.
+Cold high-cardinality/long-duration qualification, participant revocation and
+production auth/TLS remain gates. No Internet exposure is qualified here.
 
 ## Formal and empirical boundaries
 

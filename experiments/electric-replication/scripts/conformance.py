@@ -16,22 +16,32 @@ import sys
 from lab import Lab, ROOT, EXPERIMENT, BINARY, source_hashes
 
 
-def run(output, partitions=2):
+def run(output, partitions=2, cold=False):
     package = (ROOT / ".tmp/electric-conformance/node_modules/@durable-streams/server-conformance-tests").resolve()
     metadata = json.loads((package / "package.json").read_text())
     assert metadata["version"] == "0.3.5"
     vitest = package.parent.parent / "vitest/vitest.mjs"
-    lab = Lab(output, partitions=partitions, port=19400)
+    if cold:
+        from cold_faults import ColdLab, MINIO
+        lab = ColdLab(output, partitions=partitions)
+        lab.segment_bytes = 1024
+    else:
+        lab = Lab(output, partitions=partitions, port=19400)
     hashes = source_hashes()
     hashes["binary"] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
+    if cold:
+        hashes["minio"] = hashlib.sha256(MINIO.read_bytes()).hexdigest()
     for path in sorted((package / "dist").glob("*.js")):
         hashes["suite/" + path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     hashes["suite/package.json"] = hashlib.sha256((package / "package.json").read_bytes()).hexdigest()
     hashes["lockfile"] = hashlib.sha256((EXPERIMENT / "engine/Cargo.lock").read_bytes()).hexdigest()
     (lab.output / "provenance.json").write_text(json.dumps(dict(suite=metadata["version"],
         subscriptions=True, processes=3, partitions=partitions, initial_leaders=1,
+        cold="local MinIO S3, 1024-byte segments" if cold else "disabled (hot-only)",
         consistency="linearizable (default)", durability="quorum-fsync (default)", hashes=hashes), indent=2)+"\n")
     try:
+        if cold:
+            lab.start_storage()
         for node in (1, 2, 3):
             lab.start(node)
         for group in range(partitions):
@@ -44,6 +54,17 @@ def run(output, partitions=2):
         (lab.output / "command.json").write_text(json.dumps(command)+"\n")
         with open(lab.output / "suite.txt", "w") as log:
             result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+        if cold:
+            states = []
+            for n in (1,2,3):
+                for g in range(partitions):
+                    try:
+                        states.append(dict(node=n,group=g,state=lab.cold(n,g)[1]))
+                    except Exception as error:
+                        # Preserve the full suite ledger even if a replica died.
+                        states.append(dict(node=n,group=g,error=type(error).__name__))
+            (lab.output / "cold-coverage.json").write_text(json.dumps(dict(states=states,
+                note="HTTP Channel counters distinguish native cold bodies from offloader verification reads; suite is unchanged, not forced onto cold for every case."),indent=2)+"\n")
         if (lab.output / "suite.json").exists():
             data = json.loads((lab.output / "suite.json").read_text())
             counts = {k: data.get(k) for k in ("numTotalTests", "numPassedTests", "numFailedTests", "numPendingTests", "numTodoTests")}
@@ -64,4 +85,5 @@ def run(output, partitions=2):
 
 
 if __name__ == "__main__":
-    sys.exit(run(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 2))
+    sys.exit(run(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 2,
+                 cold=len(sys.argv) > 3 and sys.argv[3] == "cold"))

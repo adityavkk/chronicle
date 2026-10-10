@@ -1,0 +1,125 @@
+"""Fail-closed review of this one redacted Gitleaks report, not an allowlist.
+
+Every finding must be a SHA-256 on the reported line with independently available
+input bytes. No findings or credentials are printed. Preserve the scanner's
+exit-1 result; a reviewed false positive is not a clean scanner exit.
+"""
+import collections
+import functools
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[2]
+OUT = Path(__file__).resolve().parent
+EXP = ROOT / "experiments/electric-replication"
+rows = json.loads((OUT / "map.json").read_text())
+paths = collections.defaultdict(set)
+for row in rows:
+    paths[row["decoded_sha256"]].add(row["path"])
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def git(*args):
+    return subprocess.check_output(["/usr/bin/git", *args], cwd=ROOT)
+
+
+source = "experiments/electric-replication/engine/src/api.rs"
+source_hashes = {sha((ROOT / source).read_bytes())}
+for commit in git("rev-list", "HEAD", "--", source).decode().splitlines():
+    source_hashes.add(sha(git("show", commit + ":" + source)))
+
+key_pattern = re.compile(r"electric/(?:cold-runtime|conformance-cold)-\d+/\d+/\d{20}/[pi]/\d{20}/\d{20}/\d{20}/[0-9a-f]{64}")
+
+
+@functools.cache
+def object_hashes(run):
+    hashes = set()
+    for file in (EXP / "evidence" / run).iterdir():
+        if file.suffix not in (".json", ".jsonl"):
+            continue
+        text = file.read_text()
+        hashes.update(sha(m[0].encode()) for m in key_pattern.finditer(text))
+        # Status exposes pending/root descriptors before any PUT/GET exists.
+        values = [json.loads(line) for line in text.splitlines()] if file.suffix == ".jsonl" else [json.loads(text)]
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            states = [value] if value.get("op") == "state" else value.get("states", [])
+            for observation in states:
+                state, group = observation["state"], observation["group"]
+                descriptors = list(state["pending"].values())
+                if state.get("inventory"):
+                    descriptors.append(state["inventory"])
+                for obj in descriptors:
+                    if "Inventory" in obj["kind"]:
+                        kind, incarnation, start = "i", 0, obj["kind"]["Inventory"]["cut"]
+                    else:
+                        payload = obj["kind"]["Payload"]
+                        kind, incarnation, start = "p", payload["incarnation"], payload["start"]
+                    key = (f"electric/{run}/{group}/{obj['birth']:020}/{kind}/"
+                           f"{incarnation:020}/{start:020}/{obj['len']:020}/{obj['sha256']}")
+                    hashes.add(sha(key.encode()))
+    return hashes
+
+
+@functools.cache
+def lines(file):
+    data = (ROOT / file).read_bytes()
+    assert sha(data) == Path(file).stem
+    return data.decode().splitlines()
+
+
+counts = collections.Counter()
+by_path = collections.Counter()
+findings = json.loads((OUT / "gitleaks.json").read_text())
+grouped = collections.defaultdict(list)
+for finding in findings:
+    assert finding["RuleID"] == "generic-api-key"
+    assert not finding["Tags"] and finding["Secret"] == "REDACTED"
+    assert finding["StartLine"] == finding["EndLine"]
+    grouped[finding["File"], finding["StartLine"]].append(finding)
+for (file, number), group in grouped.items():
+    origins = paths[Path(file).stem]
+    assert len(origins) == 1
+    origin = next(iter(origins))
+    line = lines(file)[number - 1]
+    # Some report columns differ from complete-file coordinates. Instead require
+    # every redacted match on that line to correspond to a hash field, then
+    # verify ALL those fields (including ones the scanner did not report).
+    matches = list(re.finditer(r'(api\.rs|key_sha256)": "([0-9a-f]{64})"', line))
+    assert matches
+    assert collections.Counter(f["Match"].removesuffix('"') for f in group) <= collections.Counter(
+        m[1] + '": "REDACTED' for m in matches), ("unclassified line", origin, number)
+    if matches[0][1] == "api.rs":
+        assert len(matches) == 1
+        assert '/provenance.json' in origin or origin.endswith(("/qualification.json", "/final-source-sha256.json"))
+        assert '"engine/src/api.rs": ' in line
+        assert matches[0][2] in source_hashes, ("not an actual source digest", origin)
+        counts["source_sha256"] += 1
+    else:
+        assert re.search(r'/objects-[1-4]\.jsonl$', origin)
+        run = Path(origin).parent.name
+        assert all(m[1] == "key_sha256" and m[2] in object_hashes(run) for m in matches), ("unknown object-key hash", origin, number)
+        event = json.loads(line)
+        assert event["op"] == "s3" and event["method"] == "GET"
+        records = event["inventory"]["records"]
+        encoded = b"ERIC0001" + event["inventory"]["cut"].to_bytes(8, "big") + b"".join(
+            r["birth"].to_bytes(8, "big") + bytes.fromhex(r["key_sha256"]) for r in records)
+        assert sha(encoded) == event["sha256"] == event["path"].split("/")[-1]
+        assert collections.Counter(r["key_sha256"] for r in records) == collections.Counter(m[2] for m in matches)
+        counts["object_key_sha256"] += len(group)
+    by_path[origin] += len(group)
+
+result = dict(verdict="PASS_REVIEWED_FINDINGS", scanner="Gitleaks 8.30.1 default rules", scanner_exit=1,
+              findings=len(findings), classifications=dict(counts), unexplained=0, by_path=dict(sorted(by_path.items())),
+              report_sha256=sha((OUT / "gitleaks.json").read_bytes()),
+              classifier_sha256=sha(Path(__file__).read_bytes()),
+              method="Every redacted match on its reported line; independent verification of ALL source-file/object-key hashes on that line; reconstruct complete inventory hash. No rule exclusions.")
+(OUT / "findings-review.json").write_text(json.dumps(result, indent=2) + "\n")
+print(json.dumps({k: v for k, v in result.items() if k != "by_path"}, indent=2))

@@ -9,6 +9,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -56,12 +57,14 @@ class Lab:
 
     def start(self, node, environment=None, cpus=None, fault_testing=True, stats_secs=0,
               pending_commands=256, pending_bytes=16 * 1024 * 1024, append_durability="quorum-fsync",
-              heap_profile=False, workers=2):
+              heap_profile=False, workers=2, cold=None, cold_credentials=None):
         config = dict(cluster=self.cluster, node=node, listen=f"127.0.0.1:{self.port+node}",
                       dir=str(self.data / str(node)), partitions=self.partitions,
                       workers=workers, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis,
                       stats_secs=stats_secs, pending_commands=pending_commands, pending_bytes=pending_bytes,
                       append_durability=append_durability)
+        if cold is not None:
+            config["cold"] = cold
         path = self.output / f"node-{node}.json"
         path.write_text(json.dumps(config, indent=2) + "\n")
         with open(self.output / "config-history.jsonl", "a") as history:
@@ -69,7 +72,9 @@ class Lab:
         env = "env " + " ".join(shlex.quote(f"{k}={v}") for k,v in environment.items()) + " " if environment else ""
         affinity = f"taskset -c {shlex.quote(cpus)} " if cpus else ""
         profile = f"heaptrack -o {shlex.quote(str(self.output / f'heap-node-{node}'))} " if heap_profile else ""
-        command = (f"ulimit -c 0; exec {env}{affinity}{profile}{shlex.quote(str(self.binary))} --cluster-config {shlex.quote(str(path))} "
+        launcher = (shlex.join([sys.executable, str(Path(__file__).with_name("cold_service.py")),
+                               "exec", str(cold_credentials)]) + " ") if cold_credentials else ""
+        command = (f"ulimit -c 0; exec {env}{affinity}{profile}{launcher}{shlex.quote(str(self.binary))} --cluster-config {shlex.quote(str(path))} "
                    f">> {shlex.quote(str(self.output / f'node-{node}.log'))} 2>&1")
         subprocess.run(["amp", "orb", "service", "start", f"{self.cluster}-{node}",
                         "--command", command, "--cwd", str(ROOT), "--port", str(self.port+node)],

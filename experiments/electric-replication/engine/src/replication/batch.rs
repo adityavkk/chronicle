@@ -317,7 +317,7 @@ mod tests {
             ..Default::default()
         }.validate().unwrap();
         let raft = Raft::new(7, Arc::new(config), network::Network {
-            group: 0, cluster: "epoch-test".into(), client: reqwest::Client::new(),
+            group: 0, version: 10, cluster: "epoch-test".into(), client: reqwest::Client::new(),
             faults: Arc::new(std::sync::RwLock::new(network::Faults::default())),
         }, journal.clone(), machine.clone()).await.unwrap();
         raft.initialize(std::collections::BTreeMap::from([(7, BasicNode::new("127.0.0.1:1"))])).await.unwrap();

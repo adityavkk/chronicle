@@ -1,6 +1,8 @@
 //! Experimental source-integrated partition replication; see ../../CONTRACT.md.
 mod batch;
 pub(crate) mod clock;
+pub(crate) mod cold;
+pub(crate) mod cold_io;
 mod fork_io;
 mod forks;
 mod journal;
@@ -33,7 +35,7 @@ type LogId = alias::LogIdOf<Types>;
 type CommittedLeaderId = alias::CommittedLeaderIdOf<Types>;
 type Vote = alias::VoteOf<Types>;
 type SnapshotMeta = alias::SnapshotMetaOf<Types>;
-type Snapshot = alias::SnapshotOf<Types, tokio::fs::File>;
+type Snapshot = alias::SnapshotOf<Types, cold::SnapshotFile>;
 type StoredMembership = alias::StoredMembershipOf<Types>;
 type Raft = openraft::Raft<Types, Arc<machine::Machine>>;
 pub static CLUSTER: OnceLock<Cluster> = OnceLock::new();
@@ -171,6 +173,13 @@ struct Config {
     pending_bytes: usize,
     #[serde(default = "quorum_fsync")]
     append_durability: String,
+    /// Explicit, isolated cold-storage qualification mode. Hot-only identity
+    /// and snapshots remain compatible with the qualified checkpoint.
+    #[serde(default)]
+    cold: Option<cold_io::Config>,
+}
+impl Config {
+    fn version(&self) -> u32 { if self.cold.is_some() { 11 } else { 10 } }
 }
 fn pending_commands() -> usize { batch::CAPACITY }
 fn pending_bytes() -> usize { 16 * 1024 * 1024 }
@@ -339,9 +348,12 @@ impl Cluster {
             return response(200, "experimental electric replica");
         }
         if req.path.starts_with("/_raft/") || req.path.starts_with("/_raft8/") || req.path.starts_with("/_raft9/") {
-            return response(409, "incompatible consensus protocol; this node requires identity 10");
+            return response(409, "incompatible consensus protocol");
         }
-        if req.path.starts_with("/_raft10/") || req.path.starts_with("/_admin/") {
+        if req.path.starts_with("/_raft10/") || req.path.starts_with("/_raft11/") || req.path.starts_with("/_admin/") {
+            if req.path.starts_with("/_raft") && !req.path.starts_with(&format!("/_raft{}/", self.config.version())) {
+                return response(409, "incompatible hot/cold consensus identity");
+            }
             return match tokio::time::timeout(Duration::from_secs(10), self.internal(req)).await {
                 Ok(resp) => resp,
                 Err(_) => response(503, "admin/RPC timeout: outcome unknown"),
@@ -353,6 +365,11 @@ impl Cluster {
         }
         let group = partition(&req.path, self.groups.len());
         let g = &self.groups[group];
+        if let Some(cold) = &g.machine.cold {
+            if !cold.admits(&*g.machine.view.read().await) {
+                return response(503, "cold participant bootstrap incomplete");
+            }
+        }
         // The native parser caps raw bodies; this tighter admitted command cap
         // also bounds each Raft entry and its encoded WAL frame.
         if req.body.len() > 1024 * 1024 {
@@ -472,6 +489,7 @@ impl Cluster {
             );
         }
         let index = view.applied.map(|id| id.index).unwrap_or(0);
+        let cold_pin = g.machine.cold.as_ref().map(|cold| cold.pins.read(index));
         let store = view.store.clone();
         let live = req
             .query
@@ -495,6 +513,10 @@ impl Cluster {
             drop(view);
             resp
         };
+        if matches!(resp.body, Body::Channel(_)) {
+            if let Some(runtime) = &g.machine.cold { runtime.count("http_cold_bodies_started"); }
+        }
+        cold::protect_response(&mut resp, cold_pin);
         // A long-poll may have observed a later committed apply. Wait for apply
         // to finish before issuing a token that covers those observed bytes.
         let index = if live {
@@ -549,10 +571,11 @@ impl Cluster {
             };
         }
         match (parts[1], parts[3]) {
-            ("_raft10", "append") => rpc(&raft.append_entries(decode!()).await),
-            ("_raft10", "vote") => rpc(&raft.vote(decode!()).await),
-            ("_raft10", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
+            ("_raft10" | "_raft11", "append") => rpc(&raft.append_entries(decode!()).await),
+            ("_raft10" | "_raft11", "vote") => rpc(&raft.vote(decode!()).await),
+            ("_raft10" | "_raft11", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
             ("_admin", "metrics") => json(&raft.metrics().borrow_watched().clone()),
+            ("_admin", "cold") => self.cold_control(parts[2].parse().unwrap(), req).await,
             ("_admin", "keys") => self.public_group_keys(parts[2].parse().unwrap()).await,
             ("_admin", "fork") => self.fork_control(parts[2].parse().unwrap(), req).await,
             ("_admin", "fork-stats") => {
@@ -602,6 +625,11 @@ impl Cluster {
                 let Ok((id, node)) = serde_json::from_slice::<(u64, BasicNode)>(&req.body) else {
                     return response(400, "invalid learner");
                 };
+                if self.config.cold.is_some() {
+                    if let Err(status) = self.cold_register(parts[2].parse().unwrap(), id, &node).await {
+                        return response(status, "cold learner registration/bootstrap incomplete");
+                    }
+                }
                 json(&raft.add_learner(id, node, true).await)
             }
             ("_admin", "membership") => {
@@ -649,7 +677,11 @@ pub fn run() {
         "pending_bytes must be 2 MiB..1 GiB");
     assert!(matches!(config.append_durability.as_str(), "quorum-fsync" | "local-fsync"),
         "append_durability must be quorum-fsync or local-fsync");
+    assert!(config.cold.is_none() || config.fault_testing,
+        "replicated cold is qualification-only until its local acceptance gates pass");
     assert!(!config.genesis.is_empty() && config.genesis.keys().all(|id| *id > 0));
+    assert!(config.cold.is_none() || config.genesis.len() <= cold::MAX_PARTICIPANTS,
+        "cold genesis exceeds the storage participant bound");
     assert!(
         !config.cluster.is_empty()
             && config
@@ -684,15 +716,19 @@ pub fn run() {
             0,
             "data directory already owned"
         );
-        let identity = serde_json::to_vec(&(
-            10u32, // Grants retain original source defaults; no implicit migration.
+        let identity = (
+            config.version(),
             &config.cluster,
             config.node,
             config.partitions,
             &config.genesis,
             batch::MAX_COMMANDS, // Persisted receipt ordinal grammar and retention bound.
-        ))
-        .unwrap();
+        );
+        // Preserve the exact hot identity tuple. Cold deployments are a new,
+        // non-migrating format and bind their public object-store configuration.
+        let identity = if let Some(cold) = &config.cold {
+            serde_json::to_vec(&(identity, cold)).unwrap()
+        } else { serde_json::to_vec(&identity).unwrap() };
         let marker = config.dir.join("IDENTITY");
         if marker.exists() {
             assert_eq!(
@@ -724,8 +760,13 @@ pub fn run() {
             let dir = config.dir.join(group.to_string());
             let journal = journal::Journal::open(dir.join("wal"), 8 * 1024 * 1024)
                 .expect("native journal recovery");
-            let machine = machine::Machine::open(dir.join("state"), journal.clone())
-                .await
+            let options = config.cold.as_ref().map(|cold| cold_io::Options {
+                node: config.node, genesis: config.genesis.keys().copied().collect(),
+                tier: cold.tier(format!("electric/{}/{group}", config.cluster)).expect("cold configuration"),
+            });
+            let machine = if let Some(options) = options {
+                machine::Machine::open_with_cold(dir.join("state"), journal.clone(), Some(options)).await
+            } else { machine::Machine::open(dir.join("state"), journal.clone()).await }
                 .expect("materialization recovery");
             crate::store::fsync_parent_dir(&dir.join("wal")).unwrap();
             crate::store::fsync_parent_dir(&dir).unwrap();
@@ -747,6 +788,7 @@ pub fn run() {
                 Arc::new(raft_config),
                 network::Network {
                     group,
+                    version: config.version(),
                     cluster: config.cluster.clone(),
                     client: client.clone(),
                     faults: faults.clone(),
@@ -792,6 +834,10 @@ pub fn run() {
             tokio::spawn(CLUSTER.get().unwrap().subscription_worker(group));
             tokio::spawn(CLUSTER.get().unwrap().fork_worker(group));
             tokio::spawn(CLUSTER.get().unwrap().groups[group].machine.journal.maintain());
+            if CLUSTER.get().unwrap().config.cold.is_some() {
+                tokio::spawn(CLUSTER.get().unwrap().cold_worker(group));
+                tokio::spawn(CLUSTER.get().unwrap().cold_gc_worker(group));
+            }
         }
         println!("replicated Electric engine ready");
         crate::engine_raw::serve(placeholder, listener).await;

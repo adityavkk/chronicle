@@ -40,6 +40,23 @@ pub trait BlobStore: Send + Sync {
     fn head<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>>;
     /// Delete an object. Missing-object is not an error (idempotent).
     fn delete<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>>;
+
+    /// Replicated inventories can exceed one payload segment. Upload from the
+    /// current file cursor with bounded buffers, never read the whole file.
+    #[cfg(feature = "replication")]
+    fn put_file<'a>(&'a self, _key: &'a str, _file: std::fs::File) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "streamed object upload unsupported")) })
+    }
+
+    /// Strictly increasing opaque keys, exclusive of `after`. At most `limit`
+    /// keys; an empty page ends this round, NOT all future rounds. S3 general
+    /// purpose buckets support this; unordered/directory buckets do not.
+    #[cfg(feature = "replication")]
+    fn list_page<'a>(&'a self, _prefix: &'a str, _after: &'a str, _limit: usize)
+        -> BoxFuture<'a, io::Result<Vec<String>>>
+    {
+        Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "ordered object listing unsupported")) })
+    }
 }
 
 /// Shared handle to a BlobStore.
@@ -101,15 +118,12 @@ impl LocalFsBlobStore {
         }
         Err(io::Error::other("object path escaped its root"))
     }
-}
 
-impl BlobStore for LocalFsBlobStore {
-    fn put<'a>(&'a self, key: &'a str, body: Bytes) -> BoxFuture<'a, io::Result<()>> {
+    fn put_source(&self, key: &str, mut source: impl io::Read + Send + 'static) -> BoxFuture<'static, io::Result<()>> {
         let path = self.path_for(key);
         let root = self.dir.clone();
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                use std::io::Write;
                 use std::sync::atomic::{AtomicU64, Ordering};
                 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
                 let parent = path.parent().unwrap();
@@ -130,7 +144,7 @@ impl BlobStore for LocalFsBlobStore {
                     }
                 };
                 let result = (|| {
-                    file.write_all(&body)?;
+                    io::copy(&mut source, &mut file)?;
                     file.sync_all()?;
                     std::fs::rename(&tmp, &path)?;
                     Self::sync_directories(&root, parent)
@@ -142,6 +156,67 @@ impl BlobStore for LocalFsBlobStore {
             })
             .await
             .map_err(io::Error::other)?
+        })
+    }
+}
+
+impl BlobStore for LocalFsBlobStore {
+    fn put<'a>(&'a self, key: &'a str, body: Bytes) -> BoxFuture<'a, io::Result<()>> {
+        self.put_source(key, io::Cursor::new(body))
+    }
+
+    #[cfg(feature = "replication")]
+    fn put_file<'a>(&'a self, key: &'a str, file: std::fs::File) -> BoxFuture<'a, io::Result<()>> {
+        self.put_source(key, file)
+    }
+
+    #[cfg(feature = "replication")]
+    fn list_page<'a>(&'a self, prefix: &'a str, after: &'a str, limit: usize) -> BoxFuture<'a, io::Result<Vec<String>>> {
+        let root = self.dir.clone();
+        let prefix = format!("{}/", prefix.trim_end_matches('/'));
+        let after = after.to_owned();
+        Box::pin(async move {
+            if !(1..=1000).contains(&limit) { return Err(io::Error::other("invalid list bound")); }
+            tokio::task::spawn_blocking(move || {
+                // The fixture's directories are hex-encoded key chunks, not S3
+                // prefixes. Walk with directory iterators, keeping only the
+                // smallest `limit` qualifying keys in RAM, not the full listing.
+                let mut result = std::collections::BTreeSet::new();
+                let mut stack = vec![(std::fs::read_dir(&root)?, String::new())];
+                while let Some((entries, encoded)) = stack.last_mut() {
+                    match entries.next() {
+                        None => { stack.pop(); }
+                        Some(entry) => {
+                            let entry = entry?;
+                            let name = entry.file_name();
+                            let Some(name) = name.to_str() else { continue };
+                            let ty = match entry.file_type() {
+                                Ok(ty) => ty,
+                                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                                Err(e) => return Err(e),
+                            };
+                            if name == "blob" && ty.is_file() {
+                                let bytes = (0..encoded.len()).step_by(2)
+                                    .map(|n| u8::from_str_radix(&encoded[n..n+2], 16).map_err(io::Error::other))
+                                    .collect::<io::Result<Vec<_>>>()?;
+                                let key = String::from_utf8(bytes).map_err(io::Error::other)?;
+                                if key.starts_with(&prefix) && key > after {
+                                    result.insert(key);
+                                    if result.len() > limit { result.pop_last(); }
+                                }
+                            } else if ty.is_dir() && name.len() % 2 == 0 && name.bytes().all(|b| b.is_ascii_hexdigit()) {
+                                let next = format!("{encoded}{name}");
+                                match std::fs::read_dir(entry.path()) {
+                                    Ok(entries) => stack.push((entries, next)),
+                                    Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(result.into_iter().collect())
+            }).await.map_err(io::Error::other)?
         })
     }
 
@@ -255,6 +330,18 @@ mod s3 {
                     .with_access_key_id(k.clone())
                     .with_secret_access_key(s.clone());
             }
+            if cfg.consensus_managed {
+                // Directory buckets do not implement ordered StartAfter scans.
+                if bucket.ends_with("--x-s3") { return Err(io::Error::other("cold GC requires an ordered general-purpose bucket")); }
+                b = b.with_client_options(object_store::ClientOptions::new()
+                    .with_allow_http(cfg.allow_http)
+                    .with_connect_timeout(std::time::Duration::from_secs(2))
+                    .with_timeout(std::time::Duration::from_secs(10)))
+                    .with_retry(object_store::RetryConfig {
+                        max_retries: 2, retry_timeout: std::time::Duration::from_secs(20),
+                        ..Default::default()
+                    });
+            }
             let inner = b.build().map_err(io::Error::other)?;
             Ok(S3BlobStore { inner })
         }
@@ -269,6 +356,59 @@ mod s3 {
                     .await
                     .map(|_| ())
                     .map_err(io::Error::other)
+            })
+        }
+
+        #[cfg(feature = "replication")]
+        fn put_file<'a>(&'a self, key: &'a str, file: std::fs::File) -> BoxFuture<'a, io::Result<()>> {
+            Box::pin(async move {
+                use tokio::io::AsyncReadExt;
+                let mut file = tokio::fs::File::from_std(file);
+                let mut upload = self.inner.put_multipart(&ObjPath::from(key)).await.map_err(io::Error::other)?;
+                let result = async {
+                    for _ in 0..10_000 {
+                        let mut bytes = vec![0; 8 * 1024 * 1024];
+                        let mut filled = 0;
+                        while filled < bytes.len() {
+                            let n = file.read(&mut bytes[filled..]).await?;
+                            if n == 0 { break; }
+                            filled += n;
+                        }
+                        if filled == 0 { return upload.complete().await.map(|_| ()).map_err(io::Error::other); }
+                        let last = filled < bytes.len();
+                        bytes.truncate(filled);
+                        upload.put_part(bytes.into()).await.map_err(io::Error::other)?;
+                        if last { return upload.complete().await.map(|_| ()).map_err(io::Error::other); }
+                    }
+                    Err(io::Error::other("multipart part bound exceeded"))
+                }.await;
+                // Abort is cleanup, NOT rollback of an unknown completion.
+                // Process death needs the bucket's incomplete-multipart policy.
+                if result.is_err() { let _ = upload.abort().await; }
+                result
+            })
+        }
+
+        #[cfg(feature = "replication")]
+        fn list_page<'a>(&'a self, prefix: &'a str, after: &'a str, limit: usize) -> BoxFuture<'a, io::Result<Vec<String>>> {
+            Box::pin(async move {
+                use futures_util::TryStreamExt;
+                if !(1..=1000).contains(&limit) { return Err(io::Error::other("invalid list bound")); }
+                let prefix = ObjPath::from(prefix.trim_end_matches('/'));
+                let offset = ObjPath::from(after);
+                let mut stream = if after.is_empty() { self.inner.list(Some(&prefix)) }
+                    else { self.inner.list_with_offset(Some(&prefix), &offset) };
+                let mut page: Vec<String> = Vec::with_capacity(limit);
+                while page.len() < limit {
+                    let Some(object) = stream.try_next().await.map_err(io::Error::other)? else { break };
+                    let key = object.location.to_string();
+                    let previous = page.last().map_or(after, String::as_str);
+                    if key.as_str() <= previous || !key.starts_with(&format!("{prefix}/")) {
+                        return Err(io::Error::other("provider violated ordered prefix listing"));
+                    }
+                    page.push(key);
+                }
+                Ok(page)
             })
         }
 

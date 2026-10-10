@@ -1,0 +1,34 @@
+{
+  "cluster": "cold-runtime-007",
+  "node": 1,
+  "listen": "127.0.0.1:20601",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/cold-runtime-007/1",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": true,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:20601"
+    },
+    "2": {
+      "addr": "127.0.0.1:20602"
+    },
+    "3": {
+      "addr": "127.0.0.1:20603"
+    }
+  },
+  "stats_secs": 0,
+  "pending_commands": 256,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync",
+  "cold": {
+    "backend": "s3",
+    "bucket": "cold-fixture",
+    "endpoint": "http://127.0.0.1:20661",
+    "region": "us-east-1",
+    "allow_http": true,
+    "segment_bytes": 16384,
+    "inventory_interval_ms": 1500
+  }
+}

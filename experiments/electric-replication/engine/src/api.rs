@@ -60,6 +60,8 @@ pub struct SseReg {
 pub struct StreamBody {
     pub rx: mpsc::Receiver<Bytes>,
     pub failed: Arc<AtomicBool>,
+    #[cfg(feature = "replication")]
+    pub(crate) cold_pin: Option<Arc<crate::replication::cold::Pin>>,
 }
 
 /// Maximum accepted request body size; larger bodies get `413 Payload Too

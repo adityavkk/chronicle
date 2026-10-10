@@ -238,6 +238,22 @@ impl Journal {
         Ok(())
     }
 
+    /// Index transitions happen at staging, not at fsync completion. A cold
+    /// recovery certificate must join the captured durable WAL prefix as well
+    /// as see a covering snapshot and logical purge. Caller excludes snapshot
+    /// replacement while checking and publishing the local certificate.
+    pub(super) async fn recovery_covers(&self, floor: u64) -> bool {
+        let record = {
+            let index = self.index.lock().unwrap();
+            if index.snapshot.as_ref().and_then(|s| s.meta.last_log_id).is_none_or(|id| id.index < floor)
+                || index.purged.is_none_or(|id| id.index < floor)
+            { return false; }
+            index.last_record.expect("snapshot and purge have native WAL records")
+        };
+        self.shard.wait_durable(record.lsn).await;
+        true
+    }
+
     pub fn read(&self, location: RecordLocation) -> io::Result<Entry> {
         let mut probe = timing::READ.start();
         let data = self.shard.read_record(location)?;
@@ -474,6 +490,12 @@ mod tests {
                 data.extend_from_slice(suffix);
                 data
             }
+            Body::Channel(mut body) => {
+                let mut data = Vec::new();
+                while let Some(chunk) = body.rx.recv().await { data.extend_from_slice(&chunk); }
+                assert!(!body.failed.load(Ordering::Acquire), "remote response must not complete after a backend error");
+                data
+            }
             Body::Empty => vec![],
             _ => panic!("unexpected native read body"),
         };
@@ -517,9 +539,14 @@ mod tests {
             machine.build_snapshot().await.unwrap();
         }
         let dir = machine.dir.clone();
+        let cold = machine.cold.as_ref().map(|r| r.options.clone());
         drop(machine);
         let journal = Journal::open(dir.parent().unwrap().join("wal"), 256 * 1024).unwrap();
-        machine::Machine::open(dir, journal).await.unwrap()
+        machine::Machine::open_with_cold(dir, journal, cold).await.unwrap()
+    }
+
+    async fn cold_control(machine: &mut Arc<machine::Machine>, action: cold::Action) -> Reply {
+        issue(machine, "COLD", "", 1005, vec![], bincode::serialize(&action).unwrap()).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -592,6 +619,240 @@ mod tests {
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
+        #[test]
+        fn cold_sse_bounds_frames_without_splitting_json_or_utf8(pad in 0usize..6, records in 3usize..6) {
+            use base64::Engine;
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                for kind in 0..3 {
+                    let values: Vec<_> = (0..records).map(|i| serde_json::json!({
+                        "n":i,"nested":["escaped\"",["comma,value"]],"text":"x".repeat(65535+pad)+"λ",
+                    })).collect();
+                    let (ct,body) = match kind {
+                        0 => ("application/octet-stream",(0..(190000+pad)).map(|i| ((i*17)%251) as u8).collect()),
+                        1 => ("text/plain",("a".repeat(65534+pad)+&"λé𐐀".repeat(20000)).into_bytes()),
+                        _ => ("application/json",serde_json::to_vec(&values).unwrap()),
+                    };
+                    let wire = if kind==2 { [&body[1..body.len()-1],b","].concat() } else { body.clone() };
+                    let dir = tempfile::tempdir().unwrap();
+                    let options = cold_io::Options {node:1,genesis:vec![1],tier:crate::tier::TierConfig {
+                        kind:crate::tier::TierKind::Local,consensus_managed:true,
+                        local_dir:Some(dir.path().join("objects")),key_prefix:"sse/group".into(),
+                        segment_bytes:1024,compact_bytes:1024,..Default::default()
+                    }};
+                    let mut machine = machine::Machine::open_with_cold(dir.path().join("state"),
+                        Journal::open(dir.path().join("wal"),2*1024*1024).unwrap(),Some(options)).await.unwrap();
+                    assert_eq!(issue(&mut machine,"PUT","/sse",1000,
+                        vec![("content-type",ct.into()),("stream-closed","true".into())],body.clone()).await.status,201);
+                    let (incarnation,blob,prefix) = {
+                        let v=machine.view.read().await;
+                        (v.store.get("/sse").unwrap().id,v.store.blobstore.clone().unwrap(),v.store.tier_config.key_prefix.clone())
+                    };
+                    let reply=cold_control(&mut machine,cold::Action::Begin {
+                        kind:cold::Kind::Payload {path:"/sse".into(),incarnation,start:0},len:wire.len() as u64,
+                        sha256:format!("{:x}",Sha256::digest(&wire)),
+                    }).await;
+                    let object:cold::Object=serde_json::from_slice(&reply.body).unwrap();
+                    blob.put(&object.key(&prefix),wire.clone().into()).await.unwrap();
+                    assert_eq!(cold_control(&mut machine,cold::Action::Publish {birth:object.birth}).await.status,204);
+                    machine.build_snapshot().await.unwrap();
+                    let options=machine.cold.as_ref().unwrap().options.clone();
+                    drop(machine);
+                    // Preserve this fixture's segment size: its generated JSON
+                    // entry is larger than the small lifecycle helper's 256 KiB.
+                    let machine=machine::Machine::open_with_cold(dir.path().join("state"),
+                        Journal::open(dir.path().join("wal"),2*1024*1024).unwrap(),Some(options)).await.unwrap();
+                    let store=machine.view.read().await.store.clone();
+                    assert_eq!(std::fs::metadata(&store.get("/sse").unwrap().file_path).unwrap().len(),0);
+                    let response=crate::handlers::handle(store,Req {method:Method::Get,path:"/sse".into(),
+                        query:Some("offset=-1&live=sse".into()),headers:vec![],body:Default::default()}).await;
+                    let Body::Sse(mut source)=response.body else {panic!("expected SSE")};
+                    let (mut observed,mut json_values,mut frames,mut closed)=(Vec::new(),Vec::new(),0,false);
+                    while let Some(frame)=source.next_chunk().await {
+                        frames+=1;
+                        assert!(frames<=16 && frame.len()<=128*1024+1024,"cold SSE must bound catch-up frames");
+                        for event in std::str::from_utf8(&frame).unwrap().split("\n\n").filter(|e|!e.is_empty()) {
+                            let data=event.lines().filter_map(|l|l.strip_prefix("data:")).collect::<Vec<_>>().join("\n");
+                            if event.starts_with("event: data\n") {
+                                match kind {
+                                    0 => observed.extend(base64::engine::general_purpose::STANDARD.decode(data).unwrap()),
+                                    1 => observed.extend(data.as_bytes()),
+                                    _ => json_values.extend(serde_json::from_str::<Vec<serde_json::Value>>(&data).unwrap()),
+                                }
+                            } else {
+                                let control:serde_json::Value=serde_json::from_str(&data).unwrap();
+                                let complete=if kind==2 {json_values.len()==values.len()} else {observed.len()==body.len()};
+                                assert_eq!(control.get("upToDate").and_then(|v|v.as_bool()).unwrap_or(false),complete);
+                                assert_eq!(control.get("streamClosed").and_then(|v|v.as_bool()).unwrap_or(false),complete);
+                                closed|=complete;
+                            }
+                        }
+                    }
+                    assert!(closed && frames>1);
+                    if kind==2 {assert_eq!(json_values,values);} else {assert_eq!(observed,body);}
+                }
+            });
+        }
+
+        #[test]
+        fn cold_native_replay_cuts_readers_transfers_and_irreversible_retirement(
+            sizes in prop::collection::vec(1024usize..4096, 2..5), json in any::<bool>(),
+            replay_fork in any::<bool>(),
+        ) {
+            use cold::{Action, Kind, Object};
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let options = cold_io::Options { node: 1, genesis: vec![1], tier: crate::tier::TierConfig {
+                    kind: crate::tier::TierKind::Local, consensus_managed: true,
+                    local_dir: Some(dir.path().join("objects")), key_prefix: "test/group".into(),
+                    segment_bytes: 1024, compact_bytes: 1024, ..Default::default()
+                }};
+                let mut machine = machine::Machine::open_with_cold(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),8192).unwrap(),Some(options)).await.unwrap();
+                for (generation, size) in sizes.iter().enumerate() {
+                    let (body, wire, child_body, child_expected, sub) = if json {
+                        let first = serde_json::json!({"generation":generation,"text":"x".repeat(*size)});
+                        let last = serde_json::json!({"different":17+generation});
+                        let body = serde_json::to_vec(&vec![first.clone(),last]).unwrap();
+                        let wire = [&body[1..body.len()-1],b","].concat();
+                        (body,wire,b"[391]".to_vec(),serde_json::to_vec(&vec![first,serde_json::json!(391)]).unwrap(),1)
+                    } else {
+                        let wire: Vec<_> = (0..*size).map(|i| ((i*17+generation*73)%251) as u8).collect();
+                        let cut = size/3+7;
+                        let expected = [&wire[..cut],&[241,13,8]].concat();
+                        (wire.clone(),wire,vec![241,13,8],expected,cut)
+                    };
+                    assert_eq!(issue(&mut machine,"PUT","/cold",1000,
+                        vec![("content-type",if json {"application/json"} else {"application/octet-stream"}.into())],body.clone()).await.status,201);
+                    let (kind, blob, prefix) = {
+                        let view=machine.view.read().await;
+                        (Kind::Payload {path:"/cold".into(),incarnation:view.store.get("/cold").unwrap().id,start:0},
+                            view.store.blobstore.clone().unwrap(),view.store.tier_config.key_prefix.clone())
+                    };
+                    let reply=cold_control(&mut machine,Action::Begin {kind,len:wire.len() as u64,
+                        sha256:format!("{:x}",Sha256::digest(&wire))}).await;
+                    assert_eq!(reply.status,200);
+                    let object: Object=serde_json::from_slice(&reply.body).unwrap();
+                    let key=object.key(&prefix);
+                    // Freeze a real exact-cut inventory while this payload is
+                    // pending. A later Publish/Retire must not mutate its set;
+                    // the previous active inventory root is protected too.
+                    let mut capture=cold_io::spool(&machine.dir).unwrap();
+                    let (pending_cut,old_root)={
+                        let view=machine.view.read().await;
+                        let cut=view.applied.unwrap().index;
+                        let state=view.cold.as_ref().unwrap();
+                        state.capture(&prefix,cut,&mut capture).unwrap();
+                        (cut,state.inventory.clone())
+                    };
+                    let reply=cold_control(&mut machine,Action::Begin {kind:Kind::Inventory {cut:pending_cut},
+                        len:capture.metadata().unwrap().len(),sha256:cold_io::digest(&capture).unwrap()}).await;
+                    assert_eq!(reply.status,200);
+                    let captured: Object=serde_json::from_slice(&reply.body).unwrap();
+                    assert!(captured.birth > pending_cut);
+                    blob.put_file(&captured.key(&prefix),capture).await.unwrap();
+                    let mut pending_inventory=cold_io::fetch_inventory(&blob,&prefix,captured.clone(),&machine.dir).await.unwrap();
+                    assert!(pending_inventory.protects(object.birth,&key).unwrap(),"exact cut must include pending keys");
+                    if let Some(root)=old_root {
+                        assert!(pending_inventory.protects(root.birth,&root.key(&prefix)).unwrap(),"replacement must retain old root");
+                    }
+                    assert!(!pending_inventory.protects(captured.birth,&captured.key(&prefix)).unwrap(),"new inventory Begin is after its cut");
+                    assert_eq!(cold_control(&mut machine,Action::Abort {birth:captured.birth}).await.status,204);
+                    blob.put(&key,wire.clone().into()).await.unwrap();
+                    assert_eq!(cold_control(&mut machine,Action::Publish {birth:object.birth}).await.status,204);
+                    {
+                        let view=machine.view.read().await;
+                        let st=view.store.get("/cold").unwrap();
+                        assert_eq!(st.shared.read().unwrap().file_base,wire.len() as u64);
+                        assert_eq!(std::fs::metadata(&st.file_path).unwrap().len(),0,"local payload must actually be reclaimed");
+                    }
+                    // Snapshot/reopen clears the native tail cache. The getter
+                    // must traverse the remote Channel, not a hot-byte fixture.
+                    machine=reopen(machine,true).await;
+                    let applied=machine.view.read().await.applied.unwrap().index;
+                    assert!(!machine.certify_cold(applied).await.unwrap(),"completed snapshot alone cannot certify recovery");
+                    let headers=vec![("stream-forked-from","/cold".into()),("stream-fork-offset","-1".into()),
+                        ("stream-fork-sub-offset",sub.to_string())];
+                    assert_eq!(issue(&mut machine,"PUT","/child",1001,headers.clone(),child_body.clone()).await.status,201);
+                    // Replaying the fork from the preceding cold snapshot must
+                    // resolve its sub-offset through real remote bytes again.
+                    if replay_fork { machine=reopen(machine,false).await; }
+                    let mut response={
+                        let view=machine.view.read().await;
+                        let mut r=crate::handlers::handle(view.store.clone(),Req {method:Method::Get,path:"/cold".into(),
+                            query:Some("offset=-1".into()),headers:vec![],body:Default::default()}).await;
+                        assert!(matches!(r.body,Body::Channel(_)));
+                        cold::protect_response(&mut r,Some(machine.cold.as_ref().unwrap().pins.read(view.applied.unwrap().index)));
+                        r
+                    };
+                    // Keep an outbound snapshot and a lazy response alive while
+                    // all native owners retire, newer snapshots replace the
+                    // root, and logical purge completes.
+                    let transfer=machine.build_snapshot().await.unwrap();
+                    assert_eq!(issue(&mut machine,"DELETE","/cold",1002,vec![],vec![]).await.status,204);
+                    assert_eq!(cold_control(&mut machine,Action::Retire {birth:object.birth}).await.status,409);
+                    assert_eq!(bytes(&machine,"/child").await,(200,child_expected.clone()));
+                    assert_eq!(issue(&mut machine,"PUT","/child",1003,headers,child_body).await.status,200);
+                    assert_eq!(issue(&mut machine,"DELETE","/child",1004,vec![],vec![]).await.status,204);
+                    assert_eq!(cold_control(&mut machine,Action::Retire {birth:object.birth}).await.status,204);
+                    assert!(pending_inventory.protects(object.birth,&key).unwrap(),"retirement cannot rewrite a captured inventory");
+                    let snapshot=machine.build_snapshot().await.unwrap();
+                    let cut=snapshot.meta.last_log_id.unwrap();
+                    drop(snapshot);
+                    assert!(!machine.certify_cold(cut.index).await.unwrap(),"snapshot is not completed purge");
+                    machine.journal.clone().purge(cut).await.unwrap();
+                    assert!(!machine.certify_cold(cut.index).await.unwrap(),"old reader/transfer must fence certification");
+                    let Body::Channel(ref mut channel)=response.body else {unreachable!()};
+                    let mut observed=Vec::new();
+                    while let Some(chunk)=channel.rx.recv().await { observed.extend_from_slice(&chunk); }
+                    assert!(!channel.failed.load(Ordering::Acquire));
+                    assert_eq!(observed,body);
+                    drop(response);
+                    assert!(!machine.certify_cold(cut.index).await.unwrap(),"snapshot transfer still holds a pin");
+                    drop(transfer);
+                    assert!(machine.certify_cold(cut.index).await.unwrap());
+                    assert_eq!(cold_control(&mut machine,Action::Certify {node:1,floor:cut.index}).await.status,204);
+                    let mut capture=cold_io::spool(&machine.dir).unwrap();
+                    let inventory_cut={
+                        let view=machine.view.read().await;
+                        // Use the current cut: no later mutation changes capture.
+                        let cut=view.applied.unwrap().index;
+                        view.cold.as_ref().unwrap().capture(&prefix,cut,&mut capture).unwrap();
+                        cut
+                    };
+                    // This newer cut needs its own checkpoint/purge certificate.
+                    drop(machine.build_snapshot().await.unwrap());
+                    machine.journal.clone().purge(LogId::new(CommittedLeaderId::new(1,1),inventory_cut)).await.unwrap();
+                    assert!(machine.certify_cold(inventory_cut).await.unwrap());
+                    let reply=cold_control(&mut machine,Action::Begin {kind:Kind::Inventory {cut:inventory_cut},
+                        len:capture.metadata().unwrap().len(),sha256:cold_io::digest(&capture).unwrap()}).await;
+                    assert_eq!(reply.status,200);
+                    let inventory: Object=serde_json::from_slice(&reply.body).unwrap();
+                    blob.put_file(&inventory.key(&prefix),capture).await.unwrap();
+                    assert_eq!(cold_control(&mut machine,Action::Certify {node:1,floor:inventory_cut}).await.status,204);
+                    assert_eq!(cold_control(&mut machine,Action::Publish {birth:inventory.birth}).await.status,204);
+                    let mut pinned=cold_io::fetch_inventory(&blob,&prefix,inventory,&machine.dir).await.unwrap();
+                    assert!(!pinned.protects(object.birth,&key).unwrap());
+                    blob.delete(&key).await.unwrap();
+                    assert_eq!(blob.head(&key).await.unwrap(),None);
+                    // A late already-issued PUT can resurrect physical bytes,
+                    // never the logical ownership identity, across restart.
+                    blob.put(&key,wire.into()).await.unwrap();
+                    machine=reopen(machine,true).await;
+                    assert_eq!(cold_control(&mut machine,Action::Publish {birth:object.birth}).await.status,409);
+                    assert!(!pinned.protects(object.birth,&key).unwrap());
+                    blob.delete(&key).await.unwrap();
+                    let view=machine.view.read().await;
+                    let state=view.cold.as_ref().unwrap();
+                    assert!(state.live.is_empty());
+                    assert!(state.pending.is_empty());
+                    assert_eq!(state.participants.len(),1);
+                    assert!(state.inventory.is_some());
+                }
+            });
+        }
+
         #[test]
         fn streamed_apply_error_preserves_only_complete_durable_cohorts(
             sizes in prop::collection::vec(1usize..97, 130..195), failure in 0usize..195,

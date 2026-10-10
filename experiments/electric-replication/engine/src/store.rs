@@ -652,6 +652,11 @@ impl Store {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
         let blobstore = build_blobstore(&tier_config, &data_dir)?;
+        #[cfg(feature = "replication")]
+        let blobstore = if tier_config.consensus_managed {
+            blobstore.map(|blob| Arc::new(crate::replication::cold_io::VerifiedBlob::new(
+                blob, tier_config.key_prefix.clone())) as crate::blobstore::SharedBlobStore)
+        } else { blobstore };
         let store = Store {
             streams: DashMap::new(),
             data_dir,

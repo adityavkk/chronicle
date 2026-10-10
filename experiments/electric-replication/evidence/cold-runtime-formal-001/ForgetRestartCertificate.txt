@@ -1,0 +1,153 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 87 and seed 5653635638653210955 with 2 workers on 8 cores with 1820MB heap and 64MB offheap memory [pid: 3859491] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/ColdOwnership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ColdOwnership
+Starting... (2026-10-09 17:02:00)
+Implied-temporal checking--satisfiability problem has 2 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-09 17:02:00.
+Error: Invariant InvShape is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1, 2},
+  members |-> {1, 2},
+  online |-> {1, 2},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 10,
+  live |-> {"i2"},
+  pending |-> {"q"},
+  node |->
+      << [ applied |-> 10,
+           snap |-> 7,
+           request |-> 7,
+           purge |-> 7,
+           floor |-> 7,
+           pin |-> {} ],
+         [ applied |-> 10,
+           snap |-> 7,
+           request |-> 7,
+           purge |-> 7,
+           floor |-> 7,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {"a", "p", "i1"},
+  physical |-> {"a", "p", "q", "i1", "i2"},
+  inflight |-> {},
+  known |-> {"a", "p", "q", "i1", "i2"},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a", "i1", "i2"},
+  contents |-> [a |-> {"p"}, i1 |-> {"p"}, i2 |-> {"p", "q", "i1"}, i3 |-> {}],
+  active |-> "i2",
+  previous |-> "i1",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 2: <Action line 433, col 42 to line 433, col 70 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1, 2},
+  members |-> {1, 2},
+  online |-> {},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 10,
+  live |-> {"i2"},
+  pending |-> {"q"},
+  node |->
+      << [ applied |-> 10,
+           snap |-> 7,
+           request |-> 7,
+           purge |-> 7,
+           floor |-> 7,
+           pin |-> {} ],
+         [ applied |-> 10,
+           snap |-> 7,
+           request |-> 7,
+           purge |-> 7,
+           floor |-> 7,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {"a", "p", "i1"},
+  physical |-> {"a", "p", "q", "i1", "i2"},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a", "i1", "i2"},
+  contents |-> [a |-> {"p"}, i1 |-> {"p"}, i2 |-> {"p", "q", "i1"}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "i1",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> TRUE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+11 states generated, 11 distinct states found, 7 states left on queue.
+The depth of the complete state graph search is 3.
+Finished in 00s at (2026-10-09 17:02:00)

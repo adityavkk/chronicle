@@ -17,11 +17,14 @@ pub struct Faults {
     pub delay_ms: u64,
     #[serde(default)]
     pub pause_fork_import: bool,
+    #[serde(default)]
+    pub pause_snapshots: bool,
 }
 
 #[derive(Clone)]
 pub struct Network {
     pub group: usize,
+    pub version: u32,
     pub cluster: String,
     pub client: reqwest::Client,
     pub faults: Arc<RwLock<Faults>>,
@@ -41,6 +44,11 @@ impl Network {
         rpc: &str,
         request: Q,
     ) -> Result<R, RPCError<Types, E>> {
+        // Qualification-only fault: keep the actual OpenRaft snapshot handle
+        // alive before delivery while heartbeats/commits continue normally.
+        while rpc == "snapshot" && self.faults.read().unwrap().pause_snapshots {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let faults = self.faults.read().unwrap().clone();
         if faults.blocked.contains(&target) {
             return Err(RPCError::Unreachable(Unreachable::new(&io::Error::other(
@@ -54,7 +62,7 @@ impl Network {
             bincode::serialize(&request).map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
         let response = self
             .client
-            .post(format!("http://{}/_raft10/{}/{rpc}", node.addr, self.group))
+            .post(format!("http://{}/_raft{}/{}/{rpc}", node.addr, self.version, self.group))
             .header("x-electric-cluster", &self.cluster)
             .body(body)
             .send()
@@ -79,7 +87,7 @@ impl Network {
     }
 }
 impl RaftNetworkFactory<Types> for Network {
-    type Network = Adapter<Types, Connection, tokio::fs::File>;
+    type Network = Adapter<Types, Connection, cold::SnapshotFile>;
     async fn new_client(&mut self, target: u64, node: &BasicNode) -> Self::Network {
         Connection {
             network: self.clone(),
@@ -112,6 +120,13 @@ impl RaftNetwork<Types> for Connection {
         req: InstallSnapshotRequest<Types>,
         _: RPCOption,
     ) -> Result<InstallSnapshotResponse<Types>, RpcError<InstallSnapshotError>> {
+        if self.network.faults.read().unwrap().pause_snapshots {
+            // Qualification evidence must observe the actual transport, not
+            // confuse a transient snapshot-builder/GC pin with a sent snapshot.
+            eprintln!("{}", serde_json::json!({"schema":1,"event":"fault.snapshot-held",
+                "group":self.network.group,"target":self.target,
+                "index":req.meta.last_log_id.map(|id|id.index)}));
+        }
         self.network
             .send(self.target, &self.node, "snapshot", req)
             .await
@@ -131,6 +146,7 @@ mod tests {
         drop(listener);
         let network = Network {
             group: 0,
+            version: 10,
             cluster: "backoff-test".into(),
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
             faults: Arc::new(RwLock::new(Faults::default())),

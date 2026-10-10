@@ -744,7 +744,7 @@ pub(crate) fn encode_wire(body: &Bytes, is_json: bool, allow_empty_array: bool) 
 /// No-op when tiering is off (checked inside `maybe_seal`); never blocks the
 /// append ack — the work runs on a detached task.
 fn maybe_seal_bg(store: &Arc<Store>, st: &Arc<StreamState>) {
-    if !store.tier_config.enabled() {
+    if !store.tier_config.enabled() || store.tier_config.consensus_managed {
         return;
     }
     let store = store.clone();
@@ -1538,7 +1538,12 @@ fn stream_resolved_body(
             let _ = tx.send(Bytes::from_static(suffix)).await;
         }
     });
-    Body::Channel(crate::api::StreamBody { rx, failed })
+    Body::Channel(crate::api::StreamBody {
+        rx,
+        failed,
+        #[cfg(feature = "replication")]
+        cold_pin: None,
+    })
 }
 
 /// Materialize pre-resolved placement-aware slices into one contiguous buffer:
@@ -1635,7 +1640,16 @@ async fn handle_read(store: Arc<Store>, req: Req, path: String) -> Resp {
         ),
         // SSE records its own read metric per emitted batch (streaming, no single
         // dispatch latency); the dispatch here just sets up the channel.
-        Some("sse") => return handle_sse(st, offset, q.cursor),
+        Some("sse") => {
+            #[cfg(feature = "replication")]
+            let limit = store
+                .tier_config
+                .consensus_managed
+                .then_some(crate::replication::cold::MAX_SEGMENT);
+            #[cfg(not(feature = "replication"))]
+            let limit = None;
+            return handle_sse(st, offset, q.cursor, limit);
+        }
         Some(_) => return text_response(400, "invalid live mode"),
         None => (
             handle_catchup(st, offset, &req, &mut cache_hit).await,
@@ -1940,11 +1954,68 @@ struct SseSource {
     deadline: Instant,
     client_cursor: Option<u64>,
     encoding: SseEncoding,
+    max_read_bytes: Option<u64>,
     sent_initial: bool,
     done: bool,
 }
 
 impl SseSource {
+    /// Replicated cold catch-up cannot materialize an arbitrarily long prefix.
+    /// Binary/text use 64 KiB windows; JSON grows only until a whole value fits,
+    /// with the same ceiling as a cold segment. Never advance through a failed
+    /// range, an incomplete JSON value, or a split UTF-8 scalar.
+    async fn read_batch(&self, tail: u64, cache_hit: &mut bool) -> std::io::Result<Bytes> {
+        let available = tail - self.pos;
+        let mut want = available.min(if self.max_read_bytes.is_some() {
+            64 * 1024
+        } else {
+            u64::MAX
+        });
+        loop {
+            let end = self.pos + want;
+            let data = match self.st.tail_chunk_slice(self.pos, end) {
+                Some(bytes) => {
+                    *cache_hit = true;
+                    bytes
+                }
+                None => {
+                    *cache_hit = false;
+                    read_range_bytes(&self.st, self.pos, end).await?
+                }
+            };
+            let Some(max) = self.max_read_bytes else {
+                return Ok(data);
+            };
+            let cut = match self.encoding {
+                SseEncoding::Json => crate::tier::last_json_value_boundary(&data, want) as usize,
+                SseEncoding::Text if end < tail => {
+                    let mut cut = data.len();
+                    // A valid scalar is at most four bytes. Only a genuinely
+                    // incomplete suffix needs carrying; preserve native lossy
+                    // handling of already-invalid text rather than stalling.
+                    for n in data.len().saturating_sub(3)..data.len() {
+                        if std::str::from_utf8(&data[n..]).is_err_and(|e| e.error_len().is_none()) {
+                            cut = n;
+                            break;
+                        }
+                    }
+                    cut
+                }
+                _ => data.len(),
+            };
+            if cut > 0 {
+                return Ok(data.slice(..cut));
+            }
+            let next = (want * 2).min(available).min(max);
+            if next <= want {
+                return Err(std::io::Error::other(
+                    "no whole JSON SSE value within cold read bound",
+                ));
+            }
+            want = next;
+        }
+    }
+
     /// Produce the next SSE event, or `None` to end the stream. Mirrors the
     /// original producer loop, but returns one frame per call (state persists in
     /// `self`) so it can run inline without a channel.
@@ -1959,30 +2030,21 @@ impl SseSource {
                 // share the resident tail chunk — one read for all of them —
                 // and fall back to a file read only when behind it.
                 let read_t0 = crate::telemetry::Timer::start();
-                let cache_hit;
-                let data = match self.st.tail_chunk_slice(self.pos, t.bytes) {
-                    Some(b) => {
-                        cache_hit = true;
-                        b
-                    }
-                    None => {
-                        cache_hit = false;
-                        match read_range_bytes(&self.st, self.pos, t.bytes).await {
-                            Ok(d) => d,
-                            // End the stream without advancing `pos`: the client
-                            // reconnects from its last offset, never skipping a gap.
-                            Err(_) => {
-                                self.done = true;
-                                return None;
-                            }
-                        }
+                let mut cache_hit = false;
+                let data = match self.read_batch(t.bytes, &mut cache_hit).await {
+                    Ok(data) => data,
+                    // End without advancing: reconnect from the last control
+                    // offset, never advertise a successfully skipped range.
+                    Err(_) => {
+                        self.done = true;
+                        return None;
                     }
                 };
                 crate::telemetry::record_tail_cache(cache_hit, "sse");
                 crate::telemetry::record_read(read_t0.elapsed_secs(), "sse", cache_hit);
                 let mut ev = String::new();
                 sse_encode_data(&mut ev, &data, self.encoding);
-                self.pos = t.bytes;
+                self.pos += data.len() as u64;
                 let up_to_date = self.pos >= self.st.tail().bytes;
                 // If the stream closed atomically with this final data, fold the
                 // close into this control event (streamClosed:true) rather than
@@ -2076,7 +2138,12 @@ impl crate::api::EventSource for SseSource {
     }
 }
 
-fn handle_sse(st: Arc<StreamState>, offset: ParsedOffset, client_cursor: Option<u64>) -> Resp {
+fn handle_sse(
+    st: Arc<StreamState>,
+    offset: ParsedOffset,
+    client_cursor: Option<u64>,
+    max_read_bytes: Option<u64>,
+) -> Resp {
     let t0 = st.tail();
     // A beyond-tail numeric offset starts caught-up at the tail (see
     // `resolve_start`): emit the initial up-to-date control event, then wait.
@@ -2092,6 +2159,7 @@ fn handle_sse(st: Arc<StreamState>, offset: ParsedOffset, client_cursor: Option<
         deadline: Instant::now() + SSE_MAX_DURATION,
         client_cursor,
         encoding,
+        max_read_bytes,
         sent_initial: false,
         done: false,
     };

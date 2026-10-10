@@ -14,20 +14,37 @@ pub struct View {
     pub subscriptions: subscriptions::State,
     pub forks: forks::State,
     pub(super) receipts: receipts::State,
+    pub(super) cold: Option<cold::State>,
 }
 
 pub struct Machine {
     pub view: RwLock<View>,
     pub journal: Arc<journal::Journal>,
     pub dir: PathBuf,
+    pub(super) cold: Option<cold_io::Runtime>,
     // Lock order: snapshots -> view -> journal. Apply never takes snapshots.
     snapshots: Mutex<()>,
 }
 
 impl Machine {
     pub async fn open(dir: PathBuf, journal: Arc<journal::Journal>) -> io::Result<Arc<Self>> {
+        Self::open_with_cold(dir, journal, None).await
+    }
+
+    pub(super) async fn open_with_cold(dir: PathBuf, journal: Arc<journal::Journal>, options: Option<cold_io::Options>)
+        -> io::Result<Arc<Self>>
+    {
         std::fs::create_dir_all(&dir)?;
+        let cold = options.map(|options| cold_io::Runtime::open(&dir, options)).transpose()?;
         let snapshot = journal.index.lock().unwrap().snapshot.clone();
+        if let Some(runtime) = &cold {
+            let certificate = runtime.certificate();
+            let index = journal.index.lock().unwrap();
+            if certificate.floor > 0 && !(certificate.bootstrap && index.snapshot.is_none() && index.committed.is_none())
+                && (index.snapshot.as_ref().and_then(|s| s.meta.last_log_id).is_none_or(|i| i.index < certificate.floor)
+                    || (!certificate.bootstrap && index.purged.is_none_or(|i| i.index < certificate.floor)))
+            { return Err(io::Error::other("cold recovery below durable certificate")); }
+        }
         // Old materializations are disposable, unlike WAL and snapshot files.
         // No live readers exist during boot; only then collect installed old
         // generations whose path-based native readers might still have used.
@@ -41,12 +58,13 @@ impl Machine {
         if hot.exists() {
             std::fs::remove_dir_all(&hot)?;
         }
-        let (applied, membership, time, subscriptions, forks, receipts) = if let Some(snapshot) = snapshot {
+        let (applied, membership, time, subscriptions, forks, receipts, ownership) = if let Some(snapshot) = snapshot {
             let file = dir.join(&snapshot.file);
             if digest_file(&file)? != snapshot.sha256 {
                 return Err(io::Error::other("snapshot digest mismatch"));
             }
-            let (time, subscriptions, forks, receipts) = unpack(&file, &hot, &snapshot.meta)?;
+            let (time, subscriptions, forks, receipts, ownership) = unpack(&file, &hot, &snapshot.meta)?;
+            if ownership.is_some() != cold.is_some() { return Err(io::Error::other("cold snapshot/configuration mismatch")); }
             (
                 snapshot.meta.last_log_id,
                 snapshot.meta.last_membership,
@@ -54,6 +72,7 @@ impl Machine {
                 subscriptions,
                 forks,
                 receipts,
+                ownership,
             )
         } else {
             (
@@ -63,11 +82,12 @@ impl Machine {
                 subscriptions::State::default(),
                 forks::State::default(),
                 receipts::State::default(),
+                cold.as_ref().map(|r| cold::State::genesis(r.options.genesis.iter().copied())),
             )
         };
         let store = Arc::new(Store::new_with_tier(
             hot,
-            crate::tier::TierConfig::default(),
+            cold.as_ref().map_or_else(Default::default, |r| r.options.tier.clone()),
         )?);
         store.clock.advance(time);
         let machine = Arc::new(Self {
@@ -78,9 +98,11 @@ impl Machine {
                 subscriptions,
                 forks,
                 receipts,
+                cold: ownership,
             }),
             journal,
             dir,
+            cold,
             snapshots: Mutex::new(()),
         });
         let committed = machine.journal.index.lock().unwrap().committed;
@@ -102,6 +124,38 @@ impl Machine {
         }
         machine.cleanup_snapshots()?;
         Ok(machine)
+    }
+
+    pub(super) async fn certify_cold(&self, floor: u64) -> io::Result<bool> {
+        let Some(runtime) = &self.cold else { return Ok(false) };
+        let _snapshots = self.snapshots.lock().await;
+        let view = self.view.write().await;
+        let certificate = runtime.certificate();
+        if !runtime.admits(&view) || runtime.pins.blocks(floor)
+            || view.applied.is_none_or(|id| id.index < floor)
+        { return Ok(false); }
+        if !self.journal.recovery_covers(floor).await { return Ok(false); }
+        if floor > certificate.floor || certificate.bootstrap {
+            tokio::task::block_in_place(|| runtime.save(cold_io::Certificate {
+                floor: floor.max(certificate.floor), registered: true, bootstrap: false,
+            })).map_err(storage_error)?;
+        }
+        Ok(true)
+    }
+
+    /// Registration is a committed group decision BEFORE this authorization
+    /// and before add_learner. Existing participants cannot be silently reset.
+    pub(super) async fn bootstrap_cold(&self, floor: u64) -> io::Result<bool> {
+        let Some(runtime) = &self.cold else { return Ok(false) };
+        let _snapshots = self.snapshots.lock().await;
+        let view = self.view.write().await;
+        let certificate = runtime.certificate();
+        if certificate.registered { return Ok(certificate.floor >= floor); }
+        if view.applied.is_some() { return Ok(false); }
+        tokio::task::block_in_place(|| runtime.save(cold_io::Certificate {
+            floor, registered: true, bootstrap: true,
+        })).map_err(storage_error)?;
+        Ok(true)
     }
 
     /// Credit recovery is about a retained suffix, not terminal receipt proof.
@@ -166,7 +220,12 @@ impl Machine {
                     for (ordinal, command) in batch.commands.into_iter().enumerate() {
                         let receipt = command.local();
                         view.store.clock.advance(command.time);
-                        let resp = if command.method == "SUB" {
+                        let resp = if command.method == "COLD" {
+                            let action = bincode::deserialize(&command.body).map_err(|e| storage_error(io::Error::other(e)))?;
+                            let store = view.store.clone();
+                            let state = view.cold.as_mut().ok_or_else(|| storage_error(io::Error::other("cold command in hot group")))?;
+                            state.apply(&store, &store.tier_config.key_prefix, entry.log_id.index, action).await.map_err(storage_error)?
+                        } else if command.method == "SUB" {
                             let action = serde_json::from_slice(&command.body)
                                 .map_err(|e| storage_error(io::Error::other(e)))?;
                             let now = clock::millis(view.store.clock.now());
@@ -238,7 +297,7 @@ impl Machine {
 }
 
 impl RaftStateMachine<Types> for Arc<Machine> {
-    type SnapshotData = tokio::fs::File;
+    type SnapshotData = cold::SnapshotFile;
     type SnapshotBuilder = Self;
     async fn applied_state(
         &mut self,
@@ -267,10 +326,10 @@ impl RaftStateMachine<Types> for Arc<Machine> {
     async fn install_snapshot(
         &mut self,
         meta: &SnapshotMeta,
-        snapshot: tokio::fs::File,
+        snapshot: cold::SnapshotFile,
     ) -> io::Result<()> {
         let _snapshot = self.snapshots.lock().await;
-        snapshot.sync_all().await.map_err(storage_error)?;
+        snapshot.file.sync_all().await.map_err(storage_error)?;
         drop(snapshot);
         let mut view = self.view.write().await;
         // Retain the exclusive view through durable reference publication, but
@@ -278,8 +337,16 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         let (reference, restored) = tokio::task::block_in_place(|| -> io::Result<_> {
             let incoming = self.dir.join("receiving");
             let generation = self.dir.join(format!("hot-{}", nonce()));
-            let (time, subscriptions, forks, receipts) = unpack(&incoming, &generation, meta)?;
-            let store = Arc::new(Store::new_with_tier(generation, crate::tier::TierConfig::default())?);
+            let (time, subscriptions, forks, receipts, cold) = unpack(&incoming, &generation, meta)?;
+            if cold.is_some() != self.cold.is_some() { return Err(io::Error::other("cold snapshot/configuration mismatch")); }
+            if let Some(runtime) = &self.cold {
+                let certificate = runtime.certificate();
+                if !certificate.registered || meta.last_log_id.is_none_or(|i| i.index < certificate.floor)
+                    || !cold.as_ref().unwrap().participants.contains_key(&runtime.options.node)
+                { return Err(io::Error::other("cold snapshot below registration/recovery floor")); }
+            }
+            let tier = self.cold.as_ref().map_or_else(Default::default, |r| r.options.tier.clone());
+            let store = Arc::new(Store::new_with_tier(generation, tier)?);
             store.clock.advance(time);
             let file = format!("snapshot-{}", nonce());
             std::fs::rename(&incoming, self.dir.join(&file))?;
@@ -296,6 +363,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
                 subscriptions,
                 forks,
                 receipts,
+                cold,
             }))
         }).map_err(storage_error)?;
         self.journal
@@ -310,13 +378,24 @@ impl RaftStateMachine<Types> for Arc<Machine> {
     }
     async fn get_current_snapshot(&mut self) -> io::Result<Option<Snapshot>> {
         // Open while pinned against cleanup; Linux descriptors survive unlink.
+        // The view lock also serializes pin admission with certificate fencing.
+        let _view = self.view.read().await;
         let index = self.journal.index.lock().unwrap();
+        if let Some(runtime) = &self.cold {
+            let certificate = runtime.certificate();
+            if index.snapshot.as_ref().and_then(|s| s.meta.last_log_id).is_none_or(|i| i.index < certificate.floor) {
+                return Ok(None);
+            }
+        }
         match &index.snapshot {
             Some(snapshot) => Ok(Some(Snapshot {
                 meta: snapshot.meta.clone(),
-                snapshot: tokio::fs::File::from_std(
-                    std::fs::File::open(self.dir.join(&snapshot.file)).map_err(storage_error)?,
-                ),
+                snapshot: cold::SnapshotFile {
+                    file: tokio::fs::File::from_std(
+                        std::fs::File::open(self.dir.join(&snapshot.file)).map_err(storage_error)?,
+                    ),
+                    _pin: self.cold.as_ref().map(|r| r.pins.read(snapshot.meta.last_log_id.map_or(0, |id| id.index))),
+                },
             })),
             None => Ok(None),
         }
@@ -324,16 +403,17 @@ impl RaftStateMachine<Types> for Arc<Machine> {
 }
 
 impl SnapshotReceiverFactory<Types> for Arc<Machine> {
-    type SnapshotReceiver = tokio::fs::File;
-    async fn begin_receiving_snapshot(&mut self) -> io::Result<tokio::fs::File> {
-        tokio::fs::OpenOptions::new()
+    type SnapshotReceiver = cold::SnapshotFile;
+    async fn begin_receiving_snapshot(&mut self) -> io::Result<cold::SnapshotFile> {
+        let file = tokio::fs::OpenOptions::new()
             .read(true).write(true).create(true).truncate(true)
-            .open(self.dir.join("receiving")).await.map_err(storage_error)
+            .open(self.dir.join("receiving")).await.map_err(storage_error)?;
+        Ok(cold::SnapshotFile { file, _pin: None })
     }
 }
 
 impl RaftSnapshotBuilder<Types> for Arc<Machine> {
-    type SnapshotData = tokio::fs::File;
+    type SnapshotData = cold::SnapshotFile;
     async fn build_snapshot(&mut self) -> io::Result<Snapshot> {
         // Serialize the lifecycle, not apply during payload copy/hash/fsync.
         // Open descriptors pin incarnations; exact lengths pin their prefixes.
@@ -341,6 +421,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         let view = self.view.write().await;
         let _probe = timing::SNAPSHOT.start();
         let cut = tokio::task::block_in_place(|| SnapshotCut::capture(&view)).map_err(storage_error)?;
+        let pin = self.cold.as_ref().map(|r| r.pins.read(cut.meta.last_log_id.map_or(0, |id| id.index)));
         drop(view);
         let meta = cut.meta.clone();
         let file = format!("snapshot-{}", nonce());
@@ -360,7 +441,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         tokio::task::block_in_place(|| self.cleanup_snapshots()).map_err(storage_error)?;
         Ok(Snapshot {
             meta,
-            snapshot: tokio::fs::File::open(target).await.map_err(storage_error)?,
+            snapshot: cold::SnapshotFile { file: tokio::fs::File::open(target).await.map_err(storage_error)?, _pin: pin },
         })
     }
 }
@@ -420,11 +501,13 @@ pub(super) struct SnapshotCut {
     subscriptions: subscriptions::State,
     forks: forks::State,
     receipts: receipts::State,
+    cold: Option<cold::State>,
 }
 
 impl SnapshotCut {
     /// Caller holds the exclusive view. No file path or mutable state is
-    /// consulted after this returns. Cold tier/compaction is disabled here.
+    /// consulted after this returns. Consensus-owned compaction takes the same
+    /// view lock; manifests and compacted file prefixes are captured together.
     pub fn capture(view: &View) -> io::Result<Self> {
         let _probe = timing::SNAPSHOT_CUT.start();
         let mut streams: Vec<_> = view.store.streams.iter().map(|s| s.value().clone()).collect();
@@ -446,6 +529,7 @@ impl SnapshotCut {
             subscriptions: view.subscriptions.clone(),
             forks: view.forks.clone(),
             receipts: view.receipts.clone(),
+            cold: view.cold.clone(),
         })
     }
 
@@ -455,12 +539,18 @@ impl SnapshotCut {
         // recovery cleanup collects leftovers from interrupted copies.
         let control = path.with_extension("control");
         let mut writer = io::BufWriter::new(std::fs::File::create(&control)?);
-        serde_json::to_writer(&mut writer, &(self.subscriptions, self.forks, self.receipts))
-            .map_err(io::Error::other)?;
+        let cold = self.cold.is_some();
+        if let Some(ownership) = self.cold {
+            serde_json::to_writer(&mut writer, &(self.subscriptions, self.forks, self.receipts, ownership))
+                .map_err(io::Error::other)?;
+        } else {
+            serde_json::to_writer(&mut writer, &(self.subscriptions, self.forks, self.receipts))
+                .map_err(io::Error::other)?;
+        }
         writer.flush()?;
         drop(writer);
         let mut out = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(path)?;
-        out.write_all(b"ERSP0007")?;
+        out.write_all(if cold { b"ERSP0008" } else { b"ERSP0007" })?;
         let header = serde_json::to_vec(&(self.meta, self.files.len() + self.metadata.len() + 1, self.time))
             .map_err(io::Error::other)?;
         out.write_all(&(header.len() as u64).to_le_bytes())?;
@@ -489,7 +579,7 @@ fn unpack(
     path: &std::path::Path,
     target: &std::path::Path,
     expected: &SnapshotMeta,
-) -> io::Result<(u64, subscriptions::State, forks::State, receipts::State)> {
+) -> io::Result<(u64, subscriptions::State, forks::State, receipts::State, Option<cold::State>)> {
     let mut input = std::fs::File::open(path)?;
     let len = input.metadata()?.len();
     if !(48..=8 * 1024 * 1024 * 1024).contains(&len) {
@@ -504,7 +594,7 @@ fn unpack(
     input.rewind()?;
     let mut magic = [0; 8];
     input.read_exact(&mut magic)?;
-    if &magic != b"ERSP0007" {
+    if &magic != b"ERSP0007" && &magic != b"ERSP0008" {
         return Err(io::Error::other("snapshot version"));
     }
     let mut length = [0; 8];
@@ -549,6 +639,10 @@ fn unpack(
         return Err(io::Error::other("snapshot trailing bytes"));
     }
     let control = io::BufReader::new(std::fs::File::open(streams.join(".control"))?);
+    if &magic == b"ERSP0008" {
+        let (subscriptions, forks, receipts, cold) = serde_json::from_reader(control).map_err(io::Error::other)?;
+        return Ok((time, subscriptions, forks, receipts, Some(cold)));
+    }
     let (subscriptions, forks, receipts) = serde_json::from_reader(control).map_err(io::Error::other)?;
-    Ok((time, subscriptions, forks, receipts))
+    Ok((time, subscriptions, forks, receipts, None))
 }

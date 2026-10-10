@@ -89,9 +89,9 @@ not a substitute store or a model-only result.
 
 | Order | Acceptance gate | Current state and required evidence |
 | --- | --- | --- |
-| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 144 Rust tests, 332/332 conformance, storage/recovery/snapshot/identity and process fault campaigns. Assignment-time lease rejection retains outstanding receipts/credits. Identity 10 preserves terminal fork fences and original source defaults, rejecting earlier identities before recovery; no rolling upgrade or migration. Performance comparison below blocks promotion. |
+| 1 | Stock OpenRaft 0.10 isolation and lease admission | Local correctness qualification passes: 149 replicated Rust tests and unchanged 332/332 conformance in both hot-only and cold-enabled configurations. Assignment-time lease rejection retains outstanding receipts/credits. Hot identity 10 is preserved; cold identity 11 is isolated, with no rolling upgrade or migration. Performance comparison below blocks production promotion. |
 | 2 | Single-node overhead and replicated sync/async performance | Open: matched hot/many-stream repetitions and 60/60 corrected read/fanout/mixed execution checks are retained below. Coalesced physical GC passes all 12 ninety-second/16-connection cells with zero errors/rejections and exact all-replica drain; one-member/native gap is 1.80–1.84×. Earlier failures remain. Replicated latency/memory, overload envelope and instrumentation overhead still need qualification. Keep commit markers; unsafe recovery-only removal is not a performance candidate. Continue storage lifecycle work without declaring performance acceptance complete. |
-| 3 | Storage lifecycle and bounded metadata | Terminal fork fences and bounded reply/decision retention pass TLA+, native-WAL generated/boundary tests and real-process churn/snapshot/crash histories. Matching-fork retries after parent deletion/outage are fixed and qualified (`fork-fault-020`); the original failure remains. `ColdOwnership` now specifies Begin-ID/certified-inventory GC as well as participant recovery; the earlier one-object pass is not verification of this new algorithm. Filesystem object-key/concurrent-upload/directory-durability fixes pass generated and actual syscall-fault tests (`cold-foundation-001`). Replicated cold remains disabled pending implementation and qualification; high-cardinality, long-duration reclamation and cold-reader/transfer faults remain gates. |
+| 3 | Storage lifecycle and bounded metadata | Terminal fork fences and bounded reply/decision retention pass TLA+, native-WAL generated/boundary tests and real-process histories. Cold publication, pins, participant certificates, recovery and cumulative inventory GC are now implemented and locally qualified against real MinIO (`cold-runtime-012`), not only filesystem fixtures. Cold remains opt-in, loopback qualification-only. Participant revocation, high-cardinality/long-duration throughput, moving SSE pin watermarks and provider/independent-host durability remain gates; see the conditional bounds below. |
 | 4 | Production observability, security and operations | Open: start instrumentation with earlier work; qualify versioned redacted events, W3C/OTel correlation, quorum/admission/receipt/storage/GC metrics, bounded profiling, alerts and telemetry failure/overhead. Transport/admin auth, TLS, tenant/resource isolation, bootstrap/drain/replacement, backup/restore and upgrade/DR paths need actual implementations and fault/property coverage. |
 | 5 | Independent-host acceptance and release | Blocked on separate resource/access approval after no-spend work. Require independent machine/disk failures, volume loss/spares, partition and membership/subscription histories under load. Local shared-host tests do not discharge this gate. Prepare bounded cost, limits and cleanup before paid resources; no use of the PostgreSQL budget. |
 
@@ -105,10 +105,14 @@ deployment is authorized. Independently complete experimental milestones may
 merge with explicit limits; they cannot waive the remaining acceptance gates.
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The candidate's `conformance-033` executes **332/332 passing, zero failures/skips/todo**,
-with subscriptions enabled, three processes and two partitions. All 147 Rust
-tests pass; two unchanged upstream forensic helpers remain ignored, not
-conformance exclusions. `storage-fault-024` checks seven real failing/short
+The current `conformance-035` and `conformance-cold-003` each execute
+**332/332 passing, zero failures/skips/todo**, with subscriptions enabled,
+three processes and two partitions. Cold-enabled conformance records 84
+publications but zero cold HTTP bodies: compatibility, not forced-cold reads.
+All 149 replicated Rust tests pass; three upstream helpers remain ignored
+(two forensic entry points and a standalone S3 fixture), not conformance
+exclusions. Standalone runs 116 tests with two forensic helpers ignored.
+`storage-fault-024` checks seven real failing/short
 syscalls, rejects old data identities without changing stored bytes, and retains
 three unknown HTTP outcomes. `async-fault-015` checks 311
 operations and 40 receipts: 21 committed, one rejected and 18 invalidated, with
@@ -139,7 +143,7 @@ Stock recovery-wait alone is not a safe replacement across conflicting snapshot
 truncation and repeated crashes. No marker-removal or changed restart contract
 is implemented in this checkpoint; [BATCHING.md](BATCHING.md) records the
 source-derived failure sequence and the extra qualification a future candidate
-would need. Native cold ownership/recovery/GC is the next implementation task.
+would need. Native cold ownership/recovery/GC now has the local qualification below.
 Production security/operations and native
 telemetry integration remain queued, beyond the diagnostic instruments below.
 
@@ -179,8 +183,8 @@ operation/reopen/range/reclamation tests and six actual failing PUT/DELETE
 syscalls pass. The full rerun passes 147 replicated and 116 standalone Rust
 tests, 63 TLC mutations plus the Lean negative control, and unchanged 332/332
 conformance. The local fixture uses a fresh layout, not a migration from the old
-ambiguous flat keys. Replicated cold is still disabled: the model is not an
-implemented ownership/GC protocol or independent object-storage qualification.
+ambiguous flat keys. At that milestone replicated cold was still disabled; those
+results alone did not qualify the later ownership/GC runtime.
 
 The formal-first **certified-inventory GC** milestone extends `ColdOwnership.tla`,
 not the native runtime: all six new positive configurations and 20 new negative
@@ -191,15 +195,85 @@ snapshot/purge certificates, storage participants distinct from membership,
 learner registration before transfer and durable full-cluster restart authority.
 Inventory replacement cannot immediately delete the prior root. Repeated finite
 prefix scans collect late PUTs without resetting progress on every replacement.
-[The contract](CONTRACT.md#shared-cold-ownership-contract--modeled-not-yet-implemented)
+[The contract](CONTRACT.md#shared-cold-ownership-contract)
 states the invariants, finite scenario bounds, listing/durability/fairness
 assumptions and unproved implementation gaps. Metadata proportional to current
 live/pending/participant state is the representation goal, not a TLC proof of
 unbounded growth control; indefinitely unreachable participants or delayed PUTs
-preclude an unconditional physical-space bound. No cold Rust behavior changes
-or new performance/conformance claim follow from this model. The next gate is
-native publication/pinning/certificate/recovery implementation plus real-engine
-generated and process/object-fault tests; cold offload remains disabled.
+preclude an unconditional physical-space bound. No runtime or performance claim
+follows from the model alone; the subsequent implementation is qualified below.
+
+## Replicated cold storage has local end-to-end evidence, not absolute proof
+
+`cold-runtime-012` passes **817 recorded events** against a separate unmodified
+MinIO process. All three original replicas have stat-verified zero-length native
+hot files before full restart and remote binary reads. Cold SSE catches up over
+three 64 KiB windows, then delivers a committed append and closure. It checks
+JSON/sub-offset forks, quorum-loss publication fencing, an HTTP reader across
+retirement, actual learner snapshot/suffix replay through remote objects,
+removed-but-undrained restart/rejoin, corrupt/unavailable objects and inventories,
+real snapshot/certificate fsync EIO, unknown DELETE, and late payload PUTs.
+A real multipart inventory completes after its uploader crashes, its Begin is
+aborted and newer inventories activate: stale resume is rejected and repeated
+scanning removes the late object. Provider outage during committed JSON-fork
+apply fail-stops the replica; recovery is checked after the provider returns.
+
+The independent ordered-history checker verifies 28 client reads, one live feed,
+a deduplicated retry, 391 observed payload GETs, 263 DELETEs and 74 inventories.
+Two unknown HTTP outcomes remain unknown. Eight corrupted histories are rejected.
+Twelve retired generations preserve the exact 14-live-descriptor baseline and
+leave no pending Begin; another 160 live
+objects exercise inventories and scanner traversal beyond its 128-key page,
+then return to the prior 28-live-object baseline. The first checker incorrectly
+compared total live segments with the count of retired generations; increasing
+the surviving payload exposed that mistake. Its failure is retained, and the
+corrected check compares exact pre/post live sets and rejects a retained-generation
+mutation. These are finite measurements,
+not a long-duration, unbounded-state or reclamation-rate proof.
+
+The real native-WAL generated property covers JSON/binary forks, snapshot/replay,
+exact inventory cuts and actual hot reclamation in 48 cases. Removing the final
+pin fence or omitting pending records from capture makes it fail; both temporary
+mutations were restored. A second 48-case property found unbounded native inline
+SSE catch-up. Replicated cold now bounds its binary/text windows at 64 KiB and
+grows JSON windows only to a complete value, capped at 8 MiB, without splitting
+UTF-8 or advertising an unconsumed offset. The failing original and a separate
+test-journal reopen-size error are retained alongside the final passing run.
+The final Rust runs pass 149 replicated and 116 standalone tests. A disk-full
+standalone attempt is retained separately, not counted as a pass. The unchanged
+cold TLA models were rerun: eight positive
+safety/liveness configurations and all 20 inventory/recovery negative controls.
+Lean still proves only the existing deterministic contracts, not cold Rust.
+The final release SHA-256 is
+`bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878`;
+[the qualification manifest](evidence/cold-runtime-tests-001/qualification.json)
+cross-checks 280 engine/retained-vendor/Cargo manifest and lockfile input hashes,
+both suite runs, the cold campaign, model files, driver/checker and retained logs.
+The active OpenRaft 0.10 registry dependency sources are not included in those
+280 hashes; Cargo.lock pins their registry checksums.
+
+Reproduce after installing the pinned conformance package above, building MinIO
+from `minio/minio` commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` to
+`.tmp/electric-tools/minio`, and creating a Python venv at
+`.tmp/electric-tools/cold-venv` with `boto3==1.35.99` and `botocore==1.35.99`:
+
+```sh
+cargo test --locked --manifest-path experiments/electric-replication/engine/Cargo.toml --features replication,tier
+cargo build --locked --release --manifest-path experiments/electric-replication/engine/Cargo.toml --features replication,tier
+.tmp/electric-tools/cold-venv/bin/python experiments/electric-replication/scripts/cold_faults.py experiments/electric-replication/evidence/cold-new
+python3 experiments/electric-replication/scripts/check_cold.py experiments/electric-replication/evidence/cold-new
+.tmp/electric-tools/cold-venv/bin/python experiments/electric-replication/scripts/conformance.py experiments/electric-replication/evidence/conformance-cold-new 2 cold
+```
+
+Every run uses fresh fixture credentials and source/binary/config hashes; raw
+stores and provider diagnostics remain private. [The correspondence table and
+assumptions](CONTRACT.md#native-implementation-and-correspondence) link modeled
+actions to actual code and tests. Long-lived SSE holds its original pin until
+disconnect, and unreachable participants deliberately block GC. Incomplete
+multipart uploads need a provider lifecycle policy; no automatic revocation or
+arbitrary bucket lifecycle is safe. The proof/implementation gap, provider
+honesty, separate-disk/power-loss behavior, production auth/TLS/observability and
+cold performance remain explicit. No paid resources or main merge were used.
 
 The latest hot-stream matrix (`openraft010-async-002`, zero warmup) measures
 **51.8–61.2k/s one member versus 87.4–102.3k/s native**, a paired **1.67–1.74×**

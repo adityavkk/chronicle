@@ -186,6 +186,9 @@ pub enum TierKind {
 #[derive(Clone, Debug)]
 pub struct TierConfig {
     pub kind: TierKind,
+    /// Replicated mode owns publication/retirement in consensus. Native read
+    /// resolution and compaction still apply; standalone offload/GC must not.
+    pub consensus_managed: bool,
     pub segment_bytes: u64,
     /// Live-file compaction threshold: once a stream's reclaimable sealed prefix
     /// (`sealed_offset − file_base`) reaches this many bytes, the live data file
@@ -209,6 +212,7 @@ impl Default for TierConfig {
     fn default() -> Self {
         TierConfig {
             kind: TierKind::Off,
+            consensus_managed: false,
             segment_bytes: DEFAULT_SEGMENT_BYTES,
             compact_bytes: DEFAULT_COMPACT_BYTES,
             key_prefix: String::new(),
@@ -319,7 +323,7 @@ impl Store {
     /// still Local while a remote tier is configured) and log hard errors for
     /// Remote segments whose object has gone missing.
     pub(crate) fn reconcile_manifest_on_boot(&self, st: &Arc<StreamState>) {
-        if !self.tier_config.enabled() {
+        if !self.tier_config.enabled() || self.tier_config.consensus_managed {
             return;
         }
         let has_local = {
@@ -350,7 +354,7 @@ impl Store {
     /// `seal_loop`). Runs after an append's durability ack — never on the ack path
     /// itself. No-op when tiering is off.
     pub async fn maybe_seal(self: &Arc<Self>, st: &Arc<StreamState>) {
-        if !self.tier_config.enabled() {
+        if !self.tier_config.enabled() || self.tier_config.consensus_managed {
             return;
         }
         // Only one sealing pass per stream at a time, and never after a hard
@@ -387,7 +391,7 @@ impl Store {
     /// the configured `compact_bytes`, rewrite the live data file to drop it.
     /// Called inside the seal guard, so it is mutually exclusive with sealing.
     /// No-op when `compact_bytes == 0` or nothing is reclaimable.
-    async fn maybe_compact(self: &Arc<Self>, st: &Arc<StreamState>) -> std::io::Result<()> {
+    pub(crate) async fn maybe_compact(self: &Arc<Self>, st: &Arc<StreamState>) -> std::io::Result<()> {
         let threshold = self.tier_config.compact_bytes;
         if threshold == 0 {
             return Ok(());
@@ -431,10 +435,15 @@ impl Store {
             tokio::task::spawn_blocking(move || -> std::io::Result<()> {
                 use std::io::Write;
                 use std::os::unix::fs::FileExt;
-                let mut buf = vec![0u8; residual as usize];
-                of.read_exact_at(&mut buf, read_from)?;
+                let mut buf = [0u8; 64 * 1024];
                 let mut f = std::fs::File::create(&tp)?;
-                f.write_all(&buf)?;
+                let mut copied = 0;
+                while copied < residual {
+                    let n = (residual - copied).min(buf.len() as u64) as usize;
+                    of.read_exact_at(&mut buf[..n], read_from + copied)?;
+                    f.write_all(&buf[..n])?;
+                    copied += n as u64;
+                }
                 f.sync_all()?;
                 crate::store::fsync_parent_dir(&tp)
             })
@@ -689,7 +698,7 @@ impl Store {
     /// Delete every remote object backing a hard-deleted stream's sealed
     /// segments. Called only on hard delete (ref_count == 0).
     pub fn gc_remote_segments(&self, st: &Arc<StreamState>) {
-        if !self.tier_config.enabled() {
+        if !self.tier_config.enabled() || self.tier_config.consensus_managed {
             return;
         }
         // Mark the stream deleted FIRST (synchronously, before serving stops

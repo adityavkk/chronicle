@@ -1,0 +1,29 @@
+{
+  "verdict": "PASS",
+  "reads": 25,
+  "retries": 1,
+  "unknown_http_outcomes": 2,
+  "observed_object_gets": 271,
+  "observed_deletes": 243,
+  "observed_inventories": 64,
+  "state_observations": 128,
+  "negative_controls": [
+    {
+      "mutation": "wrong-read-prefix",
+      "detected": "read differs from committed client prefix (including fork/retry semantics)"
+    },
+    {
+      "mutation": "lost-participant",
+      "detected": "membership forgot a storage participant"
+    },
+    {
+      "mutation": "inventory-corruption",
+      "detected": "inventory evidence checksum mismatch"
+    },
+    {
+      "mutation": "delete-held-reader",
+      "detected": "premature deletion in protected interval"
+    }
+  ],
+  "checker_sha256": "76b791016d9ab2ccdf20ff1bb357e8c4d079ec45ca64fdd8b84d53f182a0ca39"
+}

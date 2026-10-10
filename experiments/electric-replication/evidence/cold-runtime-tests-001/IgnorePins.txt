@@ -1,0 +1,59 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1865:1
+     |
+1865 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: method `blocks` is never used
+   --> src/replication/cold.rs:287:12
+    |
+279 | impl Pins {
+    | --------- method in this implementation
+...
+287 |     pub fn blocks(&self, cut: u64) -> bool {
+    |            ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.62s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-485865a18929f236)
+
+running 1 test
+test replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement ... FAILED
+
+failures:
+
+---- replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement stdout ----
+
+thread 'replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement' (3822200) panicked at src/replication/journal.rs:730:21:
+old reader/transfer must fence certification
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement' (3822200) panicked at src/replication/journal.rs:620:5:
+Test failed: old reader/transfer must fence certification.
+minimal failing input: sizes = [
+    2576,
+    2122,
+    2706,
+], json = false, replay_fork = false
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+
+failures:
+    replication::journal::tests::cold_native_replay_cuts_readers_transfers_and_irreversible_retirement
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

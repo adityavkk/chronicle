@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/check_cold.py", line 232, in <module>
+    main(sys.argv[1])
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/check_cold.py", line 191, in main
+    result = check(history,objects)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/check_cold.py", line 158, in check
+    assert generations["generations"] >= 12 and generations["state"]["live_objects"] < generations["generations"], \
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: retired generations accumulated as live metadata
