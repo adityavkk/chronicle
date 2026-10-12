@@ -1,0 +1,22 @@
+[
+  "sudo",
+  "-n",
+  "perf",
+  "record",
+  "--clockid",
+  "mono",
+  "--max-size",
+  "128M",
+  "-e",
+  "raw_syscalls:sys_enter",
+  "--filter",
+  "id == 74 || id == 75",
+  "-e",
+  "raw_syscalls:sys_exit",
+  "--filter",
+  "id == 74 || id == 75",
+  "-o",
+  "/home/user/workspace/repo/.tmp/electric-profiles/cold-profile-kernel-001-hot-write-quorum3-hot-r1.kernel.perf.data",
+  "-p",
+  "1329616,1329640,1329680,1328827,1329173,1329377,1329525"
+]

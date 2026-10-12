@@ -1,0 +1,126 @@
+"""Close the already scanned publication range against the staged bytes."""
+import base64
+import collections
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path
+import re
+import subprocess
+import tarfile
+
+ROOT = Path('/home/user/workspace/repo')
+EXP = 'experiments/electric-replication/'
+AUDIT = ROOT / '.tmp/cold-publication-005'
+EVIDENCE = ROOT / EXP / 'evidence/cold-publication-005'
+OUT = ROOT / '.tmp/cold-publication-closure-002'
+OUT.mkdir(exist_ok=False)
+(OUT / 'decoded').mkdir()
+
+def git(*args):
+    return subprocess.check_output(['/usr/bin/git', *args], cwd=ROOT)
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+assert git('rev-parse', 'HEAD').decode().strip() == 'a75aa98c59c27aa4cf8f7df3ade56986665d55e5'
+assert git('rev-parse', 'origin/experiment/electric-replication').decode().strip() == 'de52d72bff77fd4bab736516a03644a77755c2ca'
+assert not git('diff', '--name-only'), 'Unstaged drift'
+assert not git('ls-files', '--others', '--exclude-standard', EXP), 'Unstaged additions'
+names = git('diff', '--cached', '--name-only', '-z').decode().split('\0')[:-1]
+assert names and all(name.startswith(EXP) for name in names)
+staged = {}
+for line in git('ls-files', '--stage', '-z').decode().split('\0')[:-1]:
+    info, path = line.split('\t')
+    mode, oid, stage = info.split()
+    assert stage == '0'
+    staged[path] = mode, oid
+
+rows = json.loads((AUDIT / 'map.json').read_text())
+reviewed = {row['path']: row['decoded_sha256'] for row in rows if row['origin'] == 'working tree'}
+keys = set()
+for directory in (ROOT / '.tmp/electric-labs').glob('subscription-fault-*'):
+    for wal in directory.glob('[123]/[01]/wal/*.wal'):
+        for match in re.finditer(rb'\{"Keys":\{"signing":\[[0-9,]+\],"token":\[[0-9,]+\]\}\}', wal.read_bytes()):
+            pair = json.loads(match[0])['Keys']
+            keys.update(bytes(pair[k]) for k in ('signing', 'token'))
+assert len(keys) == 68
+needles = set()
+for key in keys:
+    forms = {key, key.hex().encode(), key.hex().upper().encode(), base64.b64encode(key),
+             base64.urlsafe_b64encode(key), base64.b64encode(key).rstrip(b'='),
+             base64.urlsafe_b64encode(key).rstrip(b'='), json.dumps(list(key)).encode(),
+             json.dumps(list(key), separators=(',', ':')).encode()}
+    for form in list(forms):
+        if form.startswith(b'['):
+            forms.add(json.dumps(list(form)).encode())
+            forms.add(json.dumps(list(form), separators=(',', ':')).encode())
+    needles.update(forms)
+private = re.compile(rb'https?://[^\s<>"()]*?(?:gecgithub01|walmart\.(?:com|net)|wal-mart\.com|homeoffice|wmlink)|\.iam\.gserviceaccount\.com|workloadIdentityPools/[A-Za-z0-9_-]+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|fixture-[0-9a-f]{16}', re.I)
+bearer = re.compile(rb'Bearer\s+[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}(?:\.[A-Za-z0-9_-]+)?', re.I)
+extra = []
+matched = 0
+total = 0
+maximum = 0
+for path in names:
+    file = ROOT / path
+    assert file.is_file() and not file.is_symlink(), path
+    data = file.read_bytes()
+    mode, oid = staged[path]
+    assert mode in ('100644', '100755')
+    assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == oid, ('index drift', path)
+    assert len(data) < 50 * 1024 ** 2, ('large file', path)
+    total += len(data)
+    maximum = max(maximum, len(data))
+    if path.endswith('.gz'):
+        data = gzip.decompress(data)
+    elif path.endswith('.zst'):
+        data = subprocess.check_output(['zstd', '-dq', '-c'], input=data)
+    if path.endswith('.tar.gz'):
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for member in archive:
+                assert member.isfile() and '/' not in member.name
+                assert digest(archive.extractfile(member).read()) == reviewed[path + '::' + member.name]
+        matched += 1
+    elif digest(data) == reviewed.get(path):
+        matched += 1
+    else:
+        # Only audit reports and the previously inspected acceptance ledger
+        # changed after the original whole-range scan. No runtime drift allowed.
+        assert path.startswith(EXP + 'evidence/cold-publication-005/') or path == EXP + 'README.md', ('unreviewed drift', path)
+        assert not private.search(data), ('private pattern', path)
+        assert not bearer.search(data), ('new token', path)
+        assert not any(needle in data for needle in needles), ('retired key encoding', path)
+        data.decode()
+        (OUT / 'decoded' / (digest(data) + '.txt')).write_bytes(data)
+        extra.append(dict(path=path, sha256=digest(data), decoded_bytes=len(data)))
+
+warnings = collections.Counter()
+for line in (AUDIT / 'staged-whitespace.txt').read_text().splitlines():
+    if match := re.fullmatch(r'(.+?):\d+: (?:trailing whitespace\.|new blank line at EOF\.)', line):
+        path = match[1]
+        assert path.startswith(EXP + 'evidence/')
+        assert path.endswith('/cpu-profile.txt') or path in {
+            EXP + 'evidence/cold-work-build-001/test.txt',
+            EXP + 'evidence/cold-work-build-002/tests.txt',
+            EXP + 'evidence/cold-work-implementation-mutation-001/mutation.patch',
+        }, ('unreviewed whitespace', path)
+        warnings[path] += 1
+assert len(warnings) == 13 and sum(warnings.values()) == 550
+full_check = subprocess.run(['/usr/bin/git', 'diff', '--cached', '--check'], cwd=ROOT, capture_output=True, text=True)
+assert full_check.returncode == 2
+assert full_check.stdout == (AUDIT / 'staged-whitespace.txt').read_text()
+source_check = subprocess.run(['/usr/bin/git', 'diff', '--cached', '--check', '--', EXP, ':!' + EXP + 'evidence'], cwd=ROOT, capture_output=True, text=True)
+assert source_check.returncode == 0, source_check.stdout + source_check.stderr
+result = dict(verdict='PASS_STAGED_BYTE_CLOSURE', staged_files=len(names),
+              unchanged_audited_files=matched, separately_scanned_documents=extra,
+              staged_stored_bytes=total, largest_stored_bytes=maximum,
+              tree_before_closure_report=git('write-tree').decode().strip(),
+              retired_keys_checked=len(keys), private_key_matches=0,
+              source_whitespace_exit=source_check.returncode,
+              full_staged_whitespace_exit=full_check.returncode, raw_whitespace_warnings=dict(warnings),
+              whitespace_decision='Preserve original perf/build/patch bytes; this does not make the full staged whitespace check pass.')
+(OUT / 'closure.json').write_text(json.dumps(result, indent=2) + '\n')
+print(json.dumps({k: v for k, v in result.items() if k not in ('separately_scanned_documents', 'raw_whitespace_warnings')}, indent=2))
+print('Additional documents for scanner:', len(extra))

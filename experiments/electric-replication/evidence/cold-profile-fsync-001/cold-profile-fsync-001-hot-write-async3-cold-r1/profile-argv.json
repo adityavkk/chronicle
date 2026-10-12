@@ -1,0 +1,13 @@
+[
+  "strace",
+  "-f",
+  "-qq",
+  "-ttt",
+  "-T",
+  "-e",
+  "trace=fsync,fdatasync",
+  "-o",
+  "/home/user/workspace/repo/experiments/electric-replication/evidence/cold-profile-fsync-001/cold-profile-fsync-001-hot-write-async3-cold-r1/fsync-trace.log",
+  "-p",
+  "1461249,1461454,1461658,1460988,1461049,1461141,1461172"
+]

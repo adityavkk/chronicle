@@ -1,0 +1,55 @@
+"""Explain, never relabel, the retained observation/preflight failures."""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+
+from benchmark_summary import check_clock
+from cold_benchmark_check import read_lines, read_object_events
+from cold_generations_check import validate
+from lab import EXPERIMENT
+
+
+output = EXPERIMENT/"evidence/cold-work-harness-repair-001"
+shutil.copyfile(__file__, output/"diagnose.py.txt")
+campaign = EXPERIMENT/"evidence/cold-work-generations-001"
+failures = {}
+for name in ("baseline-async3-r2", "candidate-quorum3-r2"):
+    path = campaign/(campaign.name+"-"+name)
+    result = json.loads((path/"result.json").read_text())
+    samples, events = read_lines(path/"samples.jsonl.gz"), read_object_events(path)
+    checked = validate(result, read_lines(path/"history.jsonl.gz"), events, samples)
+    assert checked == result["check"] and checked["verdict"] == "FAIL"
+    row = dict(check=checked, clock=check_clock(samples), late_completed_deletes=[])
+    for cycle in result["cycles"]:
+        keys = {"/"+result["object_bucket"]+"/"+key for key in cycle["precondition"]["listing_keys"]}
+        deletes = [e for e in events if e.get("op") == "s3" and e["method"] == "DELETE"
+                   and e["status"] == 204 and e["path"] in keys]
+        missing = keys-{e["path"] for e in deletes if cycle["delete_start_ns"] <= e["time_ns"] <= cycle["collected_ns"]}
+        for key in missing:
+            late = [e for e in deletes if e["path"] == key and e["time_ns"] > cycle["collected_ns"]]
+            assert len(late) == 1
+            event = late[0]
+            row["late_completed_deletes"].append(dict(generation=cycle["generation"],
+                key_sha256=hashlib.sha256(key.encode()).hexdigest(),
+                start_minus_collection_ns=event["start_ns"]-cycle["collected_ns"],
+                completion_minus_collection_ns=event["time_ns"]-cycle["collected_ns"]))
+    assert not result.get("writer_error") and not result.get("sampling_error")
+    failures[name] = row
+
+preflight = []
+for name in ("cold-work-native-001", "cold-work-large-001", "cold-work-large-native-001", "cold-work-profile-fsync-002"):
+    for cell in json.loads((EXPERIMENT/"evidence"/name/"ledger.json").read_text()):
+        if cell["verdict"] == "PASS":
+            continue
+        result = json.loads((EXPERIMENT/"evidence"/name/cell["cell"]/"result.json").read_text())
+        assert result["error"] == "AssertionError('8 GiB preflight failed; no SUT started')"
+        assert "startup_resources" not in result and "client_window" not in result
+        preflight.append(dict(cell=cell["cell"], verdict="FAIL_BEFORE_START", free_bytes=result["disk_free_before"]))
+assert len(preflight) == 16
+report = dict(retained_failures=failures, retained_preflight_only=preflight,
+    repair="Wait for both object absence and completed DELETE observations; final validation still rejects missing/late completions. The clock guard and disk guard are unchanged.",
+    cleanup="Only the hash-verified disposable scanner projection from cold-bench-audit-002 was reclaimed (986924966 bytes); map and original evidence, including failed stores, remain.")
+(output/"diagnosis.json").write_text(json.dumps(report, indent=2)+"\n")
+print(json.dumps(dict(retained_generation_failures=len(failures),retained_preflight_failures=len(preflight),
+                     late_deletes=failures["candidate-quorum3-r2"]["late_completed_deletes"]),indent=2))

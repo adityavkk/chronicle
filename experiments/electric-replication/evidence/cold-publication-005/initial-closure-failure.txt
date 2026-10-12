@@ -1,0 +1,12 @@
+The fail-fast shell stopped with exit 1 before Gitleaks or publication.
+python3 .tmp/cold-publication-closure.py
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/.tmp/cold-publication-closure.py", line 110, in <module>
+    assert len(warnings) == 13 and sum(warnings.values()) == 650
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+Independent recount: 550 warnings across 13 original artifact files.
+The expected total was arithmetic error, not source drift. Original artifact
+bytes and the full raw whitespace report were preserved; source/doc whitespace
+is checked separately. No commit or push ran in this failed shell.

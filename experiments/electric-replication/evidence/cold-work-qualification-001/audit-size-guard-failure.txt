@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/.tmp/cold-work-audit.py", line 110, in <module>
+    text=raw(path).decode()
+         ^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/cold-work-audit.py", line 86, in raw
+    assert len(data)<50*1024**2,(path,'large stored file')
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('experiments/electric-replication/evidence/cold-work-sustained-many-001/cold-work-sustained-many-001-candidate-many-write-async3-cold-r1/objects-1.jsonl.gz', 'large stored file')

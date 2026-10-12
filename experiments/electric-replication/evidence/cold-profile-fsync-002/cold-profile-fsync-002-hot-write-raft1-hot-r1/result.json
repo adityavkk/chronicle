@@ -1,0 +1,900 @@
+{
+  "version": 1,
+  "arm": "raft1",
+  "cold": false,
+  "workload": "hot-write",
+  "repetition": 1,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 65536,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 12,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "fsync",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 16984510464,
+  "startup_seconds": 2.2372451039846055,
+  "roles": {
+    "sut": [
+      1465617
+    ],
+    "provider": [
+      1465576,
+      1465599
+    ],
+    "client": [
+      1465643
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791623198417,
+    "monotonic_ns": 146829552531848,
+    "processes": {
+      "1465617": {
+        "cpu_ticks": 4,
+        "rss_pages": 8537,
+        "io": {
+          "rchar": 17721943,
+          "wchar": 1266,
+          "syscr": 1000,
+          "syscw": 51,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1465576": {
+        "cpu_ticks": 57,
+        "rss_pages": 27140,
+        "io": {
+          "rchar": 161259701,
+          "wchar": 14775,
+          "syscr": 5489,
+          "syscw": 22,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1465599": {
+        "cpu_ticks": 24,
+        "rss_pages": 11419,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:54628",
+        "owners": [
+          1465576
+        ],
+        "counters": {
+          "bytes_sent": 1227,
+          "bytes_acked": 1227,
+          "bytes_received": 1371
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "precondition": {
+    "time_ns": 146829635960335,
+    "remote_keys": [],
+    "local_payload_bytes": 65536,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 65536,
+        "file_base": 0,
+        "segments": []
+      }
+    ]
+  },
+  "client_object_keys": [],
+  "before_client": {
+    "time_ns": 146829636655417,
+    "free_bytes": 16965464064,
+    "storage": {
+      "1": {
+        "logical": 18944779,
+        "allocated": 18979328,
+        "files": 26,
+        "payload": 2162694,
+        "segments": 0,
+        "metadata": 4803
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 19,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198205786493,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198205786501
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 19
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 15,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198308433964,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198308433982
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 15
+            }
+          }
+        }
+      }
+    }
+  },
+  "profiler_version": "strace -- version 6.1\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers",
+  "client_window": {
+    "start_ns": 146829946235529,
+    "start_unix_ms": 1791623198810,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 146841989794498,
+    "end_unix_ms": 1791623210854
+  },
+  "gc_delete_window": {
+    "start_ns": 146830948174119,
+    "start_unix_ms": 1791623199812,
+    "end_ns": 146831001744851
+  },
+  "client_exit_code": 0,
+  "fsync": {
+    "started": 7625,
+    "completed": 7625,
+    "incomplete_by_tid": {},
+    "resumed_without_start": 0,
+    "errors": {},
+    "successful": {
+      "count": 7625,
+      "total_us": 3585572,
+      "mean_us": 470.23895081967214,
+      "p50_us": 294,
+      "p99_us": 1234,
+      "max_us": 4070,
+      "at_least_100ms": 0
+    },
+    "scope": "All traced filesystem fsync/fdatasync calls, including setup and drain. Elapsed syscall time includes ptrace perturbation and OS scheduling, not pure device latency. Failed and unfinished calls are not successful durability; not an unperturbed capacity result."
+  },
+  "after_client": {
+    "time_ns": 146842013853685,
+    "free_bytes": 16951521280,
+    "storage": {
+      "1": {
+        "logical": 32325032,
+        "allocated": 32336384,
+        "files": 11,
+        "payload": 7161350,
+        "segments": 0,
+        "metadata": 531
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 3826,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198205786484,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198205786513
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 3826
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 19,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198308433971,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198308433984
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 19
+            }
+          }
+        }
+      }
+    }
+  },
+  "target_bytes": 7161344,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 7161344,
+      "offsets": [
+        7161344
+      ]
+    }
+  ],
+  "drain_seconds": 0.0009058089926838875,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 7161344,
+      "sha256": "c7c62eb302f40b387ae8ffee26cd523bd1c27d80ee5f7a4a782451b4113880eb",
+      "expected_sha256": "c7c62eb302f40b387ae8ffee26cd523bd1c27d80ee5f7a4a782451b4113880eb",
+      "offset": 7161344
+    }
+  ],
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 12,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {},
+      "statuses": {},
+      "request_body_bytes": 0,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 146842055022792,
+    "free_bytes": 16951521280,
+    "storage": {
+      "1": {
+        "logical": 32325032,
+        "allocated": 32336384,
+        "files": 11,
+        "payload": 7161350,
+        "segments": 0,
+        "metadata": 531
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 3826,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 3826
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198205786481,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198205786513
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 3826
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 19,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 19
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791623198308433968,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791623198308433983
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 19
+            }
+          }
+        }
+      }
+    }
+  },
+  "data_files": {
+    "cb-07d2f535be5bdd36-s3-1.log": 0,
+    "object-fault-1.json": 43,
+    "cb-07d2f535be5bdd36-minio.log": 438,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/pool.bin/xl.meta": 573,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "1/IDENTITY": 66,
+    "1/LOCK": 0,
+    "1/0/wal/4720.wal": 8388608,
+    "1/0/wal/1.wal": 8385869,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2": 7161344,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2.meta": 531,
+    "1/0/state/hot/streams/.lane": 1,
+    "1/0/state/hot/streams/.lanes": 2,
+    "1/1/wal/1.wal": 8388608,
+    "1/1/state/hot/streams/.lane": 1,
+    "1/1/state/hot/streams/.lanes": 2
+  }
+}

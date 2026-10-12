@@ -1,0 +1,1100 @@
+{
+  "cells": [
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-cold-r1",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 97583,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 4065.9583333333335,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 97583,
+        "mean_ms": 0.9804078989168188,
+        "p50_ms": 0.735,
+        "p90_ms": 1.655,
+        "p99_ms": 6.283,
+        "p999_ms": 11.647,
+        "max_ms": 56.895
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "PUT": 381,
+          "HEAD": 381,
+          "DELETE": 32
+        },
+        "statuses": {
+          "200": 762,
+          "204": 32
+        },
+        "request_body_bytes": 24969216,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.83758311,
+          "cpu_cores": 0.5117968522103246,
+          "peak_rss_bytes": 9285632,
+          "io_delta": {
+            "rchar": 31127000,
+            "wchar": 153203904,
+            "syscr": 901,
+            "syscw": 240751,
+            "read_bytes": 0,
+            "write_bytes": 342671360,
+            "cancelled_write_bytes": 25853952
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.83758311,
+          "cpu_cores": 0.12417366250348859,
+          "peak_rss_bytes": 310001664,
+          "io_delta": {
+            "rchar": 46663665,
+            "wchar": 26915577,
+            "syscr": 10568,
+            "syscw": 2226,
+            "read_bytes": 0,
+            "write_bytes": 26726400,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.816104414,
+          "cpu_cores": 0.3707907294993325,
+          "peak_rss_bytes": 6254592,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 36284912,
+            "syscr": 0,
+            "syscw": 92814,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.1773807760037016,
+        "startup_rss_bytes": {
+          "sut": 5238784,
+          "provider": 157802496
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 363,
+        "peak_object_bytes": 23789568,
+        "peak_local_allocated_bytes": 25370112,
+        "peak_local_metadata_bytes": 69790,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 381,
+        "payload_upload_bytes_in_window": 24969216,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 1.062829784,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.002272273995913565,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 170003015398157,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 170027051367866,
+        "storage": {
+          "1": {
+            "logical": 16845962,
+            "allocated": 16850432,
+            "files": 11,
+            "payload": 12035,
+            "segments": 0,
+            "metadata": 56485
+          }
+        },
+        "object_store": {
+          "count": 382,
+          "bytes": 25034752
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 5705.303245358565
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 12035
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 1039216.5691772859,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9666486272,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-cold-r2",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 102260,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 4260.833333333333,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 102260,
+        "mean_ms": 0.9357229219636212,
+        "p50_ms": 0.643,
+        "p90_ms": 1.531,
+        "p99_ms": 6.419,
+        "p999_ms": 13.863,
+        "max_ms": 88.959
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "PUT": 399,
+          "HEAD": 399,
+          "DELETE": 32
+        },
+        "statuses": {
+          "200": 798,
+          "204": 32
+        },
+        "request_body_bytes": 26148864,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.92492117,
+          "cpu_cores": 0.48234223711759877,
+          "peak_rss_bytes": 9506816,
+          "io_delta": {
+            "rchar": 32934614,
+            "wchar": 163037066,
+            "syscr": 938,
+            "syscw": 252859,
+            "read_bytes": 0,
+            "write_bytes": 361619456,
+            "cancelled_write_bytes": 27078656
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.92492117,
+          "cpu_cores": 0.12622821110009952,
+          "peak_rss_bytes": 333910016,
+          "io_delta": {
+            "rchar": 48701575,
+            "wchar": 28187561,
+            "syscr": 11030,
+            "syscw": 2336,
+            "read_bytes": 0,
+            "write_bytes": 27983872,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.909077214,
+          "cpu_cores": 0.3553176727269291,
+          "peak_rss_bytes": 6471680,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 38572422,
+            "syscr": 0,
+            "syscw": 98684,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.292386760993395,
+        "startup_rss_bytes": {
+          "sut": 5316608,
+          "provider": 156286976
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 379,
+        "peak_object_bytes": 24838144,
+        "peak_local_allocated_bytes": 25337344,
+        "peak_local_metadata_bytes": 117754,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 399,
+        "payload_upload_bytes_in_window": 26148864,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 0.108615776,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.001140431995736435,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 170032174515972,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 170056227393103,
+        "storage": {
+          "1": {
+            "logical": 16866272,
+            "allocated": 16875008,
+            "files": 11,
+            "payload": 29699,
+            "segments": 0,
+            "metadata": 59131
+          }
+        },
+        "object_store": {
+          "count": 400,
+          "bytes": 26214400
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 2820.0479247963794
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 29699
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 1087578.0066689327,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9163776000,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-cold-r3",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 3,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 81376,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 3390.6666666666665,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 81376,
+        "mean_ms": 1.17634588822257,
+        "p50_ms": 0.847,
+        "p90_ms": 2.034,
+        "p99_ms": 7.691,
+        "p999_ms": 12.791,
+        "max_ms": 55.999
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "PUT": 317,
+          "HEAD": 317,
+          "DELETE": 32
+        },
+        "statuses": {
+          "200": 634,
+          "204": 32
+        },
+        "request_body_bytes": 20774912,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.873117179,
+          "cpu_cores": 0.45658050929302985,
+          "peak_rss_bytes": 9113600,
+          "io_delta": {
+            "rchar": 25882581,
+            "wchar": 121578530,
+            "syscr": 774,
+            "syscw": 200784,
+            "read_bytes": 0,
+            "write_bytes": 274673664,
+            "cancelled_write_bytes": 21680128
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.873117179,
+          "cpu_cores": 0.11435456792385058,
+          "peak_rss_bytes": 290000896,
+          "io_delta": {
+            "rchar": 38698857,
+            "wchar": 22344653,
+            "syscr": 8826,
+            "syscw": 1913,
+            "read_bytes": 0,
+            "write_bytes": 22204416,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.851063263,
+          "cpu_cores": 0.30283054754851296,
+          "peak_rss_bytes": 6529024,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 30399014,
+            "syscr": 0,
+            "syscw": 77787,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.609402558999136,
+        "startup_rss_bytes": {
+          "sut": 5615616,
+          "provider": 154038272
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 303,
+        "peak_object_bytes": 19857408,
+        "peak_local_allocated_bytes": 25271808,
+        "peak_local_metadata_bytes": 44872,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 317,
+        "payload_upload_bytes_in_window": 20774912,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 1.062889065,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.0026604529994074255,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 170117888323775,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 170141945520084,
+        "storage": {
+          "1": {
+            "logical": 16881866,
+            "allocated": 16887296,
+            "files": 11,
+            "payload": 57347,
+            "segments": 0,
+            "metadata": 47077
+          }
+        },
+        "object_store": {
+          "count": 318,
+          "bytes": 20840448
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": -300.7565390133879
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 57347
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 864037.2683561582,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9906827264,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-hot-r1",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 103329,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 4305.375,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 103329,
+        "mean_ms": 0.9259678889759858,
+        "p50_ms": 0.727,
+        "p90_ms": 1.668,
+        "p99_ms": 3.447,
+        "p999_ms": 7.947,
+        "max_ms": 14.871
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.255074368,
+          "cpu_cores": 0.4648447830756041,
+          "peak_rss_bytes": 6209536,
+          "io_delta": {
+            "rchar": 7811,
+            "wchar": 55768754,
+            "syscr": 138,
+            "syscw": 243167,
+            "read_bytes": 0,
+            "write_bytes": 268009472,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.255074368,
+          "cpu_cores": 0.0012900410261117597,
+          "peak_rss_bytes": 159764480,
+          "io_delta": {
+            "rchar": 16512,
+            "wchar": 17501,
+            "syscr": 86,
+            "syscw": 40,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.243917991,
+          "cpu_cores": 0.3560523826425035,
+          "peak_rss_bytes": 6561792,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 37316163,
+            "syscr": 0,
+            "syscw": 95474,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.1612181910022628,
+        "startup_rss_bytes": {
+          "sut": 3952640,
+          "provider": 157691904
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 41451008,
+        "peak_local_metadata_bytes": 4398,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.0020114209910389036,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 169974971481263,
+        "local_payload_bytes": 65536,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 169999035881878,
+        "storage": {
+          "1": {
+            "logical": 43295692,
+            "allocated": 43310592,
+            "files": 11,
+            "payload": 26517763,
+            "segments": 0,
+            "metadata": 486
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 1086254.363132026
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 26517763
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9183490048,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-hot-r2",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 129917,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 5413.208333333333,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 129917,
+        "mean_ms": 0.7359108738656239,
+        "p50_ms": 0.572,
+        "p90_ms": 1.292,
+        "p99_ms": 2.515,
+        "p999_ms": 5.695,
+        "max_ms": 20.079
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.278711191,
+          "cpu_cores": 0.5296684983474093,
+          "peak_rss_bytes": 6352896,
+          "io_delta": {
+            "rchar": 7801,
+            "wchar": 69422016,
+            "syscr": 138,
+            "syscw": 302247,
+            "read_bytes": 0,
+            "write_bytes": 349687808,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.278711191,
+          "cpu_cores": 0.0017183081860418792,
+          "peak_rss_bytes": 159813632,
+          "io_delta": {
+            "rchar": 16528,
+            "wchar": 17517,
+            "syscr": 88,
+            "syscw": 42,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.259233585,
+          "cpu_cores": 0.42858618485538474,
+          "peak_rss_bytes": 6574080,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 47451370,
+            "syscr": 0,
+            "syscw": 121407,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.228490449982928,
+        "startup_rss_bytes": {
+          "sut": 1601536,
+          "provider": 157343744
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 55868928,
+        "peak_local_metadata_bytes": 4398,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.0011213959951419383,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 170061104728522,
+        "local_payload_bytes": 65536,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 170085141983580,
+        "storage": {
+          "1": {
+            "logical": 50102220,
+            "allocated": 50114048,
+            "files": 11,
+            "payload": 33324291,
+            "segments": 0,
+            "metadata": 486
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 1529750.454463806
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 33324291
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9748213760,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-002-baseline-hot-write-native-hot-r3",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 3,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 88292,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 3678.8333333333335,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 88292,
+        "mean_ms": 1.0837184569383367,
+        "p50_ms": 0.902,
+        "p90_ms": 1.947,
+        "p99_ms": 3.247,
+        "p999_ms": 7.323,
+        "max_ms": 18.591
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.302174712,
+          "cpu_cores": 0.4879372908548639,
+          "peak_rss_bytes": 6635520,
+          "io_delta": {
+            "rchar": 7809,
+            "wchar": 47729510,
+            "syscr": 138,
+            "syscw": 206336,
+            "read_bytes": 0,
+            "write_bytes": 216510464,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.302174712,
+          "cpu_cores": 0.0017165779801402428,
+          "peak_rss_bytes": 158449664,
+          "io_delta": {
+            "rchar": 16592,
+            "wchar": 17581,
+            "syscr": 96,
+            "syscw": 50,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.290305811,
+          "cpu_cores": 0.38312619272300924,
+          "peak_rss_bytes": 5984256,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 32304620,
+            "syscr": 0,
+            "syscw": 82645,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.119652600988047,
+        "startup_rss_bytes": {
+          "sut": 1638400,
+          "provider": 155496448
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 46628352,
+        "peak_local_metadata_bytes": 4398,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.001696727005764842,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 170088728227283,
+        "local_payload_bytes": 65536,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 170112790343129,
+        "storage": {
+          "1": {
+            "logical": 39446219,
+            "allocated": 39456256,
+            "files": 11,
+            "payload": 22668291,
+            "segments": 0,
+            "metadata": 486
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 916511.1088606226
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 22668291
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9221787648,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    }
+  ],
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 3,
+      "acks_per_sec": {
+        "observations": 3,
+        "median": 4065.9583333333335,
+        "minimum": 3390.6666666666665,
+        "maximum": 4260.833333333333
+      },
+      "p50_ms": {
+        "observations": 3,
+        "median": 0.735,
+        "minimum": 0.643,
+        "maximum": 0.847
+      },
+      "p99_ms": {
+        "observations": 3,
+        "median": 6.419,
+        "minimum": 6.283,
+        "maximum": 7.691
+      },
+      "payload_puts": {
+        "observations": 3,
+        "median": 381,
+        "minimum": 317,
+        "maximum": 399
+      },
+      "uploaded_bytes": {
+        "observations": 3,
+        "median": 24969216,
+        "minimum": 20774912,
+        "maximum": 26148864
+      },
+      "leader_local_payload_bytes": {
+        "observations": 3,
+        "median": 29699,
+        "minimum": 12035,
+        "maximum": 57347
+      },
+      "leader_backlog_slope": {
+        "observations": 3,
+        "median": 2820.0479247963794,
+        "minimum": -300.7565390133879,
+        "maximum": 5705.303245358565
+      },
+      "sut_cpu_cores": {
+        "observations": 3,
+        "median": 0.48234223711759877,
+        "minimum": 0.45658050929302985,
+        "maximum": 0.5117968522103246
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 3,
+        "median": 9285632,
+        "minimum": 9113600,
+        "maximum": 9506816
+      },
+      "garbage_reclamation_seconds": {
+        "observations": 3,
+        "median": 1.062829784,
+        "minimum": 0.108615776,
+        "maximum": 1.062889065
+      }
+    },
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 3,
+      "acks_per_sec": {
+        "observations": 3,
+        "median": 4305.375,
+        "minimum": 3678.8333333333335,
+        "maximum": 5413.208333333333
+      },
+      "p50_ms": {
+        "observations": 3,
+        "median": 0.727,
+        "minimum": 0.572,
+        "maximum": 0.902
+      },
+      "p99_ms": {
+        "observations": 3,
+        "median": 3.247,
+        "minimum": 2.515,
+        "maximum": 3.447
+      },
+      "payload_puts": {
+        "observations": 3,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 3,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 3,
+        "median": 26517763,
+        "minimum": 22668291,
+        "maximum": 33324291
+      },
+      "leader_backlog_slope": {
+        "observations": 3,
+        "median": 1086254.363132026,
+        "minimum": 916511.1088606226,
+        "maximum": 1529750.454463806
+      },
+      "sut_cpu_cores": {
+        "observations": 3,
+        "median": 0.4879372908548639,
+        "minimum": 0.4648447830756041,
+        "maximum": 0.5296684983474093
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 3,
+        "median": 6352896,
+        "minimum": 6209536,
+        "maximum": 6635520
+      },
+      "garbage_reclamation_seconds": null
+    }
+  ],
+  "passed": 6,
+  "total": 6,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8",
+  "variant_checker_sha256": "f2b5b0cd8f3b3e172f9b8cbd5a441870f1f909295b6e5b922853b8faf8eef648",
+  "comparison_scope": "Same workload/settings and pinned native/provider/client; local shared host. Async throughput is local acceptance, NOT committed operations/s. All-replica drain and sampled Raft entry progress remain explicit. Missing observations and failed runs remain in counts."
+}

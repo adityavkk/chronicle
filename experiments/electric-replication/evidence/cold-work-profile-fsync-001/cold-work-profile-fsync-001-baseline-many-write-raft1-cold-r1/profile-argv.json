@@ -1,0 +1,15 @@
+[
+  "strace",
+  "-f",
+  "-qq",
+  "-ttt",
+  "-T",
+  "-e",
+  "trace=fsync,fdatasync",
+  "-e",
+  "signal=none",
+  "-o",
+  "/home/user/workspace/repo/experiments/electric-replication/evidence/cold-work-profile-fsync-001/cold-work-profile-fsync-001-baseline-many-write-raft1-cold-r1/fsync-trace.log",
+  "-p",
+  "3294570,3294529,3294552"
+]

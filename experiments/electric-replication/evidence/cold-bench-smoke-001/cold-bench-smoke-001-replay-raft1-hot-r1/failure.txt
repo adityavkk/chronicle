@@ -1,0 +1,120 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connection.py", line 239, in _new_conn
+    sock = connection.create_connection(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/util/connection.py", line 85, in create_connection
+    raise err
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/util/connection.py", line 73, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/httpsession.py", line 464, in send
+    urllib_response = conn.urlopen(
+                      ^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connectionpool.py", line 847, in urlopen
+    retries = retries.increment(
+              ^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/util/retry.py", line 485, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/util/util.py", line 39, in reraise
+    raise value
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connectionpool.py", line 499, in _make_request
+    conn.request(
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/awsrequest.py", line 96, in request
+    rval = super().request(method, url, body, headers, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connection.py", line 567, in request
+    self.endheaders()
+  File "/usr/local/lib/python3.11/http/client.py", line 1281, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/awsrequest.py", line 123, in _send_output
+    self.send(msg)
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/awsrequest.py", line 223, in send
+    return super().send(str)
+           ^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/http/client.py", line 979, in send
+    self.connect()
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connection.py", line 398, in connect
+    self.sock = self._new_conn()
+                ^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/urllib3/connection.py", line 254, in _new_conn
+    raise NewConnectionError(
+urllib3.exceptions.NewConnectionError: AWSHTTPConnection(host='127.0.0.1', port=20650): Failed to establish a new connection: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 333, in cell
+    start=time.monotonic();lab.boot();result["startup_seconds"]=time.monotonic()-start
+                           ^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 90, in boot
+    self.start_storage()  # Idle provider also present in hot controls.
+    ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 76, in start_storage
+    self.wait(lambda:self.s3.list_buckets(),"MinIO ready",timeout=40)
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/lab.py", line 148, in wait
+    value = predicate()
+            ^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 76, in <lambda>
+    self.wait(lambda:self.s3.list_buckets(),"MinIO ready",timeout=40)
+                     ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/client.py", line 569, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/client.py", line 1005, in _make_api_call
+    http, parsed_response = self._make_request(
+                            ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/client.py", line 1029, in _make_request
+    return self._endpoint.make_request(operation_model, request_dict)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/endpoint.py", line 119, in make_request
+    return self._send_request(request_dict, operation_model)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/endpoint.py", line 200, in _send_request
+    while self._needs_retry(
+          ^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/endpoint.py", line 360, in _needs_retry
+    responses = self._event_emitter.emit(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/hooks.py", line 412, in emit
+    return self._emitter.emit(aliased_event_name, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/hooks.py", line 256, in emit
+    return self._emit(event_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/hooks.py", line 239, in _emit
+    response = handler(**kwargs)
+               ^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 207, in __call__
+    if self._checker(**checker_kwargs):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 284, in __call__
+    should_retry = self._should_retry(
+                   ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 320, in _should_retry
+    return self._checker(attempt_number, response, caught_exception)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 363, in __call__
+    checker_response = checker(
+                       ^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 247, in __call__
+    return self._check_caught_exception(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/retryhandler.py", line 416, in _check_caught_exception
+    raise caught_exception
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/endpoint.py", line 279, in _do_get_response
+    http_response = self._send(request)
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/endpoint.py", line 383, in _send
+    return self.http_session.send(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/httpsession.py", line 493, in send
+    raise EndpointConnectionError(endpoint_url=request.url, error=e)
+botocore.exceptions.EndpointConnectionError: Could not connect to the endpoint URL: "http://127.0.0.1:20650/"

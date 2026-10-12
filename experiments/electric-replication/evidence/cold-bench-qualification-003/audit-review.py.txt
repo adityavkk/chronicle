@@ -1,0 +1,37 @@
+"""Fail-closed classification of this increment's redacted scanner findings."""
+from collections import defaultdict
+import hashlib
+import json
+from pathlib import Path
+import re
+
+ROOT=Path('/home/user/workspace/repo')
+OUT=ROOT/'.tmp/cold-bench-audit-002'
+paths=defaultdict(set)
+for row in json.loads((OUT/'map.json').read_text()):
+    paths[row['projection_sha256']].add(row['path'])
+digest=hashlib.sha256((ROOT/'experiments/electric-replication/engine/src/api.rs').read_bytes()).hexdigest()
+assert (OUT/'gitleaks-exit.txt').read_text().strip()=='1'
+findings=json.loads((OUT/'gitleaks.json').read_text())
+assert len(findings)==20
+origins=[]
+for item in findings:
+    assert item['RuleID']=='generic-api-key' and item['Tags']==[]
+    assert item['Secret']=='REDACTED' and item['Match']=='api.rs": "REDACTED"'
+    assert item['StartLine']==item['EndLine']
+    file=ROOT/item['File']
+    data=file.read_bytes()
+    assert hashlib.sha256(data).hexdigest()==file.stem
+    origin=paths[file.stem]
+    assert len(origin)==1 and next(iter(origin)).endswith('/provenance.json')
+    line=data.decode().splitlines()[item['StartLine']-1]
+    match=re.fullmatch(r'\s*"engine/src/api.rs": "([0-9a-f]{64})",?',line)
+    assert match and match[1]==digest
+    origins.append(next(iter(origin)))
+result=dict(verdict='PASS_REVIEWED_FINDINGS',scanner='Gitleaks 8.30.1 default rules; no exclusions',
+    scanner_exit=1,findings=len(findings),independently_verified_source_sha256=20,unexplained=0,
+    paths=sorted(origins),
+    method='Each complete reported line is the actual engine/src/api.rs SHA-256, recomputed from its source bytes. This reviews false positives; it does not change the scanner exit.',
+    report_sha256=hashlib.sha256((OUT/'gitleaks.json').read_bytes()).hexdigest())
+(OUT/'findings-review.json').write_text(json.dumps(result,indent=2)+'\n')
+print(json.dumps({k:v for k,v in result.items() if k!='paths'},indent=2))

@@ -45,6 +45,7 @@ struct Completion {
     local: bool,
     _count: OwnedSemaphorePermit,
     _bytes: OwnedSemaphorePermit,
+    _storage: Option<super::cold_admission::Ticket>,
 }
 
 pub(super) struct Pending {
@@ -52,6 +53,7 @@ pub(super) struct Pending {
     pub result: oneshot::Sender<Result<Outcome, u16>>,
     pub permit: OwnedSemaphorePermit,
     pub bytes: OwnedSemaphorePermit,
+    pub storage: Option<super::cold_admission::Ticket>,
 }
 
 impl Command {
@@ -92,6 +94,7 @@ async fn take_ready(
         completions.push(Completion {
             local: pending.command.local(), result: Some(pending.result),
             _count: pending.permit, _bytes: pending.bytes,
+            _storage: pending.storage,
         });
         commands.push(pending.command);
         if !append || commands.len() == MAX_COMMANDS {
@@ -277,7 +280,7 @@ mod tests {
             Pending { command:Command {method:method.into(),path:format!("/held/{n}"),
                 headers:vec![],body:vec![n; n as usize],time:n as u64},result,
                 permit:slots.clone().try_acquire_owned().unwrap(),
-                bytes:bytes.clone().try_acquire_many_owned(100).unwrap() }
+                bytes:bytes.clone().try_acquire_many_owned(100).unwrap(), storage:None }
         };
         let (send, mut receive) = mpsc::channel(4);
         let first = pending(1,"POST");
@@ -415,7 +418,7 @@ mod tests {
                     admitted_bytes += size;
                     let (result, receiver) = oneshot::channel();
                     send.try_send(Pending {command,result,permit:slots.clone().try_acquire_owned().unwrap(),
-                        bytes:bytes.clone().try_acquire_many_owned(size as u32).unwrap()}).unwrap_or_else(|_|panic!("queue full"));
+                        bytes:bytes.clone().try_acquire_many_owned(size as u32).unwrap(),storage:None}).unwrap_or_else(|_|panic!("queue full"));
                     // Dropping HTTP receivers must not cancel queued appends.
                     receivers.push(if i % cancel_every == 0 {drop(receiver);None} else {Some(receiver)});
                 }

@@ -26,6 +26,7 @@ def credentials(path):
 def execute(path, args):
     keys = credentials(path)
     os.environ.update(ELECTRIC_COLD_ACCESS_KEY_ID=keys["access"], ELECTRIC_COLD_SECRET_ACCESS_KEY=keys["secret"],
+                      DS_S3_ACCESS_KEY_ID=keys["access"], DS_S3_SECRET_ACCESS_KEY=keys["secret"],
                       MINIO_ROOT_USER=keys["access"], MINIO_ROOT_PASSWORD=keys["secret"],
                       MINIO_BROWSER="off", MINIO_UPDATE="off")
     os.execv(args[0], args)
@@ -136,7 +137,9 @@ def proxy(upstream, port, config, log, secret_file):
                 data = response.read(10 * 1024 * 1024 + 1)
                 assert len(data) <= 10 * 1024 * 1024, "fixture proxy response bound"
                 event = dict(op="s3", method=self.command, path=path, status=response.status,
-                             start_ns=start, bytes=len(data), sha256=hashlib.sha256(data).hexdigest(), fault=fault)
+                             start_ns=start, bytes=len(data), request_bytes=len(body),
+                             range=self.headers.get("Range"),
+                             sha256=hashlib.sha256(data).hexdigest(), fault=fault)
                 if self.command == "GET" and path.count("/") == 1:
                     event["list_after"] = parse_qs(urlsplit(self.path).query).get("start-after",[""])[0]
                 # Decode complete small inventory responses for the independent

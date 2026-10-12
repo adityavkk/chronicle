@@ -1,0 +1,116 @@
+"""Review every redacted finding against real source/object bytes, fail closed."""
+import collections
+import functools
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+from cold_benchmark_check import read_object_events
+
+ROOT=Path('/home/user/workspace/repo')
+OUT=ROOT/'.tmp/cold-publication-005'
+EXP=ROOT/'experiments/electric-replication'
+rows=json.loads((OUT/'map.json').read_text())
+origins=collections.defaultdict(set)
+audited=collections.defaultdict(set)
+for row in rows:
+    origins[row['projection_sha256']].add(row['path'])
+    audited[row['path']].add(row['decoded_sha256'])
+sha=lambda data:hashlib.sha256(data).hexdigest()
+git=lambda *args:subprocess.check_output(['/usr/bin/git',*args],cwd=ROOT)
+source='experiments/electric-replication/engine/src/api.rs'
+source_hashes={sha((ROOT/source).read_bytes())}
+for commit in git('rev-list','HEAD','--',source).decode().splitlines():
+    source_hashes.add(sha(git('show',commit+':'+source)))
+key_pattern=re.compile(r'electric/(?:cold-runtime|conformance-cold)-\d+/\d+/\d{20}/[pi]/\d{20}/\d{20}/\d{20}/[0-9a-f]{64}')
+
+@functools.cache
+def object_hashes(run):
+    hashes=set()
+    for file in (EXP/'evidence'/run).iterdir():
+        if file.suffix not in ('.json','.jsonl'):continue
+        text=file.read_text()
+        hashes.update(sha(m[0].encode()) for m in key_pattern.finditer(text))
+        values=[json.loads(line) for line in text.splitlines()] if file.suffix=='.jsonl' else [json.loads(text)]
+        for value in values:
+            if not isinstance(value,dict):continue
+            states=[value] if value.get('op')=='state' else value.get('states',[])
+            for observation in states:
+                state,group=observation['state'],observation['group']
+                descriptors=list(state['pending'].values())
+                if state.get('inventory'):descriptors.append(state['inventory'])
+                for obj in descriptors:
+                    if 'Inventory' in obj['kind']:kind,inc,start='i',0,obj['kind']['Inventory']['cut']
+                    else:
+                        p=obj['kind']['Payload'];kind,inc,start='p',p['incarnation'],p['start']
+                    key=f"electric/{run}/{group}/{obj['birth']:020}/{kind}/{inc:020}/{start:020}/{obj['len']:020}/{obj['sha256']}"
+                    hashes.add(sha(key.encode()))
+    return hashes
+
+@functools.lru_cache(maxsize=2)
+def read_lines(file,commit):
+    if commit:
+        data=git('show',commit+':'+file)
+        assert sha(data) in audited[file],('not audited',file)
+    else:
+        data=(ROOT/file).read_bytes()
+        assert sha(data)==Path(file).stem
+    return data.decode().splitlines()
+
+def check_diagnosis(line):
+    match=re.fullmatch(r'\s*"key_sha256": "([0-9a-f]{64})",?',line)
+    assert match
+    diagnosis=json.loads((EXP/'evidence/cold-work-harness-repair-001/diagnosis.json').read_text())['retained_failures']['candidate-quorum3-r2']['late_completed_deletes']
+    assert len(diagnosis)==1 and diagnosis[0]['key_sha256']==match[1]
+    cell=EXP/'evidence/cold-work-generations-001/cold-work-generations-001-candidate-quorum3-r2'
+    result=json.loads((cell/'result.json').read_text())
+    cycle=next(c for c in result['cycles'] if c['generation']==diagnosis[0]['generation'])
+    keys={'/'+result['object_bucket']+'/'+key for key in cycle['precondition']['listing_keys']}
+    matches=[key for key in keys if sha(key.encode())==match[1]]
+    assert len(matches)==1
+    events=[e for e in read_object_events(cell) if e.get('op')=='s3' and e['path']==matches[0] and e['method']=='DELETE' and e['status']==204 and e['time_ns']>cycle['collected_ns']]
+    assert len(events)==1 and events[0]['time_ns']-cycle['collected_ns']==diagnosis[0]['completion_minus_collection_ns']
+
+reports={}
+for name in ('gitleaks','gitleaks-history'):
+    assert (OUT/(name+'-exit.txt')).read_text().strip()=='1'
+    findings=json.loads((OUT/(name+'.json')).read_text())
+    grouped=collections.defaultdict(list)
+    for f in findings:
+        assert f['RuleID']=='generic-api-key' and not f['Tags'] and f['Secret']=='REDACTED'
+        assert f['StartLine']==f['EndLine']
+        grouped[f['File'],f.get('Commit') or '',f['StartLine']].append(f)
+    counts=collections.Counter();by_path=collections.Counter()
+    for (file,commit,line_number),group in sorted(grouped.items()):
+        paths={file} if commit else origins[Path(file).stem]
+        assert paths
+        line=read_lines(file,commit)[line_number-1]
+        matches=list(re.finditer(r'(api\.rs|key_sha256)": "([0-9a-f]{64})"',line))
+        assert matches
+        assert collections.Counter(f['Match'].removesuffix('"') for f in group)<=collections.Counter(m[1]+'": "REDACTED' for m in matches)
+        if matches[0][1]=='api.rs':
+            assert len(matches)==1 and '"engine/src/api.rs": ' in line and matches[0][2] in source_hashes
+            counts['source_sha256']+=len(group)
+        elif paths=={'experiments/electric-replication/evidence/cold-work-harness-repair-001/diagnosis.json'}:
+            check_diagnosis(line);counts['diagnosis_object_sha256']+=len(group)
+        else:
+            assert len(paths)==1
+            origin=next(iter(paths))
+            assert re.search(r'/objects-[1-4]\.jsonl$',origin)
+            assert all(m[1]=='key_sha256' and m[2] in object_hashes(Path(origin).parent.name) for m in matches)
+            event=json.loads(line)
+            assert event['op']=='s3' and event['method']=='GET'
+            records=event['inventory']['records']
+            encoded=b'ERIC0001'+event['inventory']['cut'].to_bytes(8,'big')+b''.join(r['birth'].to_bytes(8,'big')+bytes.fromhex(r['key_sha256']) for r in records)
+            assert sha(encoded)==event['sha256']==event['path'].split('/')[-1]
+            assert collections.Counter(r['key_sha256'] for r in records)==collections.Counter(m[2] for m in matches)
+            counts['inventory_object_sha256']+=len(group)
+        for path in paths:by_path[path]+=len(group)
+    assert sum(counts.values())==len(findings)
+    reports[name]=dict(scanner_exit=1,findings=len(findings),verified=dict(counts),unexplained=0,
+        by_path=dict(by_path),report_sha256=sha((OUT/(name+'.json')).read_bytes()))
+result=dict(verdict='PASS_REVIEWED_FINDINGS',reports=reports,reviewer_sha256=sha(Path(__file__).read_bytes()),
+    method='Exact reported lines, independently recomputed source/object-name hashes and whole inventory-body checks; no rule/path exclusions, no waiver by a hash-shaped value or prior count.')
+(OUT/'findings-review.json').write_text(json.dumps(result,indent=2)+'\n')
+print(json.dumps({name:{k:v for k,v in report.items() if k!='by_path'} for name,report in reports.items()},indent=2))

@@ -1,0 +1,12 @@
+$ make public-link-check
+./scripts/public-link-check.sh
+OK: no Walmart endpoint links in tracked public files
+$ git diff --check
+$ git diff --cached --exit-code
+$ git rev-parse HEAD
+a75aa98c59c27aa4cf8f7df3ade56986665d55e5
+$ git config --get commit.gpgsign
+true
+$ amp orb service list
+No orb services are running.
+PASS: link/whitespace checks; nothing staged; no new commit; signing still enabled; all campaign services stopped.

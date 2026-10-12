@@ -57,7 +57,10 @@ impl Config {
             kind,
             consensus_managed: true,
             segment_bytes: self.segment_bytes,
-            compact_bytes: self.segment_bytes,
+            // Publication already serializes reclamation under committed apply.
+            // Pressure/closed tails can be shorter than a segment: retaining
+            // those prefixes would prevent admission from ever recovering.
+            compact_bytes: 1,
             key_prefix: prefix,
             local_dir: self.local_dir.clone(),
             bucket: self.bucket.clone(),
@@ -89,6 +92,7 @@ pub(super) struct Certificate {
 pub(super) struct Runtime {
     pub options: Options,
     pub pins: Arc<cold::Pins>,
+    pub ready: tokio::sync::Notify,
     work: tokio::sync::Mutex<()>,
     counters: Mutex<BTreeMap<&'static str, u64>>,
     certificate: Mutex<Certificate>,
@@ -134,6 +138,7 @@ impl Runtime {
         let runtime = Self {
             options,
             pins: Arc::default(),
+            ready: tokio::sync::Notify::new(),
             work: tokio::sync::Mutex::new(()),
             counters: Mutex::default(),
             certificate: Mutex::new(certificate),
@@ -148,7 +153,11 @@ impl Runtime {
     }
 
     pub(super) fn count(&self, name: &'static str) {
-        *self.counters.lock().unwrap().entry(name).or_default() += 1;
+        self.add(name, 1);
+    }
+
+    fn add(&self, name: &'static str, value: u64) {
+        *self.counters.lock().unwrap().entry(name).or_default() += value;
     }
 
     /// The caller owns snapshots -> exclusive view. Complete file and directory
@@ -509,11 +518,19 @@ impl Cluster {
                         shared.tail.saturating_sub(shared.file_base)
                     })
                     .sum();
+                let eligible: u64 = view.store.streams.iter().map(|s| {
+                    let sealed = s.tier.manifest.lock().unwrap().sealed_offset.max(s.base_offset);
+                    let tail = s.tail();
+                    let bytes = tail.bytes.saturating_sub(sealed);
+                    if tail.closed || bytes >= runtime.options.tier.segment_bytes { bytes } else { 0 }
+                }).sum();
                 json(
                     &serde_json::json!({"version":1,"applied":view.applied.map(|i|i.index),
                     "floor":state.floor(),"participants":state.participants,"pending":state.pending,
                     "inventory":state.inventory,"objects":objects,"local_payload_bytes":local_bytes,
                     "live_objects":state.live.len(),"objects_truncated":state.live.len()>128,
+                    "eligible_payload_bytes":eligible,"worker_busy":runtime.work.try_lock().is_err(),
+                    "pending_bytes":state.pending.values().map(|o|o.len).sum::<u64>(),
                     "oldest_pin":runtime.pins.oldest(),
                     "certificate":runtime.certificate(),"counters":*runtime.counters.lock().unwrap()}),
                 )
@@ -745,6 +762,7 @@ impl Cluster {
                         return Err(io::Error::other("pending cold bytes changed"));
                     }
                     runtime.count("put_attempts");
+                    runtime.add("put_attempt_bytes", object.len);
                     blob.put(&key, bytes).await?;
                 }
             },
@@ -824,6 +842,9 @@ impl Cluster {
         .await
         .map_err(|s| io::Error::other(format!("cold publication unavailable: {s}")))?;
         runtime.count("publications");
+        if matches!(object.kind, Kind::Payload { .. }) {
+            runtime.add("published_payload_bytes", object.len);
+        }
         Ok(())
     }
 
@@ -874,12 +895,20 @@ impl Cluster {
         let mut last_stream = String::new();
         let mut last_pending = 0;
         loop {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Register before inspecting state; apply notifications coalesce.
+            // The fallback also finds inherited work after leadership changes.
+            let ready = runtime.ready.notified();
+            tokio::pin!(ready);
+            ready.as_mut().enable();
             if g.raft.metrics().borrow_watched().current_leader != Some(self.config.node) {
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
             let _work = runtime.work.lock().await;
-            let (pending, retired, path) = {
+            runtime.count("work_passes");
+            let mut productive = false;
+            let mut failed = false;
+            let (pending, retired) = {
                 let view = g.machine.view.read().await;
                 let state = view.cold.as_ref().unwrap();
                 let pending = state
@@ -904,32 +933,7 @@ impl Cluster {
                         _ => false,
                     })
                     .map(|o| o.birth);
-                let path = view
-                    .store
-                    .streams
-                    .iter()
-                    .filter(|s| s.path > last_stream)
-                    .filter(|s| {
-                        if state.pending.values().any(
-                            |o| matches!(&o.kind, Kind::Payload { path, .. } if path == &s.path),
-                        ) {
-                            return false;
-                        }
-                        let sealed = s
-                            .tier
-                            .manifest
-                            .lock()
-                            .unwrap()
-                            .sealed_offset
-                            .max(s.base_offset);
-                        let tail = s.tail();
-                        tail.bytes > sealed
-                            && (tail.closed
-                                || tail.bytes - sealed >= runtime.options.tier.segment_bytes)
-                    })
-                    .map(|s| s.path.clone())
-                    .min();
-                (pending, retired, path)
+                (pending, retired)
             };
             // A blocked inventory/offline participant must not starve payload
             // publication or retirement. Each class gets bounded work per pass.
@@ -937,6 +941,9 @@ impl Cluster {
                 last_pending = object.birth;
                 if self.cold_finish(group, object, None).await.is_err() {
                     runtime.count("resume_incomplete");
+                    failed = true;
+                } else {
+                    productive = true;
                 }
             }
             if let Some(birth) = retired {
@@ -946,8 +953,10 @@ impl Cluster {
                     .is_ok()
                 {
                     runtime.count("retirements");
+                    productive = true;
                 } else {
                     runtime.count("retire_rejected");
+                    failed = true;
                 }
             }
             if tokio::time::Instant::now() >= inventory_at {
@@ -956,13 +965,49 @@ impl Cluster {
                     runtime.count("inventory_incomplete");
                 }
             }
-            if let Some(path) = path {
+            // Constant queued/in-flight work: select from authoritative state,
+            // upload sequentially, and release the work lock after 16 attempts.
+            // No reset-only turn at the end of the catalog, even for one stream.
+            for _ in 0..16 {
+                // Many partial tails can fill the budget without any full
+                // segment. Force short seals before that becomes a deadlock.
+                let force = self.cold_admission.as_ref().is_some_and(|budget| budget.pressure());
+                let path = {
+                    let view = g.machine.view.read().await;
+                    let state = view.cold.as_ref().unwrap();
+                    view.store.streams.iter().filter(|s| {
+                        if state.pending.values().any(
+                            |o| matches!(&o.kind, Kind::Payload { path, .. } if path == &s.path),
+                        ) { return false; }
+                        let sealed = s.tier.manifest.lock().unwrap().sealed_offset.max(s.base_offset);
+                        let tail = s.tail();
+                        tail.bytes > sealed && (force || tail.closed || tail.bytes - sealed >= runtime.options.tier.segment_bytes)
+                    }).map(|s| s.path.clone())
+                        .min_by_key(|path| (path <= &last_stream, path.clone()))
+                };
+                let Some(path) = path else { break; };
                 last_stream = path.clone();
-                if self.cold_seal(group, &path, false).await.is_err() {
-                    runtime.count("seal_incomplete");
+                runtime.count("payload_scheduled");
+                if force { runtime.count("pressure_seals"); }
+                match self.cold_seal(group, &path, force).await {
+                    Ok(done) => productive |= done,
+                    Err(_) => { runtime.count("seal_incomplete"); failed = true; }
                 }
+                if g.raft.metrics().borrow_watched().current_leader != Some(self.config.node) { break; }
+            }
+            drop(_work);
+            if failed {
+                // Our own Begin/apply wakeups must not bypass outage backoff.
+                runtime.count("work_retry_waits");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            } else if productive {
+                tokio::task::yield_now().await;
             } else {
-                last_stream.clear();
+                runtime.count("work_idle_waits");
+                tokio::select! {
+                    _ = ready => (),
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => (),
+                }
             }
         }
     }

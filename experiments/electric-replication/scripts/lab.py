@@ -57,7 +57,7 @@ class Lab:
 
     def start(self, node, environment=None, cpus=None, fault_testing=True, stats_secs=0,
               pending_commands=256, pending_bytes=16 * 1024 * 1024, append_durability="quorum-fsync",
-              heap_profile=False, workers=2, cold=None, cold_credentials=None):
+              heap_profile=False, workers=2, cold=None, cold_credentials=None, cold_admission=None):
         config = dict(cluster=self.cluster, node=node, listen=f"127.0.0.1:{self.port+node}",
                       dir=str(self.data / str(node)), partitions=self.partitions,
                       workers=workers, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis,
@@ -65,6 +65,8 @@ class Lab:
                       append_durability=append_durability)
         if cold is not None:
             config["cold"] = cold
+        if cold_admission is not None:
+            config["cold_admission"] = cold_admission
         path = self.output / f"node-{node}.json"
         path.write_text(json.dumps(config, indent=2) + "\n")
         with open(self.output / "config-history.jsonl", "a") as history:

@@ -1,0 +1,299 @@
+{
+  "cells": [
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-cold-r1",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    },
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-cold-r2",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 2,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    },
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-cold-r3",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 3,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    },
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-hot-r1",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 81516,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 3396.5,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 81516,
+        "mean_ms": 1.1740441017714336,
+        "p50_ms": 0.773,
+        "p90_ms": 2.049,
+        "p99_ms": 6.563,
+        "p999_ms": 14.375,
+        "max_ms": 31.135
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.339033911,
+          "cpu_cores": 0.5942833817754076,
+          "peak_rss_bytes": 6213632,
+          "io_delta": {
+            "rchar": 7740,
+            "wchar": 43844434,
+            "syscr": 138,
+            "syscw": 190350,
+            "read_bytes": 0,
+            "write_bytes": 209186816,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.339033911,
+          "cpu_cores": 0.002142333748289141,
+          "peak_rss_bytes": 159748096,
+          "io_delta": {
+            "rchar": 16608,
+            "wchar": 17597,
+            "syscr": 98,
+            "syscw": 52,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.326521885,
+          "cpu_cores": 0.37399466173053675,
+          "peak_rss_bytes": 6348800,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 29276636,
+            "syscr": 0,
+            "syscw": 75274,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.7350586190004833,
+        "startup_rss_bytes": {
+          "sut": 1536000,
+          "provider": 158158848
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 39484928,
+        "peak_local_metadata_bytes": 4398,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.002016899990849197,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 167320360997285,
+        "local_payload_bytes": 65536,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 1
+      },
+      "after_client": {
+        "time_ns": 167344445804065,
+        "storage": {
+          "1": {
+            "logical": 37711563,
+            "allocated": 37719552,
+            "files": 11,
+            "payload": 20933635,
+            "segments": 0,
+            "metadata": 486
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": 951723.2001726403
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 20933635
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": null,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 8510697472,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-hot-r2",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 2,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    },
+    {
+      "cell": "cold-work-native-001-baseline-hot-write-native-hot-r3",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "repetition": 3,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    }
+  ],
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 0,
+      "acks_per_sec": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "payload_puts": null,
+      "uploaded_bytes": null,
+      "leader_local_payload_bytes": null,
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": null,
+      "sut_peak_rss_bytes": null,
+      "garbage_reclamation_seconds": null
+    },
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 1,
+      "acks_per_sec": {
+        "observations": 1,
+        "median": 3396.5,
+        "minimum": 3396.5,
+        "maximum": 3396.5
+      },
+      "p50_ms": {
+        "observations": 1,
+        "median": 0.773,
+        "minimum": 0.773,
+        "maximum": 0.773
+      },
+      "p99_ms": {
+        "observations": 1,
+        "median": 6.563,
+        "minimum": 6.563,
+        "maximum": 6.563
+      },
+      "payload_puts": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 1,
+        "median": 20933635,
+        "minimum": 20933635,
+        "maximum": 20933635
+      },
+      "leader_backlog_slope": {
+        "observations": 1,
+        "median": 951723.2001726403,
+        "minimum": 951723.2001726403,
+        "maximum": 951723.2001726403
+      },
+      "sut_cpu_cores": {
+        "observations": 1,
+        "median": 0.5942833817754076,
+        "minimum": 0.5942833817754076,
+        "maximum": 0.5942833817754076
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 1,
+        "median": 6213632,
+        "minimum": 6213632,
+        "maximum": 6213632
+      },
+      "garbage_reclamation_seconds": null
+    }
+  ],
+  "passed": 1,
+  "total": 6,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8",
+  "variant_checker_sha256": "f2b5b0cd8f3b3e172f9b8cbd5a441870f1f909295b6e5b922853b8faf8eef648",
+  "comparison_scope": "Same workload/settings and pinned native/provider/client; local shared host. Async throughput is local acceptance, NOT committed operations/s. All-replica drain and sampled Raft entry progress remain explicit. Missing observations and failed runs remain in counts."
+}

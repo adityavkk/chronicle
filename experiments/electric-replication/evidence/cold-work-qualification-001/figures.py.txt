@@ -1,0 +1,90 @@
+"""Derive resource trends and bounded provider-time attribution from retained cells.
+
+This is offline analysis, not another benchmark. All input reports are named and
+hashed; the original failures and raw observations remain unchanged.
+"""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import statistics
+import sys
+
+from cold_benchmark_check import read_lines, read_object_events
+from cold_work_summary import trend
+from lab import EXPERIMENT
+
+
+root = EXPERIMENT/"evidence"
+output = Path(sys.argv[1])
+shutil.copyfile(__file__, output/"figures.py.txt")
+reports = {}
+inputs = {}
+for name in ("cold-work-bench-001", "cold-work-sustained-hot-001", "cold-work-sustained-many-001",
+             "cold-work-reads-001", "cold-work-native-002", "cold-work-large-002", "cold-work-large-native-002"):
+    path = root/name/"summary.json"
+    value = json.loads(path.read_text())
+    assert value["passed"] == value["total"]
+    reports[name] = value["aggregates"]
+    inputs[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+generations = []
+path = root/"cold-work-generations-002/checked.json"
+checked = json.loads(path.read_text())
+assert checked["passed"] == checked["total"] == 8
+inputs[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+for row in checked["cells"]:
+    directory = path.parent/row["cell"]
+    raw = json.loads((directory/"result.json").read_text())
+    samples = read_lines(directory/"samples.jsonl.gz")
+    start, end = raw["window"]["start_ns"], raw["window"]["end_ns"]
+    pids = [str(n) for n in raw["roles"]["sut"]]
+    selected = [s for s,following in zip(samples,samples[1:])
+                if start <= s["monotonic_ns"] and following["monotonic_ns"] <= end]
+    assert len(selected) >= 2 and all(set(pids) <= s["processes"].keys() for s in selected)
+    rss = [(s["monotonic_ns"], sum(s["processes"][p]["rss_pages"] for p in pids)*raw["page_bytes"]) for s in selected]
+    states = [s["state"] for s in selected]
+    generations.append(dict(cell=row["cell"],variant=raw["variant"],arm=row["arm"],
+        elapsed_seconds=row["elapsed_seconds"],read_remote_bytes=row["read_remote_bytes"],
+        latency_ms=row["latency_ms"],schedule_lateness_ms=row["schedule_lateness_ms"],
+        gc_unpinned_seconds=row["gc_unpinned_seconds"],gc_pinned_seconds=row["gc_pinned_seconds"],
+        resources=row["resources"],rss_first=rss[0][1],rss_last=rss[-1][1],
+        rss_second_half_slope_bytes_per_sec=trend([(t,n) for t,n in rss if t >= (start+end)//2]),
+        peak_local_allocated_bytes=row["peak_local_allocated_bytes"],peak_object_bytes=row["peak_object_bytes"],
+        peak_objects=row["peak_objects"],final_objects=row["final_objects"],
+        max_pending_per_group=max(len(g["cold"]["pending"]) for s in states for g in s["groups"].values()),
+        max_live_per_group=max(g["cold"]["live_objects"] for s in states for g in s["groups"].values()),
+        sampled_commit_gap_max_appends=row["sampled_commit_gap_max_appends"],
+        negative_controls=row["negative_controls"]))
+
+provider_time = []
+name = "cold-work-sustained-many-001"
+checked = json.loads((root/name/"summary.json").read_text())
+for row in checked["cells"]:
+    directory = root/name/row["cell"]
+    raw = json.loads((directory/"result.json").read_text())
+    window = raw["client_window"]
+    events = [e for e in read_object_events(directory) if e.get("op") == "s3"
+              and window["start_ns"] <= e["start_ns"] <= e["time_ns"] <= window["end_ns"]]
+    puts = [e for e in events if e["method"] == "PUT" and e["status"] == 200 and "/p/" in e["path"]]
+    assert len(puts) == row["diagnostics"]["payload_upload_parts_in_window"]
+    seconds = (window["end_ns"]-window["start_ns"])/1e9
+    groups = []
+    for group in (0,1):
+        keys = {e["path"] for e in puts if e["path"].lstrip("/").split("/")[3] == str(group)}
+        io = [e for e in events if e["path"] in keys and e["method"] in ("HEAD","PUT","GET")]
+        durations = [(e["time_ns"]-e["start_ns"])/1e9 for e in io]
+        groups.append(dict(group=group,payload_objects_put=len(keys),payload_http_requests=len(io),
+            payload_http_seconds=sum(durations),fraction_of_group_window=sum(durations)/seconds,
+            request_median_ms=statistics.median(durations)*1000 if durations else None,
+            request_max_ms=max(durations)*1000 if durations else None))
+    provider_time.append(dict(cell=row["cell"],variant=row["variant"],window_seconds=seconds,groups=groups))
+
+result = dict(aggregates=reports,generations=generations,provider_time=provider_time,inputs=inputs,
+    limits=["Finite least-squares RSS trends, not an indefinite heap bound or leak diagnosis.",
+        "Provider intervals are proxy-observed HEAD/PUT/GET time for new payload keys inside each write-only window, not end-to-end worker time.",
+        "They exclude consensus, scheduling, client transport outside the proxy, compaction, inventory and snapshot work; the remainder is not attributed to a specific component.",
+        "One payload uploader per group, unchanged 64 KiB segments in this attribution; different groups can overlap.",
+        "Local shared-host MinIO, not independent-host or cloud-provider measurements."])
+(output/"figures.json").write_text(json.dumps(result,indent=2)+"\n")
+print(json.dumps(dict(generation_cells=len(generations),provider_cells=len(provider_time),aggregate_campaigns=len(reports))))

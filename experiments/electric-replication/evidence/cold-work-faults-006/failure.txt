@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_work_faults.py", line 284, in run
+    lab.wait(lambda:all(lab.admin(n,0,"pressure")["filesystem_free_bytes"] < policy["min_free_bytes"] for n in lab.nodes),
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/lab.py", line 156, in wait
+    raise AssertionError(f"timeout: {description}")
+AssertionError: timeout: actual filesystem pressure sampled

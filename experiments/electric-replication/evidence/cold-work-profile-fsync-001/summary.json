@@ -1,0 +1,919 @@
+{
+  "cells": [
+    {
+      "cell": "cold-work-profile-fsync-001-baseline-many-write-raft1-cold-r1",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 14825,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 617.7083333333334,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 14825,
+        "mean_ms": 6.47413025295111,
+        "p50_ms": 4.447,
+        "p90_ms": 7.819,
+        "p99_ms": 63.839,
+        "p999_ms": 184.319,
+        "max_ms": 327.167
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "POST": 32,
+          "PUT": 16,
+          "HEAD": 305,
+          "GET": 131,
+          "DELETE": 43
+        },
+        "statuses": {
+          "200": 379,
+          "206": 105,
+          "204": 43
+        },
+        "request_body_bytes": 331488,
+        "response_body_bytes": 4593666,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 3,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 4,
+          "sampled_seconds": 22.122191672,
+          "cpu_cores": 0.5673036463147774,
+          "peak_rss_bytes": 98963456,
+          "io_delta": {
+            "rchar": 625137963,
+            "wchar": 308664004,
+            "syscr": 90377,
+            "syscw": 135668,
+            "read_bytes": 0,
+            "write_bytes": 397488128,
+            "cancelled_write_bytes": 3964928
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 4,
+          "sampled_seconds": 22.122191672,
+          "cpu_cores": 0.3091917881110021,
+          "peak_rss_bytes": 384790528,
+          "io_delta": {
+            "rchar": 42773003,
+            "wchar": 11024499,
+            "syscr": 13003,
+            "syscw": 1069,
+            "read_bytes": 0,
+            "write_bytes": 5386240,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 3,
+          "sampled_seconds": 14.830346226,
+          "cpu_cores": 0.049223395656144,
+          "peak_rss_bytes": 7168000,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 40597600,
+            "syscr": 0,
+            "syscw": 9596,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.438125725981081,
+        "startup_rss_bytes": {
+          "sut": 36102144,
+          "provider": 156598272
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 1
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 1
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 0,
+              "maximum": 1
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "stages": {
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 104,
+            "whole_invocation": {
+              "applied_commands": 20288,
+              "locally_durable_commands": 20288
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791640534073,
+              "end_unix_ms": 1791640557070,
+              "cumulative_delta": {
+                "applied_commands": 14272,
+                "locally_durable_commands": 14272
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791640534073,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640535083,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640536070,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791640537074,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640538116,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791640539071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640540072,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640541071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640542071,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640543070,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640544115,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791640545071,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640546070,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791640547071,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640548076,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640549070,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640550070,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791640551071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640552073,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791640553071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640554071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640555070,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640556071,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640557070,
+                "commands": 0
+              }
+            ]
+          }
+        },
+        "cold_progress": {
+          "1-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 23,
+              "delete_attempts": 7,
+              "delete_completed": 7,
+              "inventory_incomplete": 5,
+              "inventory_put_attempts": 5,
+              "publications": 5,
+              "put_attempts": 0,
+              "resume_incomplete": 18,
+              "retirements": 0,
+              "scan_rounds": 1,
+              "scanned": 786
+            },
+            "live_objects": {
+              "first": 512,
+              "last": 512
+            },
+            "pending": {
+              "first": 1,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 6221824,
+              "last": 26148864,
+              "maximum": 26148864
+            }
+          },
+          "1-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 25,
+              "delete_attempts": 9,
+              "delete_completed": 9,
+              "inventory_incomplete": 5,
+              "inventory_put_attempts": 5,
+              "publications": 4,
+              "put_attempts": 0,
+              "resume_incomplete": 20,
+              "retirements": 0,
+              "scan_rounds": 1,
+              "scanned": 658
+            },
+            "live_objects": {
+              "first": 512,
+              "last": 512
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 6221824,
+              "last": 26157056,
+              "maximum": 26157056
+            }
+          }
+        },
+        "peak_object_count": 1066,
+        "peak_object_bytes": 69413336,
+        "peak_local_allocated_bytes": 166086144,
+        "peak_local_metadata_bytes": 822312,
+        "peak_pending_replicated_descriptors": 2,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 23.760680853,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.2559285449970048,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 159372972336473,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 1024
+      },
+      "after_client": {
+        "time_ns": 159401535581514,
+        "storage": {
+          "1": {
+            "logical": 140119482,
+            "allocated": 143522816,
+            "files": 2062,
+            "payload": 60723206,
+            "segments": 0,
+            "metadata": 809888
+          }
+        },
+        "object_store": {
+          "count": 1037,
+          "bytes": 67375832
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "baseline",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": null
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 60723206
+        },
+        "leader_full_or_closed_eligibility": {},
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": 1,
+        "max_active_backlog_credit": null,
+        "max_spent_backlog_credit": null,
+        "max_unapplied_bytes": null,
+        "minimum_filesystem_free_bytes": 9688092672,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    },
+    {
+      "cell": "cold-work-profile-fsync-001-candidate-many-write-raft1-cold-r1",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 14238,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 593.25,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 14238,
+        "mean_ms": 6.756191459474638,
+        "p50_ms": 4.599,
+        "p90_ms": 7.047,
+        "p99_ms": 91.071,
+        "p999_ms": 204.671,
+        "max_ms": 355.839
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "HEAD": 338,
+          "GET": 138,
+          "POST": 32,
+          "PUT": 16,
+          "DELETE": 38
+        },
+        "statuses": {
+          "200": 408,
+          "206": 116,
+          "204": 38
+        },
+        "request_body_bytes": 330768,
+        "response_body_bytes": 4834358,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 4,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 4,
+          "sampled_seconds": 21.982631013,
+          "cpu_cores": 0.6746235239644379,
+          "peak_rss_bytes": 100147200,
+          "io_delta": {
+            "rchar": 654673200,
+            "wchar": 312779223,
+            "syscr": 94899,
+            "syscw": 132941,
+            "read_bytes": 0,
+            "write_bytes": 396226560,
+            "cancelled_write_bytes": 4198400
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 4,
+          "sampled_seconds": 21.982631013,
+          "cpu_cores": 0.33526469127565117,
+          "peak_rss_bytes": 387989504,
+          "io_delta": {
+            "rchar": 44218035,
+            "wchar": 11625243,
+            "syscr": 13411,
+            "syscw": 1186,
+            "read_bytes": 0,
+            "write_bytes": 5881856,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 3,
+          "sampled_seconds": 14.663684996,
+          "cpu_cores": 0.05182871837517751,
+          "peak_rss_bytes": 6791168,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 36285176,
+            "syscr": 0,
+            "syscw": 8575,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.159095431008609,
+        "startup_rss_bytes": {
+          "sut": 36327424,
+          "provider": 154923008
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 0,
+              "last": 1,
+              "maximum": 1
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 1
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 0,
+              "maximum": 0
+            }
+          }
+        },
+        "stages": {
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 49,
+            "whole_invocation": {
+              "applied_commands": 19595,
+              "locally_durable_commands": 19595
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791640588143,
+              "end_unix_ms": 1791640611145,
+              "cumulative_delta": {
+                "applied_commands": 13546,
+                "locally_durable_commands": 13546
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791640588143,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640589143,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640590146,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640591143,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640592150,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640593147,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640594152,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640595143,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640596149,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640597148,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640598143,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791640599148,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640600152,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640601144,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640602149,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640603143,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640604144,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640605143,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791640606145,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640607149,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640608144,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791640609145,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640610144,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791640611145,
+                "commands": 0
+              }
+            ]
+          }
+        },
+        "cold_progress": {
+          "1-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 29,
+              "delete_attempts": 19,
+              "delete_completed": 19,
+              "inventory_incomplete": 5,
+              "inventory_put_attempts": 5,
+              "payload_scheduled": 0,
+              "publications": 5,
+              "published_payload_bytes": 0,
+              "put_attempt_bytes": 0,
+              "put_attempts": 0,
+              "resume_incomplete": 24,
+              "retirements": 0,
+              "scan_rounds": 2,
+              "scanned": 860,
+              "work_idle_waits": 2150,
+              "work_passes": 2179,
+              "work_retry_waits": 24
+            },
+            "live_objects": {
+              "first": 512,
+              "last": 512
+            },
+            "pending": {
+              "first": 1,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 6991872,
+              "last": 24846336,
+              "maximum": 24846336
+            }
+          },
+          "1-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 28,
+              "delete_attempts": 18,
+              "delete_completed": 19,
+              "inventory_incomplete": 5,
+              "inventory_put_attempts": 5,
+              "payload_scheduled": 0,
+              "publications": 5,
+              "published_payload_bytes": 0,
+              "put_attempt_bytes": 0,
+              "put_attempts": 0,
+              "resume_incomplete": 23,
+              "retirements": 0,
+              "scan_rounds": 2,
+              "scanned": 814,
+              "work_idle_waits": 2144,
+              "work_passes": 2171,
+              "work_retry_waits": 23
+            },
+            "live_objects": {
+              "first": 512,
+              "last": 512
+            },
+            "pending": {
+              "first": 1,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 7000064,
+              "last": 24850432,
+              "maximum": 24850432
+            }
+          }
+        },
+        "peak_object_count": 1066,
+        "peak_object_bytes": 69408176,
+        "peak_local_allocated_bytes": 130360832,
+        "peak_local_metadata_bytes": 822445,
+        "peak_pending_replicated_descriptors": 2,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 18.276898093,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.2810936000023503,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 159426545408423,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 1024
+      },
+      "after_client": {
+        "time_ns": 159455137221125,
+        "storage": {
+          "1": {
+            "logical": 135311189,
+            "allocated": 138714112,
+            "files": 2062,
+            "payload": 58318854,
+            "segments": 0,
+            "metadata": 810021
+          }
+        },
+        "object_store": {
+          "count": 1035,
+          "bytes": 67334760
+        },
+        "garbage_objects_remaining": 0
+      },
+      "variant": "candidate",
+      "offload": {
+        "per_node_second_half_local_payload_slope_bytes_per_sec": {
+          "1": null
+        },
+        "per_node_after_client_payload_bytes": {
+          "1": 58318854
+        },
+        "leader_full_or_closed_eligibility": {
+          "1-0": {
+            "sampled_seconds": 14.887548333,
+            "first": 0,
+            "last": 0,
+            "maximum": 0,
+            "published_bytes_per_sec": 0.0,
+            "pressure_seals": 0,
+            "eligible_arrival_estimate_bytes_per_sec": 0.0
+          },
+          "1-1": {
+            "sampled_seconds": 14.887548333,
+            "first": 0,
+            "last": 0,
+            "maximum": 0,
+            "published_bytes_per_sec": 0.0,
+            "pressure_seals": 0,
+            "eligible_arrival_estimate_bytes_per_sec": 0.0
+          }
+        },
+        "eligibility_scope": "Candidate-only sampled full/closed tails, including pending work; pressure-forced short tails are not this gauge. Without pressure seals, arrival is estimated as published bytes plus gauge change over the same interval, not HTTP throughput. Nodes other than the direct leader do not increment its publication counter. Non-atomic observations, no deletions of the benchmark's live streams.",
+        "payload_upload_bytes_per_sec": 0.0,
+        "max_pending_per_group": 1,
+        "max_active_backlog_credit": 16988,
+        "max_spent_backlog_credit": 305784,
+        "max_unapplied_bytes": 17066,
+        "minimum_filesystem_free_bytes": 9798955008,
+        "scope": "Finite second-half least-squares slope; small partial tails oscillate. Physical payload files exclude WAL/metadata and pinned unlinked inodes; allocated totals and statvfs are separate. Not an indefinite bound. Pressure observations are candidate-only, not invented baseline zeroes."
+      }
+    }
+  ],
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "total": 1,
+      "passing": 1,
+      "acks_per_sec": {
+        "observations": 1,
+        "median": 617.7083333333334,
+        "minimum": 617.7083333333334,
+        "maximum": 617.7083333333334
+      },
+      "p50_ms": {
+        "observations": 1,
+        "median": 4.447,
+        "minimum": 4.447,
+        "maximum": 4.447
+      },
+      "p99_ms": {
+        "observations": 1,
+        "median": 63.839,
+        "minimum": 63.839,
+        "maximum": 63.839
+      },
+      "payload_puts": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 1,
+        "median": 60723206,
+        "minimum": 60723206,
+        "maximum": 60723206
+      },
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": {
+        "observations": 1,
+        "median": 0.5673036463147774,
+        "minimum": 0.5673036463147774,
+        "maximum": 0.5673036463147774
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 1,
+        "median": 98963456,
+        "minimum": 98963456,
+        "maximum": 98963456
+      },
+      "garbage_reclamation_seconds": {
+        "observations": 1,
+        "median": 23.760680853,
+        "minimum": 23.760680853,
+        "maximum": 23.760680853
+      }
+    },
+    {
+      "variant": "candidate",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "total": 1,
+      "passing": 1,
+      "acks_per_sec": {
+        "observations": 1,
+        "median": 593.25,
+        "minimum": 593.25,
+        "maximum": 593.25
+      },
+      "p50_ms": {
+        "observations": 1,
+        "median": 4.599,
+        "minimum": 4.599,
+        "maximum": 4.599
+      },
+      "p99_ms": {
+        "observations": 1,
+        "median": 91.071,
+        "minimum": 91.071,
+        "maximum": 91.071
+      },
+      "payload_puts": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 1,
+        "median": 58318854,
+        "minimum": 58318854,
+        "maximum": 58318854
+      },
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": {
+        "observations": 1,
+        "median": 0.6746235239644379,
+        "minimum": 0.6746235239644379,
+        "maximum": 0.6746235239644379
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 1,
+        "median": 100147200,
+        "minimum": 100147200,
+        "maximum": 100147200
+      },
+      "garbage_reclamation_seconds": {
+        "observations": 1,
+        "median": 18.276898093,
+        "minimum": 18.276898093,
+        "maximum": 18.276898093
+      }
+    }
+  ],
+  "passed": 2,
+  "total": 2,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8",
+  "variant_checker_sha256": "f2b5b0cd8f3b3e172f9b8cbd5a441870f1f909295b6e5b922853b8faf8eef648",
+  "comparison_scope": "Same workload/settings and pinned native/provider/client; local shared host. Async throughput is local acceptance, NOT committed operations/s. All-replica drain and sampled Raft entry progress remain explicit. Missing observations and failed runs remain in counts."
+}

@@ -1,0 +1,2611 @@
+{
+  "passed": 8,
+  "total": 8,
+  "cells": [
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15674,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-baseline-async3-r1",
+      "arm": "async3",
+      "cold": true,
+      "elapsed_seconds": 245.699457922,
+      "completion_ops_per_second": 64.00362374905157,
+      "latency_ms": {
+        "count": 15674,
+        "p50": 1.456225,
+        "p99": 22.471529,
+        "max": 100.264688
+      },
+      "schedule_lateness_ms": {
+        "count": 15674,
+        "p50": 0.272456,
+        "p99": 30.678374,
+        "max": 101.088647
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.87108904,
+        "p99": 7.82079118,
+        "max": 7.82079118
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.87108904,
+        "p99": 4.152835911,
+        "max": 4.152835911
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.82079118,
+        "p99": 7.82079118,
+        "max": 7.82079118
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 4.348690759012243,
+        "max": 4.348690759012243
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 245.529581823,
+          "cpu_cores": 0.35295136071413336,
+          "peak_rss_bytes": 196472832,
+          "io_delta": {
+            "rchar": 445287162,
+            "wchar": 481732383,
+            "syscr": 462249,
+            "syscw": 1450920,
+            "read_bytes": 0,
+            "write_bytes": 833630208,
+            "cancelled_write_bytes": 144805888
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 245.529581823,
+          "cpu_cores": 0.36158575818371524,
+          "peak_rss_bytes": 491905024,
+          "io_delta": {
+            "rchar": 693554282,
+            "wchar": 225295971,
+            "syscr": 289266,
+            "syscw": 50690,
+            "read_bytes": 0,
+            "write_bytes": 48762880,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 245.529581823,
+          "cpu_cores": 0.16128402820539675,
+          "peak_rss_bytes": 140222464,
+          "io_delta": {
+            "rchar": 345608461,
+            "wchar": 16861252,
+            "syscr": 100836,
+            "syscw": 17449,
+            "read_bytes": 0,
+            "write_bytes": 13946880,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 73,
+      "peak_object_bytes": 4461488,
+      "peak_local_allocated_bytes": 77894656,
+      "final_objects": {
+        "count": 4,
+        "bytes": 1344
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197192
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459816
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722200
+        },
+        {
+          "count": 15,
+          "bytes": 722000
+        },
+        {
+          "count": 17,
+          "bytes": 853272
+        },
+        {
+          "count": 18,
+          "bytes": 918808
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115816
+        },
+        {
+          "count": 22,
+          "bytes": 1181232
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 25,
+          "bytes": 1378320
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509352
+        },
+        {
+          "count": 28,
+          "bytes": 1575208
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771896
+        },
+        {
+          "count": 32,
+          "bytes": 1837512
+        },
+        {
+          "count": 33,
+          "bytes": 1903048
+        },
+        {
+          "count": 37,
+          "bytes": 2099872
+        },
+        {
+          "count": 37,
+          "bytes": 2165632
+        },
+        {
+          "count": 38,
+          "bytes": 2231248
+        },
+        {
+          "count": 39,
+          "bytes": 2296744
+        },
+        {
+          "count": 41,
+          "bytes": 2428136
+        },
+        {
+          "count": 42,
+          "bytes": 2493592
+        },
+        {
+          "count": 43,
+          "bytes": 2559208
+        },
+        {
+          "count": 45,
+          "bytes": 2690600
+        },
+        {
+          "count": 46,
+          "bytes": 2756016
+        },
+        {
+          "count": 47,
+          "bytes": 2821672
+        },
+        {
+          "count": 48,
+          "bytes": 2887328
+        },
+        {
+          "count": 49,
+          "bytes": 2952904
+        },
+        {
+          "count": 51,
+          "bytes": 3084216
+        },
+        {
+          "count": 52,
+          "bytes": 3149872
+        },
+        {
+          "count": 53,
+          "bytes": 3215368
+        },
+        {
+          "count": 54,
+          "bytes": 3281144
+        },
+        {
+          "count": 56,
+          "bytes": 3412216
+        },
+        {
+          "count": 57,
+          "bytes": 3477832
+        },
+        {
+          "count": 58,
+          "bytes": 3543608
+        },
+        {
+          "count": 61,
+          "bytes": 3676976
+        },
+        {
+          "count": 61,
+          "bytes": 3740256
+        },
+        {
+          "count": 62,
+          "bytes": 3806032
+        },
+        {
+          "count": 63,
+          "bytes": 3871568
+        },
+        {
+          "count": 64,
+          "bytes": 3937144
+        }
+      ],
+      "peak_pending_replicated_descriptors": 9,
+      "methods": {
+        "GET": 10950,
+        "HEAD": 6865,
+        "PUT": 614,
+        "POST": 338,
+        "DELETE": 609
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 7
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15621,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-baseline-async3-r2",
+      "arm": "async3",
+      "cold": true,
+      "elapsed_seconds": 244.708320058,
+      "completion_ops_per_second": 64.00338588143005,
+      "latency_ms": {
+        "count": 15621,
+        "p50": 1.347248,
+        "p99": 14.799565,
+        "max": 113.965476
+      },
+      "schedule_lateness_ms": {
+        "count": 15621,
+        "p50": 0.21863,
+        "p99": 18.045086,
+        "max": 111.040124
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.477209882,
+        "p99": 7.69972031,
+        "max": 7.69972031
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.477209882,
+        "p99": 3.967707143,
+        "max": 3.967707143
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.69972031,
+        "p99": 7.69972031,
+        "max": 7.69972031
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 3.914760259009199,
+        "max": 3.914760259009199
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 244.477312583,
+          "cpu_cores": 0.3147940362518182,
+          "peak_rss_bytes": 186765312,
+          "io_delta": {
+            "rchar": 447648320,
+            "wchar": 482430927,
+            "syscr": 467041,
+            "syscw": 1451257,
+            "read_bytes": 0,
+            "write_bytes": 834220032,
+            "cancelled_write_bytes": 145031168
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 244.477312583,
+          "cpu_cores": 0.3502165460483456,
+          "peak_rss_bytes": 478961664,
+          "io_delta": {
+            "rchar": 677710157,
+            "wchar": 223271953,
+            "syscr": 285837,
+            "syscw": 50360,
+            "read_bytes": 0,
+            "write_bytes": 48996352,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 244.477312583,
+          "cpu_cores": 0.15330665902700294,
+          "peak_rss_bytes": 177692672,
+          "io_delta": {
+            "rchar": 349244722,
+            "wchar": 16363377,
+            "syscr": 100769,
+            "syscw": 17297,
+            "read_bytes": 0,
+            "write_bytes": 13869056,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 72,
+      "peak_object_bytes": 4461352,
+      "peak_local_allocated_bytes": 77263872,
+      "final_objects": {
+        "count": 4,
+        "bytes": 1304
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197192
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459776
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722240
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853192
+        },
+        {
+          "count": 18,
+          "bytes": 919128
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115736
+        },
+        {
+          "count": 21,
+          "bytes": 1115696
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 24,
+          "bytes": 1312704
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509352
+        },
+        {
+          "count": 28,
+          "bytes": 1575288
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771776
+        },
+        {
+          "count": 32,
+          "bytes": 1837632
+        },
+        {
+          "count": 33,
+          "bytes": 1903048
+        },
+        {
+          "count": 36,
+          "bytes": 2099816
+        },
+        {
+          "count": 37,
+          "bytes": 2165632
+        },
+        {
+          "count": 38,
+          "bytes": 2231088
+        },
+        {
+          "count": 39,
+          "bytes": 2296744
+        },
+        {
+          "count": 41,
+          "bytes": 2428096
+        },
+        {
+          "count": 41,
+          "bytes": 2427976
+        },
+        {
+          "count": 43,
+          "bytes": 2559208
+        },
+        {
+          "count": 44,
+          "bytes": 2625104
+        },
+        {
+          "count": 45,
+          "bytes": 2690440
+        },
+        {
+          "count": 47,
+          "bytes": 2821632
+        },
+        {
+          "count": 48,
+          "bytes": 2887528
+        },
+        {
+          "count": 49,
+          "bytes": 2952904
+        },
+        {
+          "count": 50,
+          "bytes": 3018560
+        },
+        {
+          "count": 52,
+          "bytes": 3149792
+        },
+        {
+          "count": 53,
+          "bytes": 3215368
+        },
+        {
+          "count": 54,
+          "bytes": 3281104
+        },
+        {
+          "count": 56,
+          "bytes": 3412296
+        },
+        {
+          "count": 57,
+          "bytes": 3477792
+        },
+        {
+          "count": 58,
+          "bytes": 3543688
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 60,
+          "bytes": 3674680
+        },
+        {
+          "count": 62,
+          "bytes": 3806192
+        },
+        {
+          "count": 63,
+          "bytes": 3871488
+        },
+        {
+          "count": 64,
+          "bytes": 3937144
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 11136,
+        "HEAD": 6938,
+        "PUT": 613,
+        "POST": 336,
+        "DELETE": 608
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 1,
+        "upper": 7
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15639,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-baseline-quorum3-r1",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 245.276465808,
+      "completion_ops_per_second": 64.00321183401796,
+      "latency_ms": {
+        "count": 15639,
+        "p50": 2.366808,
+        "p99": 27.302364,
+        "max": 168.975971
+      },
+      "schedule_lateness_ms": {
+        "count": 15639,
+        "p50": 0.262693,
+        "p99": 61.383341,
+        "max": 268.700704
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.618617089,
+        "p99": 7.661224893,
+        "max": 7.661224893
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.618617089,
+        "p99": 4.024709209,
+        "max": 4.024709209
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.661224893,
+        "p99": 7.661224893,
+        "max": 7.661224893
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 4.212934256007429,
+        "max": 4.212934256007429
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 244.842486549,
+          "cpu_cores": 0.3608850785883382,
+          "peak_rss_bytes": 183828480,
+          "io_delta": {
+            "rchar": 320504316,
+            "wchar": 394724135,
+            "syscr": 456531,
+            "syscw": 1440706,
+            "read_bytes": 0,
+            "write_bytes": 748318720,
+            "cancelled_write_bytes": 101883904
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 244.842486549,
+          "cpu_cores": 0.36076255083417735,
+          "peak_rss_bytes": 487555072,
+          "io_delta": {
+            "rchar": 666479551,
+            "wchar": 220577543,
+            "syscr": 281675,
+            "syscw": 50167,
+            "read_bytes": 0,
+            "write_bytes": 48566272,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 244.842486549,
+          "cpu_cores": 0.15920439523962676,
+          "peak_rss_bytes": 79937536,
+          "io_delta": {
+            "rchar": 343743382,
+            "wchar": 16667682,
+            "syscr": 100101,
+            "syscw": 17356,
+            "read_bytes": 0,
+            "write_bytes": 13701120,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 73,
+      "peak_object_bytes": 4461528,
+      "peak_local_allocated_bytes": 77792256,
+      "final_objects": {
+        "count": 4,
+        "bytes": 1384
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197192
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459736
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722160
+        },
+        {
+          "count": 15,
+          "bytes": 722000
+        },
+        {
+          "count": 17,
+          "bytes": 853232
+        },
+        {
+          "count": 18,
+          "bytes": 918808
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115816
+        },
+        {
+          "count": 22,
+          "bytes": 1181232
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 25,
+          "bytes": 1378320
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509352
+        },
+        {
+          "count": 28,
+          "bytes": 1575208
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771816
+        },
+        {
+          "count": 32,
+          "bytes": 1837472
+        },
+        {
+          "count": 33,
+          "bytes": 1903048
+        },
+        {
+          "count": 36,
+          "bytes": 2099856
+        },
+        {
+          "count": 37,
+          "bytes": 2165672
+        },
+        {
+          "count": 38,
+          "bytes": 2231088
+        },
+        {
+          "count": 39,
+          "bytes": 2296744
+        },
+        {
+          "count": 41,
+          "bytes": 2428176
+        },
+        {
+          "count": 41,
+          "bytes": 2427976
+        },
+        {
+          "count": 43,
+          "bytes": 2559208
+        },
+        {
+          "count": 44,
+          "bytes": 2625144
+        },
+        {
+          "count": 45,
+          "bytes": 2690440
+        },
+        {
+          "count": 47,
+          "bytes": 2821712
+        },
+        {
+          "count": 48,
+          "bytes": 2887488
+        },
+        {
+          "count": 49,
+          "bytes": 2952904
+        },
+        {
+          "count": 51,
+          "bytes": 3084176
+        },
+        {
+          "count": 53,
+          "bytes": 3151728
+        },
+        {
+          "count": 53,
+          "bytes": 3215368
+        },
+        {
+          "count": 54,
+          "bytes": 3281224
+        },
+        {
+          "count": 55,
+          "bytes": 3346600
+        },
+        {
+          "count": 57,
+          "bytes": 3477832
+        },
+        {
+          "count": 58,
+          "bytes": 3543728
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 61,
+          "bytes": 3740256
+        },
+        {
+          "count": 62,
+          "bytes": 3806072
+        },
+        {
+          "count": 63,
+          "bytes": 3871528
+        },
+        {
+          "count": 64,
+          "bytes": 3937224
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 10866,
+        "HEAD": 6798,
+        "PUT": 612,
+        "POST": 334,
+        "DELETE": 608
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 7
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15618,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-baseline-quorum3-r2",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 244.779450736,
+      "completion_ops_per_second": 64.00307057584138,
+      "latency_ms": {
+        "count": 15618,
+        "p50": 2.89289,
+        "p99": 19.649007,
+        "max": 201.586541
+      },
+      "schedule_lateness_ms": {
+        "count": 15618,
+        "p50": 0.285669,
+        "p99": 40.704392,
+        "max": 647.429078
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.498421607,
+        "p99": 7.725860029,
+        "max": 7.725860029
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.498421607,
+        "p99": 3.990961786,
+        "max": 3.990961786
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.725860029,
+        "p99": 7.725860029,
+        "max": 7.725860029
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 4.0031657830113545,
+        "max": 4.0031657830113545
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.974252283,
+          "cpu_cores": 0.34007686968442163,
+          "peak_rss_bytes": 175104000,
+          "io_delta": {
+            "rchar": 319442101,
+            "wchar": 394110029,
+            "syscr": 461007,
+            "syscw": 1439028,
+            "read_bytes": 0,
+            "write_bytes": 747552768,
+            "cancelled_write_bytes": 102080512
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.974252283,
+          "cpu_cores": 0.36561235116126806,
+          "peak_rss_bytes": 492187648,
+          "io_delta": {
+            "rchar": 661684271,
+            "wchar": 213771516,
+            "syscr": 281829,
+            "syscw": 49637,
+            "read_bytes": 0,
+            "write_bytes": 48627712,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.974252283,
+          "cpu_cores": 0.16054972864335057,
+          "peak_rss_bytes": 183345152,
+          "io_delta": {
+            "rchar": 345279768,
+            "wchar": 16854981,
+            "syscr": 100031,
+            "syscw": 17365,
+            "read_bytes": 0,
+            "write_bytes": 13971456,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 72,
+      "peak_object_bytes": 4461592,
+      "peak_local_allocated_bytes": 76600320,
+      "final_objects": {
+        "count": 4,
+        "bytes": 1104
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197232
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459816
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722160
+        },
+        {
+          "count": 15,
+          "bytes": 722000
+        },
+        {
+          "count": 17,
+          "bytes": 853312
+        },
+        {
+          "count": 18,
+          "bytes": 918808
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115816
+        },
+        {
+          "count": 22,
+          "bytes": 1181232
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 25,
+          "bytes": 1378360
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509352
+        },
+        {
+          "count": 28,
+          "bytes": 1575128
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771896
+        },
+        {
+          "count": 31,
+          "bytes": 1771856
+        },
+        {
+          "count": 33,
+          "bytes": 1903048
+        },
+        {
+          "count": 36,
+          "bytes": 2099896
+        },
+        {
+          "count": 37,
+          "bytes": 2165752
+        },
+        {
+          "count": 38,
+          "bytes": 2231088
+        },
+        {
+          "count": 39,
+          "bytes": 2296744
+        },
+        {
+          "count": 41,
+          "bytes": 2428256
+        },
+        {
+          "count": 41,
+          "bytes": 2427976
+        },
+        {
+          "count": 43,
+          "bytes": 2559208
+        },
+        {
+          "count": 44,
+          "bytes": 2624984
+        },
+        {
+          "count": 45,
+          "bytes": 2690440
+        },
+        {
+          "count": 47,
+          "bytes": 2821792
+        },
+        {
+          "count": 47,
+          "bytes": 2821712
+        },
+        {
+          "count": 49,
+          "bytes": 2952904
+        },
+        {
+          "count": 51,
+          "bytes": 3084256
+        },
+        {
+          "count": 51,
+          "bytes": 3084136
+        },
+        {
+          "count": 53,
+          "bytes": 3215368
+        },
+        {
+          "count": 54,
+          "bytes": 3281264
+        },
+        {
+          "count": 55,
+          "bytes": 3346600
+        },
+        {
+          "count": 57,
+          "bytes": 3477832
+        },
+        {
+          "count": 58,
+          "bytes": 3543528
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 61,
+          "bytes": 3740296
+        },
+        {
+          "count": 62,
+          "bytes": 3805952
+        },
+        {
+          "count": 63,
+          "bytes": 3871528
+        },
+        {
+          "count": 64,
+          "bytes": 3937344
+        }
+      ],
+      "peak_pending_replicated_descriptors": 9,
+      "methods": {
+        "GET": 10999,
+        "HEAD": 6857,
+        "PUT": 613,
+        "POST": 336,
+        "DELETE": 608
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 8
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15567,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-candidate-async3-r1",
+      "arm": "async3",
+      "cold": true,
+      "elapsed_seconds": 244.011364634,
+      "completion_ops_per_second": 64.00370708182051,
+      "latency_ms": {
+        "count": 15567,
+        "p50": 1.401218,
+        "p99": 19.566944,
+        "max": 300.553989
+      },
+      "schedule_lateness_ms": {
+        "count": 15567,
+        "p50": 0.227042,
+        "p99": 61.374769,
+        "max": 533.306189
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.570402364,
+        "p99": 7.708081646,
+        "max": 7.708081646
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.570402364,
+        "p99": 3.580406875,
+        "max": 3.580406875
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.708081646,
+        "p99": 7.708081646,
+        "max": 7.708081646
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 3.181456240999978,
+        "max": 3.181456240999978
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.823370271,
+          "cpu_cores": 0.33671915825275117,
+          "peak_rss_bytes": 187473920,
+          "io_delta": {
+            "rchar": 418380929,
+            "wchar": 472287316,
+            "syscr": 451317,
+            "syscw": 1457828,
+            "read_bytes": 0,
+            "write_bytes": 821313536,
+            "cancelled_write_bytes": 144338944
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.823370271,
+          "cpu_cores": 0.34713653537774497,
+          "peak_rss_bytes": 489766912,
+          "io_delta": {
+            "rchar": 643210603,
+            "wchar": 219913248,
+            "syscr": 275853,
+            "syscw": 50431,
+            "read_bytes": 0,
+            "write_bytes": 48488448,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.823370271,
+          "cpu_cores": 0.15019068910128805,
+          "peak_rss_bytes": 172593152,
+          "io_delta": {
+            "rchar": 332417910,
+            "wchar": 16828709,
+            "syscr": 92414,
+            "syscw": 17266,
+            "read_bytes": 0,
+            "write_bytes": 14213120,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 72,
+      "peak_object_bytes": 4398392,
+      "peak_local_allocated_bytes": 76518400,
+      "final_objects": {
+        "count": 4,
+        "bytes": 2624
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 8,
+          "bytes": 197248
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459656
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 14,
+          "bytes": 656544
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853352
+        },
+        {
+          "count": 18,
+          "bytes": 918768
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 20,
+          "bytes": 1050080
+        },
+        {
+          "count": 21,
+          "bytes": 1115656
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509312
+        },
+        {
+          "count": 28,
+          "bytes": 1574968
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771896
+        },
+        {
+          "count": 32,
+          "bytes": 1837432
+        },
+        {
+          "count": 33,
+          "bytes": 1903008
+        },
+        {
+          "count": 36,
+          "bytes": 2100016
+        },
+        {
+          "count": 36,
+          "bytes": 2099896
+        },
+        {
+          "count": 38,
+          "bytes": 2231048
+        },
+        {
+          "count": 39,
+          "bytes": 2296864
+        },
+        {
+          "count": 40,
+          "bytes": 2362360
+        },
+        {
+          "count": 41,
+          "bytes": 2427976
+        },
+        {
+          "count": 42,
+          "bytes": 2493592
+        },
+        {
+          "count": 44,
+          "bytes": 2624824
+        },
+        {
+          "count": 45,
+          "bytes": 2690400
+        },
+        {
+          "count": 46,
+          "bytes": 2756056
+        },
+        {
+          "count": 48,
+          "bytes": 2887248
+        },
+        {
+          "count": 49,
+          "bytes": 2952984
+        },
+        {
+          "count": 50,
+          "bytes": 3018520
+        },
+        {
+          "count": 51,
+          "bytes": 3084176
+        },
+        {
+          "count": 52,
+          "bytes": 3149752
+        },
+        {
+          "count": 54,
+          "bytes": 3280984
+        },
+        {
+          "count": 55,
+          "bytes": 3346600
+        },
+        {
+          "count": 56,
+          "bytes": 3412216
+        },
+        {
+          "count": 57,
+          "bytes": 3477872
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 60,
+          "bytes": 3674680
+        },
+        {
+          "count": 61,
+          "bytes": 3740296
+        },
+        {
+          "count": 63,
+          "bytes": 3871688
+        },
+        {
+          "count": 64,
+          "bytes": 3937104
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 10775,
+        "HEAD": 6730,
+        "PUT": 609,
+        "POST": 330,
+        "DELETE": 605
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 6
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15573,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-candidate-async3-r2",
+      "arm": "async3",
+      "cold": true,
+      "elapsed_seconds": 243.957376717,
+      "completion_ops_per_second": 64.00357159910244,
+      "latency_ms": {
+        "count": 15573,
+        "p50": 1.338105,
+        "p99": 10.928561,
+        "max": 111.768304
+      },
+      "schedule_lateness_ms": {
+        "count": 15573,
+        "p50": 0.198854,
+        "p99": 13.057975,
+        "max": 137.63248
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.552901722,
+        "p99": 7.671749453,
+        "max": 7.671749453
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.552901722,
+        "p99": 3.546974881,
+        "max": 3.546974881
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.671749453,
+        "p99": 7.671749453,
+        "max": 7.671749453
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 3.303399172000354,
+        "max": 3.303399172000354
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 243.41009583,
+          "cpu_cores": 0.30836847479170565,
+          "peak_rss_bytes": 194621440,
+          "io_delta": {
+            "rchar": 421133994,
+            "wchar": 473599311,
+            "syscr": 459079,
+            "syscw": 1459077,
+            "read_bytes": 0,
+            "write_bytes": 823939072,
+            "cancelled_write_bytes": 144510976
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 243.41009583,
+          "cpu_cores": 0.3408650726547804,
+          "peak_rss_bytes": 490094592,
+          "io_delta": {
+            "rchar": 654413706,
+            "wchar": 214464971,
+            "syscr": 280673,
+            "syscw": 49703,
+            "read_bytes": 0,
+            "write_bytes": 48668672,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 231,
+          "sampled_seconds": 243.41009583,
+          "cpu_cores": 0.14609090012780512,
+          "peak_rss_bytes": 181633024,
+          "io_delta": {
+            "rchar": 336149424,
+            "wchar": 17054735,
+            "syscr": 93337,
+            "syscw": 17300,
+            "read_bytes": 0,
+            "write_bytes": 14209024,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 71,
+      "peak_object_bytes": 4330256,
+      "peak_local_allocated_bytes": 76502016,
+      "final_objects": {
+        "count": 4,
+        "bytes": 2624
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 6,
+          "bytes": 131416
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 10,
+          "bytes": 393880
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 14,
+          "bytes": 656344
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853352
+        },
+        {
+          "count": 18,
+          "bytes": 918768
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115776
+        },
+        {
+          "count": 21,
+          "bytes": 1115656
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509312
+        },
+        {
+          "count": 28,
+          "bytes": 1574968
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771896
+        },
+        {
+          "count": 32,
+          "bytes": 1837432
+        },
+        {
+          "count": 33,
+          "bytes": 1903008
+        },
+        {
+          "count": 36,
+          "bytes": 2100016
+        },
+        {
+          "count": 36,
+          "bytes": 2099896
+        },
+        {
+          "count": 38,
+          "bytes": 2231048
+        },
+        {
+          "count": 39,
+          "bytes": 2296704
+        },
+        {
+          "count": 40,
+          "bytes": 2362360
+        },
+        {
+          "count": 41,
+          "bytes": 2427976
+        },
+        {
+          "count": 42,
+          "bytes": 2493632
+        },
+        {
+          "count": 44,
+          "bytes": 2624824
+        },
+        {
+          "count": 45,
+          "bytes": 2690440
+        },
+        {
+          "count": 46,
+          "bytes": 2756056
+        },
+        {
+          "count": 48,
+          "bytes": 2887288
+        },
+        {
+          "count": 49,
+          "bytes": 2952864
+        },
+        {
+          "count": 50,
+          "bytes": 3018520
+        },
+        {
+          "count": 51,
+          "bytes": 3084176
+        },
+        {
+          "count": 53,
+          "bytes": 3215288
+        },
+        {
+          "count": 54,
+          "bytes": 3280984
+        },
+        {
+          "count": 55,
+          "bytes": 3346600
+        },
+        {
+          "count": 57,
+          "bytes": 3477912
+        },
+        {
+          "count": 57,
+          "bytes": 3477872
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 60,
+          "bytes": 3674840
+        },
+        {
+          "count": 61,
+          "bytes": 3740296
+        },
+        {
+          "count": 63,
+          "bytes": 3871528
+        },
+        {
+          "count": 63,
+          "bytes": 3871568
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 10898,
+        "HEAD": 6779,
+        "PUT": 608,
+        "POST": 328,
+        "DELETE": 604
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 5
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15568,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-candidate-quorum3-r1",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 243.920169924,
+      "completion_ops_per_second": 64.00355670487885,
+      "latency_ms": {
+        "count": 15568,
+        "p50": 2.254527,
+        "p99": 17.975196,
+        "max": 105.760959
+      },
+      "schedule_lateness_ms": {
+        "count": 15568,
+        "p50": 0.224689,
+        "p99": 22.390101,
+        "max": 151.608595
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.50518676,
+        "p99": 7.533889346,
+        "max": 7.533889346
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.50518676,
+        "p99": 3.706151457,
+        "max": 3.706151457
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.533889346,
+        "p99": 7.533889346,
+        "max": 7.533889346
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 3.2069417889870238,
+        "max": 3.2069417889870238
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.300707168,
+          "cpu_cores": 0.3279891823121493,
+          "peak_rss_bytes": 173969408,
+          "io_delta": {
+            "rchar": 289220791,
+            "wchar": 383687028,
+            "syscr": 458202,
+            "syscw": 1453116,
+            "read_bytes": 0,
+            "write_bytes": 735502336,
+            "cancelled_write_bytes": 101216256
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.300707168,
+          "cpu_cores": 0.358116509459368,
+          "peak_rss_bytes": 490078208,
+          "io_delta": {
+            "rchar": 646643340,
+            "wchar": 212585854,
+            "syscr": 278249,
+            "syscw": 50111,
+            "read_bytes": 0,
+            "write_bytes": 48558080,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 229,
+          "sampled_seconds": 243.300707168,
+          "cpu_cores": 0.15466457306273407,
+          "peak_rss_bytes": 153776128,
+          "io_delta": {
+            "rchar": 337133800,
+            "wchar": 16735031,
+            "syscr": 93111,
+            "syscw": 17237,
+            "read_bytes": 0,
+            "write_bytes": 14155776,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 72,
+      "peak_object_bytes": 4398192,
+      "peak_local_allocated_bytes": 75887616,
+      "final_objects": {
+        "count": 4,
+        "bytes": 2624
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197352
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459816
+        },
+        {
+          "count": 11,
+          "bytes": 459536
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722240
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853192
+        },
+        {
+          "count": 18,
+          "bytes": 918968
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 21,
+          "bytes": 1115776
+        },
+        {
+          "count": 22,
+          "bytes": 1181432
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 26,
+          "bytes": 1443896
+        },
+        {
+          "count": 27,
+          "bytes": 1509312
+        },
+        {
+          "count": 28,
+          "bytes": 1574968
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771736
+        },
+        {
+          "count": 32,
+          "bytes": 1837432
+        },
+        {
+          "count": 33,
+          "bytes": 1903008
+        },
+        {
+          "count": 36,
+          "bytes": 2100016
+        },
+        {
+          "count": 36,
+          "bytes": 2099896
+        },
+        {
+          "count": 38,
+          "bytes": 2231288
+        },
+        {
+          "count": 39,
+          "bytes": 2296864
+        },
+        {
+          "count": 40,
+          "bytes": 2362360
+        },
+        {
+          "count": 42,
+          "bytes": 2493712
+        },
+        {
+          "count": 42,
+          "bytes": 2493592
+        },
+        {
+          "count": 44,
+          "bytes": 2624824
+        },
+        {
+          "count": 45,
+          "bytes": 2690600
+        },
+        {
+          "count": 46,
+          "bytes": 2756056
+        },
+        {
+          "count": 48,
+          "bytes": 2887248
+        },
+        {
+          "count": 49,
+          "bytes": 2953064
+        },
+        {
+          "count": 50,
+          "bytes": 3018520
+        },
+        {
+          "count": 51,
+          "bytes": 3084136
+        },
+        {
+          "count": 53,
+          "bytes": 3215688
+        },
+        {
+          "count": 54,
+          "bytes": 3280944
+        },
+        {
+          "count": 55,
+          "bytes": 3346600
+        },
+        {
+          "count": 57,
+          "bytes": 3478112
+        },
+        {
+          "count": 57,
+          "bytes": 3477832
+        },
+        {
+          "count": 59,
+          "bytes": 3609064
+        },
+        {
+          "count": 60,
+          "bytes": 3674640
+        },
+        {
+          "count": 61,
+          "bytes": 3740296
+        },
+        {
+          "count": 63,
+          "bytes": 3871488
+        },
+        {
+          "count": 63,
+          "bytes": 3871528
+        }
+      ],
+      "peak_pending_replicated_descriptors": 7,
+      "methods": {
+        "GET": 10755,
+        "HEAD": 6705,
+        "PUT": 608,
+        "POST": 328,
+        "DELETE": 604
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 5
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 15564,
+      "read_remote_bytes": 75497472,
+      "cycles": 48,
+      "cell": "cold-work-generations-002-candidate-quorum3-r2",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 243.949652177,
+      "completion_ops_per_second": 64.00298631861199,
+      "latency_ms": {
+        "count": 15564,
+        "p50": 2.101029,
+        "p99": 12.83132,
+        "max": 100.210998
+      },
+      "schedule_lateness_ms": {
+        "count": 15564,
+        "p50": 0.199617,
+        "p99": 15.817517,
+        "max": 148.083566
+      },
+      "gc_seconds": {
+        "count": 48,
+        "p50": 2.632674903,
+        "p99": 7.555469073,
+        "max": 7.555469073
+      },
+      "gc_unpinned_seconds": {
+        "count": 47,
+        "p50": 2.632674903,
+        "p99": 3.608328572,
+        "max": 3.608328572
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.555469073,
+        "p99": 7.555469073,
+        "max": 7.555469073
+      },
+      "generation_overrun_seconds": {
+        "count": 48,
+        "p50": 0,
+        "p99": 3.14014365899493,
+        "max": 3.14014365899493
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 242.928740658,
+          "cpu_cores": 0.30128176600988665,
+          "peak_rss_bytes": 182341632,
+          "io_delta": {
+            "rchar": 287487308,
+            "wchar": 383009766,
+            "syscr": 453835,
+            "syscw": 1451904,
+            "read_bytes": 0,
+            "write_bytes": 733667328,
+            "cancelled_write_bytes": 100818944
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 242.928740658,
+          "cpu_cores": 0.3363537792139341,
+          "peak_rss_bytes": 487948288,
+          "io_delta": {
+            "rchar": 647878749,
+            "wchar": 212536432,
+            "syscr": 279659,
+            "syscw": 49979,
+            "read_bytes": 0,
+            "write_bytes": 48586752,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 230,
+          "sampled_seconds": 242.928740658,
+          "cpu_cores": 0.14181113320181168,
+          "peak_rss_bytes": 170745856,
+          "io_delta": {
+            "rchar": 335652881,
+            "wchar": 16918612,
+            "syscr": 92719,
+            "syscw": 17298,
+            "read_bytes": 0,
+            "write_bytes": 14094336,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 71,
+      "peak_object_bytes": 4395816,
+      "peak_local_allocated_bytes": 76125184,
+      "final_objects": {
+        "count": 4,
+        "bytes": 2624
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 6,
+          "bytes": 131416
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 10,
+          "bytes": 393880
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 14,
+          "bytes": 656344
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853312
+        },
+        {
+          "count": 18,
+          "bytes": 918968
+        },
+        {
+          "count": 19,
+          "bytes": 984424
+        },
+        {
+          "count": 20,
+          "bytes": 1050080
+        },
+        {
+          "count": 22,
+          "bytes": 1181192
+        },
+        {
+          "count": 23,
+          "bytes": 1246888
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 27,
+          "bytes": 1509472
+        },
+        {
+          "count": 28,
+          "bytes": 1574968
+        },
+        {
+          "count": 29,
+          "bytes": 1640584
+        },
+        {
+          "count": 31,
+          "bytes": 1771776
+        },
+        {
+          "count": 32,
+          "bytes": 1837432
+        },
+        {
+          "count": 33,
+          "bytes": 1903008
+        },
+        {
+          "count": 36,
+          "bytes": 2099856
+        },
+        {
+          "count": 36,
+          "bytes": 2099896
+        },
+        {
+          "count": 38,
+          "bytes": 2231048
+        },
+        {
+          "count": 39,
+          "bytes": 2296704
+        },
+        {
+          "count": 40,
+          "bytes": 2362360
+        },
+        {
+          "count": 41,
+          "bytes": 2428136
+        },
+        {
+          "count": 42,
+          "bytes": 2493592
+        },
+        {
+          "count": 44,
+          "bytes": 2624824
+        },
+        {
+          "count": 46,
+          "bytes": 2692256
+        },
+        {
+          "count": 46,
+          "bytes": 2756056
+        },
+        {
+          "count": 48,
+          "bytes": 2887248
+        },
+        {
+          "count": 48,
+          "bytes": 2887288
+        },
+        {
+          "count": 50,
+          "bytes": 3018520
+        },
+        {
+          "count": 51,
+          "bytes": 3084136
+        },
+        {
+          "count": 52,
+          "bytes": 3149752
+        },
+        {
+          "count": 54,
+          "bytes": 3280984
+        },
+        {
+          "count": 55,
+          "bytes": 3346760
+        },
+        {
+          "count": 56,
+          "bytes": 3412216
+        },
+        {
+          "count": 58,
+          "bytes": 3543408
+        },
+        {
+          "count": 59,
+          "bytes": 3609224
+        },
+        {
+          "count": 60,
+          "bytes": 3674680
+        },
+        {
+          "count": 61,
+          "bytes": 3740296
+        },
+        {
+          "count": 63,
+          "bytes": 3871528
+        },
+        {
+          "count": 64,
+          "bytes": 3937104
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 10916,
+        "HEAD": 6833,
+        "PUT": 607,
+        "POST": 326,
+        "DELETE": 603
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 3
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "missing-completed-delete": true,
+        "collection-before-completion": true,
+        "early-pinned-delete": true
+      }
+    }
+  ],
+  "checker_sources": {
+    "cold_generations_check.py": "7b478bf011b631d4bee5cb65a7812acf2a33b91a9be6255250ea41095870bf3f",
+    "cold_benchmark_check.py": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+    "benchmark_summary.py": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8"
+  }
+}

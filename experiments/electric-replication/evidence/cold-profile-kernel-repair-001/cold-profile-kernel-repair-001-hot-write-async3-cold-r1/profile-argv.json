@@ -1,0 +1,22 @@
+[
+  "sudo",
+  "-n",
+  "perf",
+  "record",
+  "--clockid",
+  "mono",
+  "--max-size",
+  "128M",
+  "-e",
+  "raw_syscalls:sys_enter",
+  "--filter",
+  "id == 74 || id == 75",
+  "-e",
+  "raw_syscalls:sys_exit",
+  "--filter",
+  "id == 74 || id == 75",
+  "-o",
+  "/home/user/workspace/repo/.tmp/electric-profiles/cold-profile-kernel-repair-001-hot-write-async3-cold-r1.kernel.perf.data",
+  "-p",
+  "1355333,1355354,1355376,1355256,1355280,1355298,1355316"
+]

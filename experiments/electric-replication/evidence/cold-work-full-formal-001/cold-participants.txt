@@ -1,0 +1,26 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 75 and seed 5775357372889888597 with 2 workers on 8 cores with 1820MB heap and 64MB offheap memory [pid: 2234336] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/ColdOwnership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ColdOwnership
+Starting... (2026-10-10 12:40:39)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-10 12:40:39.
+Progress(14) at 2026-10-10 12:40:42: 366,633 states generated (366,633 s/min), 65,116 distinct states found (65,116 ds/min), 24,148 states left on queue.
+Progress(34) at 2026-10-10 12:41:42: 10,754,040 states generated (10,387,407 s/min), 1,200,190 distinct states found (1,135,074 ds/min), 118,524 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.3E-6
+  based on the actual fingerprints:  val = 3.1E-7
+16405057 states generated, 1677456 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 45.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 9 and the 95th percentile is 3).
+Finished in 01min 35s at (2026-10-10 12:42:14)

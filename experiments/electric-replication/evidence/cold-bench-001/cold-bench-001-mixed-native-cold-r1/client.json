@@ -1,0 +1,59 @@
+{
+  "scenario": "mixed",
+  "api_style": "Durable",
+  "target": "http://127.0.0.1:20601",
+  "bucket": "bench-mixed",
+  "streams": 16,
+  "writers_per_stream": 1,
+  "readers": 4,
+  "read_rate": 1,
+  "read_interval_ms": 0,
+  "backfill_events": 0,
+  "subscribers": 16,
+  "writer_rate": 32,
+  "duration_secs": 24,
+  "payload_bytes": 256,
+  "elapsed_secs": 26.010991166,
+  "drive_secs": 24.0,
+  "write_counts": {
+    "ok": 12304,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "events_received": 12304,
+  "control_events_received": 12320,
+  "read_bytes_total": 36357376,
+  "read_counts": {
+    "ok": 100,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "aggregate_ops_per_sec": 512.6666666666666,
+  "write_latency_ms": {
+    "count": 12304,
+    "mean_ms": 2.2910441319895987,
+    "p50_ms": 2.163,
+    "p90_ms": 3.289,
+    "p99_ms": 5.103,
+    "p999_ms": 10.159,
+    "max_ms": 34.047
+  },
+  "fan_out_latency_ms": {
+    "count": 12304,
+    "mean_ms": 1.3525465702210666,
+    "p50_ms": 1.182,
+    "p90_ms": 2.179,
+    "p99_ms": 3.307,
+    "p999_ms": 7.143,
+    "max_ms": 33.087
+  },
+  "read_latency_ms": {
+    "count": 100,
+    "mean_ms": 26.540680000000005,
+    "p50_ms": 15.143,
+    "p90_ms": 18.415,
+    "p99_ms": 64.159,
+    "p999_ms": 1043.455,
+    "max_ms": 1043.455
+  }
+}

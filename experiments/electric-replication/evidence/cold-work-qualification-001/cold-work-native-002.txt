@@ -1,0 +1,137 @@
+{
+  "passed": 6,
+  "total": 6,
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 3,
+      "acks_per_sec": {
+        "observations": 3,
+        "median": 4065.9583333333335,
+        "minimum": 3390.6666666666665,
+        "maximum": 4260.833333333333
+      },
+      "p50_ms": {
+        "observations": 3,
+        "median": 0.735,
+        "minimum": 0.643,
+        "maximum": 0.847
+      },
+      "p99_ms": {
+        "observations": 3,
+        "median": 6.419,
+        "minimum": 6.283,
+        "maximum": 7.691
+      },
+      "payload_puts": {
+        "observations": 3,
+        "median": 381,
+        "minimum": 317,
+        "maximum": 399
+      },
+      "uploaded_bytes": {
+        "observations": 3,
+        "median": 24969216,
+        "minimum": 20774912,
+        "maximum": 26148864
+      },
+      "leader_local_payload_bytes": {
+        "observations": 3,
+        "median": 29699,
+        "minimum": 12035,
+        "maximum": 57347
+      },
+      "leader_backlog_slope": {
+        "observations": 3,
+        "median": 2820.0479247963794,
+        "minimum": -300.7565390133879,
+        "maximum": 5705.303245358565
+      },
+      "sut_cpu_cores": {
+        "observations": 3,
+        "median": 0.48234223711759877,
+        "minimum": 0.45658050929302985,
+        "maximum": 0.5117968522103246
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 3,
+        "median": 9285632,
+        "minimum": 9113600,
+        "maximum": 9506816
+      },
+      "garbage_reclamation_seconds": {
+        "observations": 3,
+        "median": 1.062829784,
+        "minimum": 0.108615776,
+        "maximum": 1.062889065
+      }
+    },
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 3,
+      "acks_per_sec": {
+        "observations": 3,
+        "median": 4305.375,
+        "minimum": 3678.8333333333335,
+        "maximum": 5413.208333333333
+      },
+      "p50_ms": {
+        "observations": 3,
+        "median": 0.727,
+        "minimum": 0.572,
+        "maximum": 0.902
+      },
+      "p99_ms": {
+        "observations": 3,
+        "median": 3.247,
+        "minimum": 2.515,
+        "maximum": 3.447
+      },
+      "payload_puts": {
+        "observations": 3,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 3,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 3,
+        "median": 26517763,
+        "minimum": 22668291,
+        "maximum": 33324291
+      },
+      "leader_backlog_slope": {
+        "observations": 3,
+        "median": 1086254.363132026,
+        "minimum": 916511.1088606226,
+        "maximum": 1529750.454463806
+      },
+      "sut_cpu_cores": {
+        "observations": 3,
+        "median": 0.4879372908548639,
+        "minimum": 0.4648447830756041,
+        "maximum": 0.5296684983474093
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 3,
+        "median": 6352896,
+        "minimum": 6209536,
+        "maximum": 6635520
+      },
+      "garbage_reclamation_seconds": null
+    }
+  ]
+}

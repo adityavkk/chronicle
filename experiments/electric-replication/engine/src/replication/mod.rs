@@ -2,6 +2,7 @@
 mod batch;
 pub(crate) mod clock;
 pub(crate) mod cold;
+mod cold_admission;
 pub(crate) mod cold_io;
 mod fork_io;
 mod forks;
@@ -177,6 +178,9 @@ struct Config {
     /// and snapshots remain compatible with the qualified checkpoint.
     #[serde(default)]
     cold: Option<cold_io::Config>,
+    /// Local pressure policy; deliberately excluded from the durable identity.
+    #[serde(default)]
+    cold_admission: cold_admission::Policy,
 }
 impl Config {
     fn version(&self) -> u32 { if self.cold.is_some() { 11 } else { 10 } }
@@ -199,6 +203,7 @@ struct Group {
     admitted_term: Arc<AtomicU64>,
     proposals: tokio::sync::mpsc::Sender<batch::Pending>,
     reads: ReadBarrier,
+    cold_admission: Option<Arc<cold_admission::Budget>>,
 }
 
 #[derive(Default)]
@@ -241,9 +246,10 @@ impl Group {
             timing::write_outcome("byte_bound", 1);
             429u16
         })?;
+        let storage = self.cold_admission.as_ref().map(|budget| budget.command(&command)).transpose()?.flatten();
         let (result, receive) = tokio::sync::oneshot::channel();
         // The queue/consensus worker, not the HTTP future, owns this permit.
-        self.proposals.try_send(batch::Pending { command, result, permit, bytes }).map_err(|_| {
+        self.proposals.try_send(batch::Pending { command, result, permit, bytes, storage }).map_err(|_| {
             timing::write_outcome("queue_unavailable", 1);
             503u16
         })?;
@@ -266,6 +272,7 @@ impl Group {
 pub struct Cluster {
     config: Config,
     groups: Vec<Group>,
+    cold_admission: Option<Arc<cold_admission::Budget>>,
     faults: Arc<std::sync::RwLock<network::Faults>>,
     client: reqwest::Client,
     _lock: std::fs::File,
@@ -409,7 +416,8 @@ impl Cluster {
                         .push(("stream-durability", "quorum-fsync".into()));
                     resp
                 }
-                Err(429) => response(429, "pending proposal bound reached"),
+                Err(429) => response(429, "pending proposal or cold backlog/observation bound reached; not admitted"),
+                Err(507) => response(507, "local disk headroom bound reached; not admitted"),
                 Err(413) => response(413, "encoded command exceeds admission bound"),
                 _ => self.unavailable(group, "write outcome unknown; retry with producer identity"),
             };
@@ -571,10 +579,55 @@ impl Cluster {
             };
         }
         match (parts[1], parts[3]) {
-            ("_raft10" | "_raft11", "append") => rpc(&raft.append_entries(decode!()).await),
+            ("_raft10" | "_raft11", "append") => {
+                let request: openraft::raft::AppendEntriesRequest<Types> = decode!();
+                if let Some(budget) = &self.cold_admission {
+                    // Publication/deletion and consensus maintenance use the
+                    // protected headroom; rejecting them could prevent recovery.
+                    if request.entries.iter().any(|entry| matches!(&entry.payload,
+                        EntryPayload::Normal(batch) if batch.commands.iter().any(cold_admission::grows))) {
+                        let ticket = match budget.reserve(req.body.len() as u64, false) {
+                            Ok(ticket) => ticket,
+                            Err(status) => return response(status, "replica storage admission unavailable"),
+                        };
+                        let raft = raft.clone();
+                        // The 10s HTTP timeout must not release a reservation
+                        // while the consensus/storage task can still write.
+                        return match tokio::spawn(async move {
+                            let _ticket = ticket;
+                            raft.append_entries(request).await
+                        }).await {
+                            Ok(result) => rpc(&result),
+                            Err(_) => response(503, "append task outcome unknown"),
+                        };
+                    }
+                }
+                rpc(&raft.append_entries(request).await)
+            },
             ("_raft10" | "_raft11", "vote") => rpc(&raft.vote(decode!()).await),
-            ("_raft10" | "_raft11", "snapshot") => rpc(&raft.install_snapshot(decode!()).await),
+            ("_raft10" | "_raft11", "snapshot") => {
+                let request: openraft_legacy::network_v1::InstallSnapshotRequest<Types> = decode!();
+                if let Some(budget) = &self.cold_admission {
+                    let bytes = if request.done {
+                        request.offset.saturating_add(request.data.len() as u64)
+                    } else { request.data.len() as u64 };
+                    let ticket = match budget.reserve(bytes, false) {
+                        Ok(ticket) => ticket,
+                        Err(status) => return response(status, "snapshot storage admission unavailable"),
+                    };
+                    let raft = raft.clone();
+                    return match tokio::spawn(async move {
+                        let _ticket = ticket;
+                        raft.install_snapshot(request).await
+                    }).await {
+                        Ok(result) => rpc(&result),
+                        Err(_) => response(503, "snapshot task outcome unknown"),
+                    };
+                }
+                rpc(&raft.install_snapshot(request).await)
+            },
             ("_admin", "metrics") => json(&raft.metrics().borrow_watched().clone()),
+            ("_admin", "pressure") => json(&self.cold_admission.as_ref().map(|budget| budget.status())),
             ("_admin", "cold") => self.cold_control(parts[2].parse().unwrap(), req).await,
             ("_admin", "keys") => self.public_group_keys(parts[2].parse().unwrap()).await,
             ("_admin", "fork") => self.fork_control(parts[2].parse().unwrap(), req).await,
@@ -682,6 +735,9 @@ pub fn run() {
     assert!(!config.genesis.is_empty() && config.genesis.keys().all(|id| *id > 0));
     assert!(config.cold.is_none() || config.genesis.len() <= cold::MAX_PARTICIPANTS,
         "cold genesis exceeds the storage participant bound");
+    if let Some(cold) = &config.cold {
+        config.cold_admission.validate(config.partitions, cold.segment_bytes);
+    }
     assert!(
         !config.cluster.is_empty()
             && config
@@ -756,6 +812,7 @@ pub fn run() {
             .build()
             .unwrap();
         let mut groups = Vec::new();
+        let cold_admission = config.cold.as_ref().map(|_| cold_admission::Budget::new(config.cold_admission.clone()));
         for group in 0..config.partitions {
             let dir = config.dir.join(group.to_string());
             let journal = journal::Journal::open(dir.join("wal"), 8 * 1024 * 1024)
@@ -807,6 +864,7 @@ pub fn run() {
                 bytes: Arc::new(Semaphore::new(config.pending_bytes)),
                 admitted_term,
                 reads: ReadBarrier::default(),
+                cold_admission: cold_admission.clone(),
             });
         }
         if config.stats_secs > 0 {
@@ -825,11 +883,16 @@ pub fn run() {
         let cluster = Cluster {
             config,
             groups,
+            cold_admission,
             faults,
             client,
             _lock: lock,
         };
         assert!(CLUSTER.set(cluster).is_ok());
+        if CLUSTER.get().unwrap().cold_admission.is_some() {
+            CLUSTER.get().unwrap().cold_pressure_sample().await;
+            tokio::spawn(CLUSTER.get().unwrap().cold_pressure_worker());
+        }
         for group in 0..CLUSTER.get().unwrap().groups.len() {
             tokio::spawn(CLUSTER.get().unwrap().subscription_worker(group));
             tokio::spawn(CLUSTER.get().unwrap().fork_worker(group));

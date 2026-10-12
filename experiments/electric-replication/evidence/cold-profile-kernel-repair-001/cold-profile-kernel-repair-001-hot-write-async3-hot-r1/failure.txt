@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 452, in cell
+    stop_trace()
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 363, in stop_trace
+    result["fsync"]=export_kernel_fsync(lab.output,kernel_path,lab.node_pids+lab.provider_pids)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 109, in export_kernel_fsync
+    return summarize_kernel_fsync(json.loads(line) for line in events)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark_summary.py", line 69, in summarize_kernel_fsync
+    raise ValueError("overlapping kernel fsync calls")
+ValueError: overlapping kernel fsync calls

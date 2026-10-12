@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import gzip
 import io
 import json
@@ -8,6 +9,7 @@ import tempfile
 import unittest
 
 from benchmark_summary import check_clock, kernel_fsync_event, summarize, summarize_fsync_trace, summarize_kernel_fsync, summarize_phase_timings, summarize_progress, summarize_sync_timings, summarize_write_outcomes
+from cold_benchmark_check import listing_key, object_window, summarize as summarize_cold, validate
 
 
 class KernelFsyncTrace(unittest.TestCase):
@@ -301,6 +303,77 @@ class SyncTimingSummary(unittest.TestCase):
         self.assertTrue(row["counter_reset_detected"])
         self.assertIsNone(row["whole_invocation"])
         self.assertIsNone(row["sampled_window"])
+
+
+class ColdAttribution(unittest.TestCase):
+    def test_startup_failure_stays_in_its_comparison_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cell = root / "failed-startup"
+            cell.mkdir()
+            (cell / "result.json").write_text(json.dumps(dict(arm="native", cold=True,
+                workload="many-write", repetition=2, verdict="FAIL", error="storage not initialized")))
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = summarize_cold(root)
+            self.assertEqual((result["total"], result["passed"]), (1, 0))
+            group = result["aggregates"][0]
+            self.assertEqual((group["arm"], group["cold"], group["workload"]), ("native", True, "many-write"))
+            self.assertEqual((group["cells"], group["passed"]), (1, 0))
+            self.assertIsNone(group["median_ops_per_sec"])
+
+    def test_generated_interleavings_exclude_verification_inventory_and_window_edges(self):
+        for seed in range(80):
+            rng=random.Random(seed)
+            events=[];expected=[]
+            for _ in range(40):
+                size=rng.randrange(1,131073)
+                kind=rng.choice(["client","new-key","inventory","head","before","after","cross-start","cross-end","failed"])
+                row=dict(op="s3",method="GET",status=206,start_ns=120,time_ns=180,path="/bucket/live",bytes=size,request_bytes=0)
+                if kind=="client":expected.append(size)
+                elif kind=="new-key":row["path"]="/bucket/new"
+                elif kind=="inventory":row["path"]="/bucket/inventory"
+                elif kind=="head":row.update(method="HEAD",bytes=0)
+                elif kind=="before":row.update(start_ns=20,time_ns=80)
+                elif kind=="after":row.update(start_ns=220,time_ns=280)
+                elif kind=="cross-start":row.update(start_ns=80)
+                elif kind=="cross-end":row.update(time_ns=220)
+                else:row.update(status=503)
+                events.append(row)
+            rng.shuffle(events)
+            result=object_window(events,100,200,{"/bucket/live"})
+            self.assertEqual(result["client_remote_fetched_bytes"],sum(expected))
+            self.assertEqual(result["client_payload_gets"],len(expected))
+        self.assertEqual(listing_key("p/+v1+stream~19/0000",True),"p/+v1+stream%7E19/0000")
+        for key in ("p/a%7Eb","/p/a","p//a","p/../a","p/a/"):
+            with self.assertRaises(ValueError):listing_key(key,True)
+
+    def test_cold_claim_requires_reclamation_client_reads_and_every_replica(self):
+        row=dict(arm="quorum3",cold=True,workload="replay",client_exit_code=0,replicas=3,streams=1,
+            seed_bytes=73,target_bytes=73,drain=[dict(node=n,bytes=73,offsets={"stream":73}) for n in range(1,4)],object_bucket="bucket",
+            probes=[dict(node=n,name="stream",bytes=73,offset=73,sha256="actual",expected_sha256="actual") for n in range(1,4)],
+            client_window=dict(start_ns=100,end_ns=200),client_object_keys=["/bucket/key"],
+            precondition=dict(remote_keys=["key"],listing_keys=["key"],local_payload_bytes=0,local_segment_bytes=0))
+        raw=dict(counts=dict(ok=7,backpressure=0,other_err=0),bytes_read_total=511)
+        events=[dict(op="s3",method="GET",status=206,start_ns=120,time_ns=180,path="/bucket/key",bytes=73,request_bytes=0)]
+        samples=[dict(unix_ms=1000,monotonic_ns=100),dict(unix_ms=1000,monotonic_ns=200)]
+        self.assertEqual(validate(row,raw,events,samples)["verdict"],"PASS")
+        mutations=[lambda r:r["drain"].pop(),lambda r:r["drain"][1].update(bytes=72),
+            lambda r:r["drain"][2]["offsets"].update(stream=72),lambda r:r.update(object_bucket="wrong-bucket"),
+            lambda r:r["probes"].pop(),lambda r:r["probes"][1].update(sha256="corrupt"),
+            lambda r:r["drain"][1].update(node=1),lambda r:r["probes"][1].update(node=1),
+            lambda r:r["probes"][2].update(sha256="different",expected_sha256="different"),
+            lambda r:r["probes"][2].update(offset=72),lambda r:r["precondition"].update(local_payload_bytes=1),
+            lambda r:r["precondition"].update(local_segment_bytes=1),lambda r:r["precondition"].update(listing_keys=["other"]),
+            lambda r:r.update(client_object_keys=[]),lambda r:r.update(client_exit_code=1),
+            lambda r:r.update(client_window=dict(start_ns=190,end_ns=200))]
+        for mutation in mutations:
+            changed=copy.deepcopy(row);mutation(changed)
+            self.assertEqual(validate(changed,raw,events,samples)["verdict"],"FAIL")
+        for key in ("backpressure","other_err"):
+            changed=copy.deepcopy(raw);changed["counts"][key]=1
+            self.assertEqual(validate(row,changed,events,samples)["verdict"],"FAIL")
+        changed=copy.deepcopy(raw);changed["bytes_read_total"]-=1
+        self.assertEqual(validate(row,changed,events,samples)["verdict"],"FAIL")
 
 
 if __name__ == "__main__":

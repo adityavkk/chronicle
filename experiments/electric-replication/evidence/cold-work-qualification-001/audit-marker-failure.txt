@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/.tmp/cold-work-audit.py", line 168, in <module>
+    else:inspect(path,data,str(p.parent.relative_to(ROOT)))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/cold-work-audit.py", line 123, in inspect
+    assert not private.search(data),(path,'private endpoint/key/access-id pattern')
+AssertionError: ('experiments/electric-replication/evidence/cold-bench-qualification-003/audit-export.py.txt', 'private endpoint/key/access-id pattern')

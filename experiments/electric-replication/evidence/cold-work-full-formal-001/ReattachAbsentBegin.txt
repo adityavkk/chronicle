@@ -1,0 +1,417 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 40 and seed 367195048009742028 with 2 workers on 8 cores with 1820MB heap and 64MB offheap memory [pid: 2356875] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/ColdOwnership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ColdOwnership
+Starting... (2026-10-10 13:00:00)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-10 13:00:00.
+Error: Invariant InvSafe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 0,
+  live |-> {},
+  pending |-> {},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {},
+  contents |-> [a |-> {}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 2: <Action line 399, col 44 to line 399, col 68 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 1,
+  live |-> {},
+  pending |-> {"p"},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {},
+  contents |-> [a |-> {}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 3: <Action line 399, col 44 to line 399, col 68 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 1,
+  live |-> {},
+  pending |-> {"p"},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a"},
+  contents |-> [a |-> {"p"}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 4: <Action line 399, col 44 to line 399, col 68 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 2,
+  live |-> {},
+  pending |-> {"a", "p"},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a"},
+  contents |-> [a |-> {"p"}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 5: <Action line 399, col 44 to line 399, col 68 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 3,
+  live |-> {},
+  pending |-> {"p"},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {"a"},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a"},
+  contents |-> [a |-> {"p"}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+State 6: <Action line 399, col 44 to line 399, col 68 of module ColdOwnership>
+/\ floors = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0 @@ 3 :> 0)
+/\ transfer = 0
+/\ readers = {}
+/\ joinFloor = 0
+/\ joining = "Absent"
+/\ fences = {}
+/\ g = [ participants |-> {1},
+  members |-> {1},
+  online |-> {1},
+  transfer |-> 0,
+  joining |-> "Absent",
+  joinFloor |-> 0,
+  pos |-> 3,
+  live |-> {"a"},
+  pending |-> {"p"},
+  node |->
+      << [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ],
+         [ applied |-> 0,
+           snap |-> 0,
+           request |-> 0,
+           purge |-> 0,
+           floor |-> 0,
+           pin |-> {} ] >>,
+  dead |-> {"a"},
+  physical |-> {},
+  inflight |-> {},
+  known |-> {},
+  late |-> {"a", "p"},
+  deletes |-> {},
+  captured |-> {"a"},
+  contents |-> [a |-> {"p"}, i1 |-> {}, i2 |-> {}, i3 |-> {}],
+  active |-> "none",
+  previous |-> "none",
+  scan |-> 0,
+  scanRoot |-> "none",
+  scanFrom |-> 0,
+  refresh |-> FALSE,
+  sourcePin |-> FALSE,
+  crashed |-> FALSE ]
+/\ deleted = FALSE
+/\ purged = <<0, 0, 0>>
+/\ applied = <<0, 0, 0>>
+/\ online = {1, 2}
+/\ upload = TRUE
+/\ deletePending = FALSE
+/\ committed = 0
+/\ participants = {1, 2}
+/\ attached = FALSE
+/\ members = {1, 2}
+/\ snapshots = <<0, 0, 0>>
+/\ requested = {}
+/\ retired = FALSE
+/\ blob = FALSE
+
+70 states generated, 45 distinct states found, 25 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 5 and the 95th percentile is 5).
+Finished in 00s at (2026-10-10 13:00:00)

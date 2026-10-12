@@ -1,0 +1,68 @@
+{
+  "cells": [
+    {
+      "cell": "cold-work-profile-fsync-002-baseline-hot-write-raft1-cold-r1",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "baseline"
+    },
+    {
+      "cell": "cold-work-profile-fsync-002-candidate-hot-write-raft1-cold-r1",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "repetition": 1,
+      "verdict": "FAIL",
+      "error": "AssertionError('8 GiB preflight failed; no SUT started')",
+      "variant": "candidate"
+    }
+  ],
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 1,
+      "passing": 0,
+      "acks_per_sec": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "payload_puts": null,
+      "uploaded_bytes": null,
+      "leader_local_payload_bytes": null,
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": null,
+      "sut_peak_rss_bytes": null,
+      "garbage_reclamation_seconds": null
+    },
+    {
+      "variant": "candidate",
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 1,
+      "passing": 0,
+      "acks_per_sec": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "payload_puts": null,
+      "uploaded_bytes": null,
+      "leader_local_payload_bytes": null,
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": null,
+      "sut_peak_rss_bytes": null,
+      "garbage_reclamation_seconds": null
+    }
+  ],
+  "passed": 0,
+  "total": 2,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8",
+  "variant_checker_sha256": "f2b5b0cd8f3b3e172f9b8cbd5a441870f1f909295b6e5b922853b8faf8eef648",
+  "comparison_scope": "Same workload/settings and pinned native/provider/client; local shared host. Async throughput is local acceptance, NOT committed operations/s. All-replica drain and sampled Raft entry progress remain explicit. Missing observations and failed runs remain in counts."
+}

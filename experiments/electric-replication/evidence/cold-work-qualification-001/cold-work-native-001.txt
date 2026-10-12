@@ -1,0 +1,87 @@
+{
+  "passed": 1,
+  "total": 6,
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 0,
+      "acks_per_sec": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "payload_puts": null,
+      "uploaded_bytes": null,
+      "leader_local_payload_bytes": null,
+      "leader_backlog_slope": null,
+      "sut_cpu_cores": null,
+      "sut_peak_rss_bytes": null,
+      "garbage_reclamation_seconds": null
+    },
+    {
+      "variant": "baseline",
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "total": 3,
+      "passing": 1,
+      "acks_per_sec": {
+        "observations": 1,
+        "median": 3396.5,
+        "minimum": 3396.5,
+        "maximum": 3396.5
+      },
+      "p50_ms": {
+        "observations": 1,
+        "median": 0.773,
+        "minimum": 0.773,
+        "maximum": 0.773
+      },
+      "p99_ms": {
+        "observations": 1,
+        "median": 6.563,
+        "minimum": 6.563,
+        "maximum": 6.563
+      },
+      "payload_puts": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "uploaded_bytes": {
+        "observations": 1,
+        "median": 0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "leader_local_payload_bytes": {
+        "observations": 1,
+        "median": 20933635,
+        "minimum": 20933635,
+        "maximum": 20933635
+      },
+      "leader_backlog_slope": {
+        "observations": 1,
+        "median": 951723.2001726403,
+        "minimum": 951723.2001726403,
+        "maximum": 951723.2001726403
+      },
+      "sut_cpu_cores": {
+        "observations": 1,
+        "median": 0.5942833817754076,
+        "minimum": 0.5942833817754076,
+        "maximum": 0.5942833817754076
+      },
+      "sut_peak_rss_bytes": {
+        "observations": 1,
+        "median": 6213632,
+        "minimum": 6213632,
+        "maximum": 6213632
+      },
+      "garbage_reclamation_seconds": null
+    }
+  ]
+}

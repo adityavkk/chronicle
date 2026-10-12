@@ -1,0 +1,6468 @@
+{
+  "cells": [
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-cold-r1",
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 75110,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 1251.8333333333333,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 75110,
+        "mean_ms": 3.1936310211689602,
+        "p50_ms": 1.895,
+        "p90_ms": 4.075,
+        "p99_ms": 27.407,
+        "p999_ms": 138.623,
+        "max_ms": 486.143
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "HEAD": 1745,
+          "GET": 1511,
+          "POST": 77,
+          "PUT": 575,
+          "DELETE": 70
+        },
+        "statuses": {
+          "200": 2527,
+          "206": 844,
+          "204": 70,
+          "404": 537
+        },
+        "request_body_bytes": 36160846,
+        "response_body_bytes": 130646653,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 2,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 39,
+          "sampled_seconds": 58.875131922,
+          "cpu_cores": 1.8809299679652953,
+          "peak_rss_bytes": 249708544,
+          "io_delta": {
+            "rchar": 29283644832,
+            "wchar": 11980230284,
+            "syscr": 1420541,
+            "syscw": 1552051,
+            "read_bytes": 266240,
+            "write_bytes": 12343611392,
+            "cancelled_write_bytes": 141864960
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 39,
+          "sampled_seconds": 58.875131922,
+          "cpu_cores": 0.8828854951673835,
+          "peak_rss_bytes": 485724160,
+          "io_delta": {
+            "rchar": 1213550053,
+            "wchar": 207062326,
+            "syscr": 306484,
+            "syscw": 10896,
+            "read_bytes": 0,
+            "write_bytes": 60887040,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 38,
+          "sampled_seconds": 57.352649462,
+          "cpu_cores": 0.07950809671001001,
+          "peak_rss_bytes": 6721536,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 299631032,
+            "syscr": 0,
+            "syscw": 71479,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 6.433331139996881,
+        "startup_rss_bytes": {
+          "sut": 108720128,
+          "provider": 250826752
+        },
+        "node_socket_sent_bytes_lower_bound": 625182613,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 2,
+              "maximum": 3
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 2,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 2,
+              "maximum": 10
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 2,
+              "maximum": 10
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 2,
+              "maximum": 10
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 2,
+              "maximum": 11
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 10
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 4,
+              "last": 1,
+              "maximum": 11
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 1,
+              "maximum": 11
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 1,
+              "last": 1,
+              "maximum": 8
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 1,
+              "maximum": 4
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 164,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617138111,
+              "end_unix_ms": 1791617197112,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617138111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617139111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617140112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617141111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617142111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617143112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617144112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617145112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617146112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617147112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617148112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617149111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617150112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617151112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617152111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617153111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617154112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617155112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617156112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617157111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617158119,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617159111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617160111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617161111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617162111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617163112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617164111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617165111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617166111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617167112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617168111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617169111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617170111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617171112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617172112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617173112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617174112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617175111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617176111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617177112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617178112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617179111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617180112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617181112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617182112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617183111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617184112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617185111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617186125,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617187112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617188111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617189122,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617190111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617191111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617192112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617193112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617194112,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617195111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617196111,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617197112,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 164,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617137623,
+              "end_unix_ms": 1791617196623,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617137623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617138623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617139623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617140623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617141623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617142623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617143623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617144624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617145623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617146623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617147623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617148623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617149623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617150623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617151623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617152623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617153623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617154625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617155623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617156623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617157623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617158623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617159623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617160623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617161623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617162623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617163624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617164623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617165623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617166642,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617167625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617168623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617169623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617170623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617171653,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617172625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617173624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617174623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617175623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617176623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617177623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617178625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617179623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617180623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617181624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617182623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617183623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617184623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617185623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617186623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617187623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617188624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617189623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617190623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617191623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617192623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617193623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617194623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617195623,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617196623,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 164,
+            "whole_invocation": {
+              "applied_commands": 82407,
+              "locally_durable_commands": 82408
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791617138064,
+              "end_unix_ms": 1791617197065,
+              "cumulative_delta": {
+                "applied_commands": 74727,
+                "locally_durable_commands": 74725
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617138064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617139064,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617140064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617141064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617142065,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617143065,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617144064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617145065,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617146064,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617147064,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617148066,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617149066,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617150064,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617151065,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617152064,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617153064,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617154065,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617155064,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617156064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617157065,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617158065,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617159065,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617160065,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617161064,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617162064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617163065,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617164072,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617165064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617166065,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617167065,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617168065,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617169064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617170065,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617171064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617172064,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617173069,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617174065,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617175064,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617176065,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617177064,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617178064,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617179065,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617180064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617181064,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617182067,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617183066,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617184067,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617185069,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617186070,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617187066,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617188064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617189066,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617190065,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617191065,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617192065,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617193065,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617194064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617195066,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617196064,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617197065,
+                "commands": 2
+              }
+            ]
+          }
+        },
+        "cold_progress": {
+          "1-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 215,
+              "delete_attempts": 34,
+              "delete_completed": 34,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 275,
+              "put_attempts": 257,
+              "resume_incomplete": 56,
+              "retirements": 16,
+              "scan_rounds": 60,
+              "scanned": 36240
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1290240,
+              "last": 131547136,
+              "maximum": 131547136
+            }
+          },
+          "1-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 190,
+              "delete_attempts": 33,
+              "delete_completed": 33,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 275,
+              "put_attempts": 257,
+              "resume_incomplete": 47,
+              "retirements": 16,
+              "scan_rounds": 60,
+              "scanned": 36148
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1302528,
+              "last": 131559424,
+              "maximum": 131559424
+            }
+          },
+          "2-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1302528,
+              "last": 131559424,
+              "maximum": 131559424
+            }
+          },
+          "2-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1310720,
+              "last": 131563520,
+              "maximum": 131563520
+            }
+          },
+          "3-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1318912,
+              "last": 131567616,
+              "maximum": 131567616
+            }
+          },
+          "3-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 769
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1347584,
+              "last": 131575808,
+              "maximum": 131575808
+            }
+          }
+        },
+        "peak_object_count": 1542,
+        "peak_object_bytes": 100808272,
+        "peak_local_allocated_bytes": 2259176448,
+        "peak_local_metadata_bytes": 2817794,
+        "peak_pending_replicated_descriptors": 8,
+        "payload_upload_parts_in_window": 537,
+        "payload_upload_bytes_in_window": 35192832,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 5.515834874,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 1.0787648389814422,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 140843983999461,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 140904708511299,
+        "storage": {
+          "1": {
+            "logical": 560991556,
+            "allocated": 564263936,
+            "files": 2063,
+            "payload": 272457734,
+            "segments": 0,
+            "metadata": 946281
+          },
+          "2": {
+            "logical": 560978614,
+            "allocated": 564247552,
+            "files": 2063,
+            "payload": 272457734,
+            "segments": 0,
+            "metadata": 946281
+          },
+          "3": {
+            "logical": 560977689,
+            "allocated": 564251648,
+            "files": 2063,
+            "payload": 272457734,
+            "segments": 0,
+            "metadata": 946281
+          }
+        },
+        "object_store": {
+          "count": 1567,
+          "bytes": 102520392
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-cold-r2",
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 92139,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 1535.65,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 92139,
+        "mean_ms": 2.6013050825383455,
+        "p50_ms": 1.797,
+        "p90_ms": 3.517,
+        "p99_ms": 18.655,
+        "p999_ms": 69.887,
+        "max_ms": 242.815
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "GET": 1618,
+          "HEAD": 1969,
+          "DELETE": 70,
+          "POST": 76,
+          "PUT": 664
+        },
+        "statuses": {
+          "200": 2754,
+          "206": 947,
+          "204": 70,
+          "404": 626
+        },
+        "request_body_bytes": 42027110,
+        "response_body_bytes": 140507031,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 1,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 40,
+          "sampled_seconds": 60.099867828,
+          "cpu_cores": 2.2079915446698575,
+          "peak_rss_bytes": 249311232,
+          "io_delta": {
+            "rchar": 34084421108,
+            "wchar": 14134890078,
+            "syscr": 1566805,
+            "syscw": 1762923,
+            "read_bytes": 0,
+            "write_bytes": 14589251584,
+            "cancelled_write_bytes": 139304960
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 40,
+          "sampled_seconds": 60.099867828,
+          "cpu_cores": 0.9246276574024415,
+          "peak_rss_bytes": 485056512,
+          "io_delta": {
+            "rchar": 1292714666,
+            "wchar": 228381240,
+            "syscr": 326154,
+            "syscw": 12776,
+            "read_bytes": 0,
+            "write_bytes": 69914624,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 39,
+          "sampled_seconds": 58.551183936,
+          "cpu_cores": 0.09922941961943386,
+          "peak_rss_bytes": 6942720,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 378761760,
+            "syscr": 0,
+            "syscw": 90804,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 4.568225038005039,
+        "startup_rss_bytes": {
+          "sut": 108482560,
+          "provider": 250523648
+        },
+        "node_socket_sent_bytes_lower_bound": 801678226,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 0,
+              "last": 0,
+              "maximum": 2
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 0,
+              "maximum": 4
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 1,
+              "maximum": 6
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 0,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 1,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 0,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 0,
+              "maximum": 3
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 165,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617311625,
+              "end_unix_ms": 1791617370625,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617311625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617312625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617313625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617314625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617315625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617316625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617317625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617318625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617319624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617320625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617321624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617322625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617323625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617324626,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617325626,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617326625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617327625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617328625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617329624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617330625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617331625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617332626,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617333625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617334625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617335625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617336625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617337625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617338625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617339625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617340625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617341625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617342626,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617343625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617344625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617345625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617346625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617347625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617348625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617349625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617350625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617351625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617352625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617353625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617354625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617355625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617356624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617357625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617358625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617359625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617360625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617361625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617362625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617363625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617364625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617365624,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617366628,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617367625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617368625,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617369627,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617370625,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 165,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617312157,
+              "end_unix_ms": 1791617371157,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617312157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617313158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617314158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617315157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617316157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617317157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617318157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617319158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617320157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617321158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617322158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617323158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617324157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617325157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617326162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617327158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617328157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617329159,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617330157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617331157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617332158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617333157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617334157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617335159,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617336158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617337158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617338158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617339157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617340158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617341158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617342159,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617343157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617344158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617345158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617346157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617347157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617348157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617349157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617350157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617351157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617352158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617353158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617354158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617355157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617356157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617357173,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617358158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617359157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617360157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617361158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617362158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617363157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617364157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617365157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617366157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617367158,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617368157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617369157,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617370159,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617371157,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 165,
+            "whole_invocation": {
+              "applied_commands": 99658,
+              "locally_durable_commands": 99659
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791617311685,
+              "end_unix_ms": 1791617370685,
+              "cumulative_delta": {
+                "applied_commands": 91610,
+                "locally_durable_commands": 91608
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617311685,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617312685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617313685,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617314685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617315685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617316685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617317685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617318685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617319686,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617320685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617321685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617322685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617323685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617324685,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617325685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617326685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617327685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617328685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617329685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617330685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617331685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617332701,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617333685,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617334685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617335685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617336685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617337685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617338685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617339685,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617340685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617341685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617342701,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617343685,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617344690,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617345685,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617346685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617347687,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617348685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617349685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617350693,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617351686,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617352685,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617353686,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617354685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617355685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617356685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617357689,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617358685,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617359685,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617360685,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617361685,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617362685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617363686,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617364685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617365685,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617366688,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617367685,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617368685,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617369685,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617370685,
+                "commands": 5
+              }
+            ]
+          }
+        },
+        "cold_progress": {
+          "1-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 225,
+              "delete_attempts": 34,
+              "delete_completed": 34,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 323,
+              "put_attempts": 305,
+              "resume_incomplete": 60,
+              "retirements": 16,
+              "scan_rounds": 60,
+              "scanned": 37146
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 817
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 753664,
+              "last": 164450304,
+              "maximum": 164450304
+            }
+          },
+          "1-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 224,
+              "delete_attempts": 35,
+              "delete_completed": 35,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 322,
+              "put_attempts": 304,
+              "resume_incomplete": 59,
+              "retirements": 16,
+              "scan_rounds": 60,
+              "scanned": 37484
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 816
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 753664,
+              "last": 164507648,
+              "maximum": 164507648
+            }
+          },
+          "2-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 817
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 761856,
+              "last": 164450304,
+              "maximum": 164450304
+            }
+          },
+          "2-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 816
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 765952,
+              "last": 164507648,
+              "maximum": 164507648
+            }
+          },
+          "3-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 817
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 782336,
+              "last": 164450304,
+              "maximum": 164450304
+            }
+          },
+          "3-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 816
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 798720,
+              "last": 164507648,
+              "maximum": 164507648
+            }
+          }
+        },
+        "peak_object_count": 1637,
+        "peak_object_bytes": 107045832,
+        "peak_local_allocated_bytes": 2992063488,
+        "peak_local_metadata_bytes": 3475930,
+        "peak_pending_replicated_descriptors": 9,
+        "payload_upload_parts_in_window": 626,
+        "payload_upload_bytes_in_window": 41025536,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 6.386620775,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 2.919091519986978,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 141018130448356,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 141079260114832,
+        "storage": {
+          "1": {
+            "logical": 698793944,
+            "allocated": 702053376,
+            "files": 2064,
+            "payload": 336113670,
+            "segments": 0,
+            "metadata": 969909
+          },
+          "2": {
+            "logical": 698775358,
+            "allocated": 702110720,
+            "files": 2064,
+            "payload": 336113670,
+            "segments": 0,
+            "metadata": 969909
+          },
+          "3": {
+            "logical": 698785310,
+            "allocated": 702032896,
+            "files": 2064,
+            "payload": 336113670,
+            "segments": 0,
+            "metadata": 969909
+          }
+        },
+        "object_store": {
+          "count": 1661,
+          "bytes": 108655456
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-cold-r3",
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 3,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 90968,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 1516.1333333333334,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 90968,
+        "mean_ms": 2.6344086821739534,
+        "p50_ms": 1.846,
+        "p90_ms": 3.387,
+        "p99_ms": 17.855,
+        "p999_ms": 62.175,
+        "max_ms": 321.791
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "GET": 1638,
+          "HEAD": 2023,
+          "POST": 80,
+          "PUT": 664,
+          "DELETE": 70
+        },
+        "statuses": {
+          "200": 2817,
+          "206": 963,
+          "204": 70,
+          "404": 625
+        },
+        "request_body_bytes": 41956584,
+        "response_body_bytes": 140848977,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 3,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 39,
+          "sampled_seconds": 59.543568487,
+          "cpu_cores": 2.2868968632561826,
+          "peak_rss_bytes": 232361984,
+          "io_delta": {
+            "rchar": 34162599507,
+            "wchar": 14116514830,
+            "syscr": 1570197,
+            "syscw": 1752058,
+            "read_bytes": 471040,
+            "write_bytes": 14564724736,
+            "cancelled_write_bytes": 184537088
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 39,
+          "sampled_seconds": 59.543568487,
+          "cpu_cores": 0.9703818811701714,
+          "peak_rss_bytes": 484675584,
+          "io_delta": {
+            "rchar": 1282275133,
+            "wchar": 227962048,
+            "syscr": 323383,
+            "syscw": 12485,
+            "read_bytes": 4096,
+            "write_bytes": 70098944,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 38,
+          "sampled_seconds": 58.023331121,
+          "cpu_cores": 0.12460504869882065,
+          "peak_rss_bytes": 7086080,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 368883768,
+            "syscr": 0,
+            "syscw": 89991,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 4.702019736985676,
+        "startup_rss_bytes": {
+          "sut": 109965312,
+          "provider": 250269696
+        },
+        "node_socket_sent_bytes_lower_bound": 778284463,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 3,
+              "last": 1,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 1,
+              "maximum": 4
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 3,
+              "last": 2,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 0,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 0,
+              "maximum": 5
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 1,
+              "last": 0,
+              "maximum": 9
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 0,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 3,
+              "last": 1,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 1,
+              "maximum": 3
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 1,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 1,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 0,
+              "maximum": 8
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 0,
+              "maximum": 3
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 162,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617648306,
+              "end_unix_ms": 1791617707306,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617648306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617649306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617650306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617651306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617652307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617653306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617654306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617655306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617656306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617657306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617658306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617659306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617660306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617661306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617662306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617663306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617664307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617665306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617666307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617667307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617668306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617669306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617670306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617671306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617672306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617673307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617674306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617675307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617676306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617677306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617678306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617679306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617680307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617681306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617682306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617683306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617684307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617685306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617686306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617687306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617688307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617689306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617690307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617691308,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617692309,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617693306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617694306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617695306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617696306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617697306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617698307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617699306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617700306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617701306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617702306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617703306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617704306,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617705324,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617706307,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617707306,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 162,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617647857,
+              "end_unix_ms": 1791617706857,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617647857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617648857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617649857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617650857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617651857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617652857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617653857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617654858,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617655857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617656857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617657857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617658856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617659857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617660857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617661857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617662857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617663857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617664856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617665857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617666856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617667857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617668857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617669857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617670857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617671857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617672857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617673857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617674857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617675857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617676857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617677857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617678857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617679857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617680858,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617681857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617682859,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617683857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617684857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617685856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617686856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617687857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617688860,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617689857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617690857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617691857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617692857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617693857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617694857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617695857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617696856,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617697857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617698857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617699857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617700857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617701857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617702857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617703857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617704862,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617705857,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617706857,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 162,
+            "whole_invocation": {
+              "applied_commands": 98482,
+              "locally_durable_commands": 98482
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791617648392,
+              "end_unix_ms": 1791617707392,
+              "cumulative_delta": {
+                "applied_commands": 90233,
+                "locally_durable_commands": 90233
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617648392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617649392,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617650392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617651392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617652393,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617653392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617654392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617655392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617656393,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617657392,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617658392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617659392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617660393,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617661392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617662392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617663393,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617664395,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617665392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617666392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617667393,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617668392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617669392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617670392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617671392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617672392,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617673392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617674393,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617675392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617676393,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617677392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617678392,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617679392,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617680400,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617681392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617682392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617683392,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617684393,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617685392,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617686393,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617687393,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617688392,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617689401,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617690393,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617691392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617692393,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617693393,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617694392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617695392,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617696393,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617697393,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617698393,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617699392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617700392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617701393,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617702392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617703393,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617704396,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617705393,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617706392,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617707392,
+                "commands": 2
+              }
+            ]
+          }
+        },
+        "cold_progress": {
+          "1-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 258,
+              "delete_attempts": 34,
+              "delete_completed": 34,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 318,
+              "put_attempts": 300,
+              "resume_incomplete": 70,
+              "retirements": 16,
+              "scan_rounds": 59,
+              "scanned": 37198
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 812
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1306624,
+              "last": 160944128,
+              "maximum": 160944128
+            }
+          },
+          "1-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {
+              "certificate_blocked": 238,
+              "delete_attempts": 34,
+              "delete_completed": 34,
+              "inventory_incomplete": 19,
+              "inventory_put_attempts": 19,
+              "publications": 322,
+              "put_attempts": 303,
+              "resume_incomplete": 64,
+              "retirements": 16,
+              "scan_rounds": 60,
+              "scanned": 37211
+            },
+            "live_objects": {
+              "first": 528,
+              "last": 815
+            },
+            "pending": {
+              "first": 0,
+              "last": 0
+            },
+            "local_payload_bytes": {
+              "first": 1314816,
+              "last": 160727040,
+              "maximum": 160727040
+            }
+          },
+          "2-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 812
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1327104,
+              "last": 160948224,
+              "maximum": 160948224
+            }
+          },
+          "2-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 815
+            },
+            "pending": {
+              "first": 0,
+              "last": 0
+            },
+            "local_payload_bytes": {
+              "first": 1351680,
+              "last": 160743424,
+              "maximum": 160743424
+            }
+          },
+          "3-0": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 812
+            },
+            "pending": {
+              "first": 0,
+              "last": 1
+            },
+            "local_payload_bytes": {
+              "first": 1417216,
+              "last": 160948224,
+              "maximum": 160948224
+            }
+          },
+          "3-1": {
+            "counter_reset_detected": false,
+            "counter_delta": {},
+            "live_objects": {
+              "first": 528,
+              "last": 815
+            },
+            "pending": {
+              "first": 0,
+              "last": 0
+            },
+            "local_payload_bytes": {
+              "first": 1421312,
+              "last": 160759808,
+              "maximum": 160759808
+            }
+          }
+        },
+        "peak_object_count": 1629,
+        "peak_object_bytes": 106554624,
+        "peak_local_allocated_bytes": 2994128896,
+        "peak_local_metadata_bytes": 3039850,
+        "peak_pending_replicated_descriptors": 8,
+        "payload_upload_parts_in_window": 624,
+        "payload_upload_bytes_in_window": 40894464,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 4.894326293,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.9374672719859518,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 141354137016131,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 141414836540829,
+        "storage": {
+          "1": {
+            "logical": 1000318466,
+            "allocated": 1144105984,
+            "files": 2067,
+            "payload": 331710470,
+            "segments": 0,
+            "metadata": 968384
+          },
+          "2": {
+            "logical": 1002382497,
+            "allocated": 1305674240,
+            "files": 2068,
+            "payload": 331710470,
+            "segments": 0,
+            "metadata": 968384
+          },
+          "3": {
+            "logical": 1009765214,
+            "allocated": 1154420224,
+            "files": 2069,
+            "payload": 331644934,
+            "segments": 0,
+            "metadata": 1267933
+          }
+        },
+        "object_store": {
+          "count": 1657,
+          "bytes": 108393552
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-hot-r1",
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "repetition": 1,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 108665,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 1811.0833333333333,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 108665,
+        "mean_ms": 2.2079585331063347,
+        "p50_ms": 1.71,
+        "p90_ms": 2.873,
+        "p99_ms": 8.679,
+        "p999_ms": 82.303,
+        "max_ms": 428.799
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.776316925,
+          "cpu_cores": 1.9457538701477968,
+          "peak_rss_bytes": 167276544,
+          "io_delta": {
+            "rchar": 10632062230,
+            "wchar": 6968999990,
+            "syscr": 479975,
+            "syscw": 1484269,
+            "read_bytes": 71938048,
+            "write_bytes": 7482601472,
+            "cancelled_write_bytes": 11784192
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.776316925,
+          "cpu_cores": 0.0015056130024357467,
+          "peak_rss_bytes": 250494976,
+          "io_delta": {
+            "rchar": 55386,
+            "wchar": 44714,
+            "syscr": 222,
+            "syscw": 106,
+            "read_bytes": 110592,
+            "write_bytes": 24576,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 53,
+          "sampled_seconds": 58.665032555,
+          "cpu_cores": 0.12937860373441668,
+          "peak_rss_bytes": 7131136,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 452654392,
+            "syscr": 0,
+            "syscw": 109031,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 4.858206061006058,
+        "startup_rss_bytes": {
+          "sut": 105975808,
+          "provider": 246878208
+        },
+        "node_socket_sent_bytes_lower_bound": 951144623,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 3,
+              "last": 4,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 2,
+              "maximum": 5
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 3,
+              "last": 3,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 2,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 3,
+              "maximum": 6
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 5,
+              "last": 4,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 3,
+              "last": 4,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 6,
+              "last": 3,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 3,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 6,
+              "last": 4,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 1,
+              "maximum": 4
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 78,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791616980750,
+              "end_unix_ms": 1791617039768,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791616980750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616981750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616982750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616983750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616984752,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616985750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616986750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616987750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616988749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616989752,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616990750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616991750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616992750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616993750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616994751,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616995750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616996750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616997750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616998749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616999750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617000749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617001750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617002750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617003750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617004750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617005750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617006764,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617007750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617008750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617009749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617010750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617011750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617012750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617013750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617014750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617015749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617016750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617017750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617018750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617019750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617020750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617021750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617022751,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617023750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617024750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617025750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617026750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617027750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617028749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617029749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617030750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617031750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617032750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617033750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617034749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617035749,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617036750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617037750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617038750,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617039768,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 78,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791616980259,
+              "end_unix_ms": 1791617039276,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791616980259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616981259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616982260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616983260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616984259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616985259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616986259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616987259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616988259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616989259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616990259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616991267,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616992259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616993260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616994260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616995259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616996259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616997260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616998259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791616999259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617000260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617001259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617002259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617003259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617004259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617005259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617006260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617007260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617008259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617009260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617010259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617011259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617012260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617013259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617014259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617015260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617016260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617017259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617018259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617019260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617020259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617021259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617022275,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617023260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617024260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617025260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617026260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617027259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617028259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617029261,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617030259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617031260,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617032259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617033259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617034259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617035259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617036259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617037259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617038259,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617039276,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 79,
+            "whole_invocation": {
+              "applied_commands": 111785,
+              "locally_durable_commands": 111785
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791616980742,
+              "end_unix_ms": 1791617039744,
+              "cumulative_delta": {
+                "applied_commands": 106940,
+                "locally_durable_commands": 106932
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791616980742,
+                "commands": 10
+              },
+              {
+                "unix_ms": 1791616981742,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791616982741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791616983742,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791616984741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791616985741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791616986741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791616987741,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791616988742,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791616989741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791616990742,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791616991741,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791616992741,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791616993742,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791616994741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791616995741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791616996741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791616997741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791616998742,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791616999741,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617000741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617001741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617002741,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617003741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617004741,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617005741,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617006742,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617007741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617008741,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617009741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617010742,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617011742,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617012742,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617013741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617014741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617015741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617016742,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617017742,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617018741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617019742,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617020741,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617021743,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617022753,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617023741,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617024742,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617025741,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617026741,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617027742,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617028741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617029741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617030742,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617031741,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617032741,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617033741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617034741,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617035741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617036741,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617037741,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617038741,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617039744,
+                "commands": 2
+              }
+            ]
+          }
+        },
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 3469749760,
+        "peak_local_metadata_bytes": 1649910,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 1.080212141998345,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 140686694174990,
+        "local_payload_bytes": 67108864,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 140747563994382,
+        "storage": {
+          "1": {
+            "logical": 1370791215,
+            "allocated": 1374501376,
+            "files": 2076,
+            "payload": 512200710,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "2": {
+            "logical": 1387734217,
+            "allocated": 1391450624,
+            "files": 2076,
+            "payload": 512200710,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "3": {
+            "logical": 1385337885,
+            "allocated": 1389046272,
+            "files": 2076,
+            "payload": 512200710,
+            "segments": 0,
+            "metadata": 545677
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-hot-r2",
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 129278,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 2154.633333333333,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 129278,
+        "mean_ms": 1.8525952985039964,
+        "p50_ms": 1.581,
+        "p90_ms": 2.415,
+        "p99_ms": 4.735,
+        "p999_ms": 39.327,
+        "max_ms": 303.615
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.608721702,
+          "cpu_cores": 2.261078515889024,
+          "peak_rss_bytes": 169951232,
+          "io_delta": {
+            "rchar": 14835619061,
+            "wchar": 8425145444,
+            "syscr": 603008,
+            "syscw": 1724054,
+            "read_bytes": 35540992,
+            "write_bytes": 9016274944,
+            "cancelled_write_bytes": 11759616
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.608721702,
+          "cpu_cores": 0.0018453675378230644,
+          "peak_rss_bytes": 252329984,
+          "io_delta": {
+            "rchar": 55289,
+            "wchar": 44626,
+            "syscr": 210,
+            "syscw": 94,
+            "read_bytes": 110592,
+            "write_bytes": 24576,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 53,
+          "sampled_seconds": 58.50177637,
+          "cpu_cores": 0.18529351880601705,
+          "peak_rss_bytes": 6926336,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 531907448,
+            "syscr": 0,
+            "syscw": 129391,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 4.7511075969960075,
+        "startup_rss_bytes": {
+          "sut": 106172416,
+          "provider": 248852480
+        },
+        "node_socket_sent_bytes_lower_bound": 1110792284,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 5,
+              "last": 3,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 1,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": {
+              "first": 0,
+              "last": 2,
+              "maximum": 5
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 4,
+              "last": 3,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 2,
+              "maximum": 3
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 2,
+              "maximum": 5
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 7,
+              "last": 4,
+              "maximum": 7
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 7,
+              "last": 4,
+              "maximum": 7
+            },
+            "uncommitted": {
+              "first": 4,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 2,
+              "last": 4,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 3,
+              "maximum": 3
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 2,
+              "last": 5,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 4,
+              "maximum": 4
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 73,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617414313,
+              "end_unix_ms": 1791617473313,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617414313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617415313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617416313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617417313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617418313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617419313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617420313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617421313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617422313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617423313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617424314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617425313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617426313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617427313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617428313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617429313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617430313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617431313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617432314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617433313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617434313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617435313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617436405,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617437313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617438314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617439313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617440313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617441313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617442314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617443313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617444314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617445313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617446313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617447313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617448313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617449313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617450313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617451313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617452313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617453313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617454313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617455313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617456313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617457313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617458313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617459313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617460313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617461313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617462314,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617463329,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617464316,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617465313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617466313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617467313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617468313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617469313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617470313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617471313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617472313,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617473313,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 73,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617414839,
+              "end_unix_ms": 1791617473839,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617414839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617415839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617416839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617417839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617418839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617419839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617420839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617421839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617422839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617423859,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617424839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617425839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617426839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617427839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617428839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617429839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617430839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617431839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617432839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617433839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617434839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617435845,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617436839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617437839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617438840,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617439839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617440839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617441839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617442839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617443840,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617444839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617445839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617446839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617447840,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617448839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617449839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617450839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617451839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617452839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617453839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617454839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617455839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617456839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617457839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617458839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617459839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617460839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617461839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617462839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617463839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617464840,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617465839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617466839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617467839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617468839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617469839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617470839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617471839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617472839,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617473839,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 74,
+            "whole_invocation": {
+              "applied_commands": 132398,
+              "locally_durable_commands": 132398
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791617414382,
+              "end_unix_ms": 1791617473382,
+              "cumulative_delta": {
+                "applied_commands": 126954,
+                "locally_durable_commands": 126954
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617414382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617415382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617416382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617417382,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617418382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617419382,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617420382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617421382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617422381,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617423389,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617424382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617425382,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617426382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617427382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617428382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617429382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617430382,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617431382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617432382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617433382,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617434382,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617435382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617436404,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617437382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617438382,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617439382,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617440382,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617441381,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617442382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617443382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617444382,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617445382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617446382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617447382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617448382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617449385,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617450382,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617451382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617452382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617453382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617454382,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617455382,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617456382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617457382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617458382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617459382,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617460382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617461382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617462469,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617463383,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617464390,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617465382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617466382,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617467382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617468382,
+                "commands": 10
+              },
+              {
+                "unix_ms": 1791617469381,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617470382,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617471382,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617472382,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617473382,
+                "commands": 5
+              }
+            ]
+          }
+        },
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 4442119680,
+        "peak_local_metadata_bytes": 1649895,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.9525275579944719,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 141120900590667,
+        "local_payload_bytes": 67108864,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 141181355423237,
+        "storage": {
+          "1": {
+            "logical": 1219605947,
+            "allocated": 1223297536,
+            "files": 2072,
+            "payload": 596631558,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "2": {
+            "logical": 1202889554,
+            "allocated": 1206577664,
+            "files": 2070,
+            "payload": 596631558,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "3": {
+            "logical": 1202900927,
+            "allocated": 1206577664,
+            "files": 2070,
+            "payload": 596631558,
+            "segments": 0,
+            "metadata": 545677
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-envelope-001-many-write-async3-hot-r3",
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "repetition": 3,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 128017,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 2133.616666666667,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 128017,
+        "mean_ms": 1.870680425256022,
+        "p50_ms": 1.613,
+        "p90_ms": 2.475,
+        "p99_ms": 4.667,
+        "p999_ms": 35.391,
+        "max_ms": 182.783
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.313058658,
+          "cpu_cores": 2.2462169885422063,
+          "peak_rss_bytes": 166031360,
+          "io_delta": {
+            "rchar": 14751240443,
+            "wchar": 8335795654,
+            "syscr": 595244,
+            "syscw": 1698971,
+            "read_bytes": 15052800,
+            "write_bytes": 8918216704,
+            "cancelled_write_bytes": 11747328
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 54,
+          "sampled_seconds": 59.313058658,
+          "cpu_cores": 0.0016859693676665964,
+          "peak_rss_bytes": 257208320,
+          "io_delta": {
+            "rchar": 55328,
+            "wchar": 44666,
+            "syscr": 215,
+            "syscw": 99,
+            "read_bytes": 110592,
+            "write_bytes": 24576,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 53,
+          "sampled_seconds": 58.203699612,
+          "cpu_cores": 0.1889914227674301,
+          "peak_rss_bytes": 6877184,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 523183648,
+            "syscr": 0,
+            "syscw": 127652,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 5.806474253011402,
+        "startup_rss_bytes": {
+          "sut": 104529920,
+          "provider": 252534784
+        },
+        "node_socket_sent_bytes_lower_bound": 1089225923,
+        "raft_entry_gaps": {
+          "1-0": {
+            "unapplied": {
+              "first": 3,
+              "last": 4,
+              "maximum": 4
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 4,
+              "maximum": 4
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 4,
+              "maximum": 7
+            }
+          },
+          "1-1": {
+            "unapplied": {
+              "first": 3,
+              "last": 3,
+              "maximum": 5
+            },
+            "uncommitted": {
+              "first": 2,
+              "last": 2,
+              "maximum": 4
+            },
+            "matched_gap": {
+              "first": 1,
+              "last": 4,
+              "maximum": 5
+            }
+          },
+          "2-0": {
+            "unapplied": {
+              "first": 5,
+              "last": 6,
+              "maximum": 6
+            },
+            "uncommitted": {
+              "first": 4,
+              "last": 5,
+              "maximum": 5
+            },
+            "matched_gap": null
+          },
+          "2-1": {
+            "unapplied": {
+              "first": 4,
+              "last": 3,
+              "maximum": 7
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 2,
+              "maximum": 5
+            },
+            "matched_gap": null
+          },
+          "3-0": {
+            "unapplied": {
+              "first": 3,
+              "last": 6,
+              "maximum": 7
+            },
+            "uncommitted": {
+              "first": 3,
+              "last": 4,
+              "maximum": 4
+            },
+            "matched_gap": null
+          },
+          "3-1": {
+            "unapplied": {
+              "first": 7,
+              "last": 5,
+              "maximum": 7
+            },
+            "uncommitted": {
+              "first": 7,
+              "last": 2,
+              "maximum": 7
+            },
+            "matched_gap": null
+          }
+        },
+        "stages": {
+          "node-3.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 74,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617496161,
+              "end_unix_ms": 1791617555162,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617496161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617497162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617498162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617499161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617500162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617501162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617502161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617503162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617504161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617505162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617506163,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617507162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617508161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617509162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617510163,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617511162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617512162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617513162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617514162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617515162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617516161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617517161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617518162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617519163,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617520162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617521162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617522161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617523161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617524162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617525161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617526162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617527161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617528161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617529162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617530162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617531161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617532166,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617533163,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617534162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617535162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617536162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617537161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617538161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617539162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617540163,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617541162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617542161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617543161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617544162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617545162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617546162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617547162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617548161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617549161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617550161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617551161,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617552162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617553162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617554162,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617555162,
+                "commands": 0
+              }
+            ]
+          },
+          "node-2.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 74,
+            "whole_invocation": {},
+            "sampled_window": {
+              "start_unix_ms": 1791617496709,
+              "end_unix_ms": 1791617555709,
+              "cumulative_delta": {}
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617496709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617497709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617498710,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617499709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617500709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617501709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617502709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617503709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617504709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617505709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617506709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617507709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617508710,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617509709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617510709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617511709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617512709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617513709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617514709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617515709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617516709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617517709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617518709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617519710,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617520709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617521709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617522709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617523709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617524709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617525709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617526709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617527709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617528709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617529709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617530709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617531709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617532709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617533709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617534709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617535709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617536709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617537709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617538709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617539710,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617540709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617541709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617542709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617543709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617544709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617545709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617546709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617547709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617548709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617549709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617550709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617551709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617552709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617553709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617554709,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617555709,
+                "commands": 0
+              }
+            ]
+          },
+          "node-1.log.gz": {
+            "counter_reset_detected": false,
+            "observations": 74,
+            "whole_invocation": {
+              "applied_commands": 131137,
+              "locally_durable_commands": 131137
+            },
+            "sampled_window": {
+              "start_unix_ms": 1791617496232,
+              "end_unix_ms": 1791617555232,
+              "cumulative_delta": {
+                "applied_commands": 125518,
+                "locally_durable_commands": 125517
+              }
+            },
+            "unapplied_locally_durable_commands": [
+              {
+                "unix_ms": 1791617496232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617497232,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617498232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617499232,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617500232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617501232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617502232,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617503232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617504232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617505232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617506237,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617507232,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617508232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617509232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617510232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617511232,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617512232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617513232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617514232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617515232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617516232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617517232,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617518232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617519232,
+                "commands": 2
+              },
+              {
+                "unix_ms": 1791617520232,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617521232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617522232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617523232,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617524233,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617525232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617526232,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617527232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617528232,
+                "commands": 7
+              },
+              {
+                "unix_ms": 1791617529232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617530232,
+                "commands": 8
+              },
+              {
+                "unix_ms": 1791617531232,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617532232,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617533232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617534232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617535232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617536232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617537232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617538232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617539232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617540232,
+                "commands": 1
+              },
+              {
+                "unix_ms": 1791617541232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617542232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617543232,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617544232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617545232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617546233,
+                "commands": 0
+              },
+              {
+                "unix_ms": 1791617547233,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617548232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617549232,
+                "commands": 9
+              },
+              {
+                "unix_ms": 1791617550233,
+                "commands": 6
+              },
+              {
+                "unix_ms": 1791617551232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617552232,
+                "commands": 5
+              },
+              {
+                "unix_ms": 1791617553232,
+                "commands": 3
+              },
+              {
+                "unix_ms": 1791617554232,
+                "commands": 4
+              },
+              {
+                "unix_ms": 1791617555232,
+                "commands": 3
+              }
+            ]
+          }
+        },
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 4552109568,
+        "peak_local_metadata_bytes": 1649895,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.9861047710001003,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 141202958934907,
+        "local_payload_bytes": 67108864,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 3072
+      },
+      "after_client": {
+        "time_ns": 141263406728661,
+        "storage": {
+          "1": {
+            "logical": 1197124734,
+            "allocated": 1200810496,
+            "files": 2070,
+            "payload": 591466502,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "2": {
+            "logical": 1205537689,
+            "allocated": 1209227776,
+            "files": 2071,
+            "payload": 591466502,
+            "segments": 0,
+            "metadata": 545677
+          },
+          "3": {
+            "logical": 1205510633,
+            "allocated": 1209195008,
+            "files": 2071,
+            "payload": 591466502,
+            "segments": 0,
+            "metadata": 545677
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      }
+    }
+  ],
+  "aggregates": [
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 1516.1333333333334,
+      "min_ops_per_sec": 1251.8333333333333,
+      "max_ops_per_sec": 1535.65
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 2133.616666666667,
+      "min_ops_per_sec": 1811.0833333333333,
+      "max_ops_per_sec": 2154.633333333333
+    }
+  ],
+  "passed": 6,
+  "total": 6,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8"
+}

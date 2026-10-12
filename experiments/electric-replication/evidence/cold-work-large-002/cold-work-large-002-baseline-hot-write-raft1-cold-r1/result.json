@@ -1,0 +1,1638 @@
+{
+  "version": 1,
+  "arm": "raft1",
+  "cold": true,
+  "workload": "hot-write",
+  "repetition": 1,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 8388608,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 24,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "none",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 9937485824,
+  "startup_seconds": 2.783858782000607,
+  "roles": {
+    "sut": [
+      1661395
+    ],
+    "provider": [
+      1661300,
+      1661348
+    ],
+    "client": [
+      1663592
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791651391045,
+    "monotonic_ns": 170148604890045,
+    "processes": {
+      "1661395": {
+        "cpu_ticks": 15,
+        "rss_pages": 8795,
+        "io": {
+          "rchar": 21650550,
+          "wchar": 1654,
+          "syscr": 2530,
+          "syscw": 51,
+          "read_bytes": 0,
+          "write_bytes": 36864,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1661300": {
+        "cpu_ticks": 58,
+        "rss_pages": 26981,
+        "io": {
+          "rchar": 161259789,
+          "wchar": 14790,
+          "syscr": 5490,
+          "syscw": 23,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1661348": {
+        "cpu_ticks": 28,
+        "rss_pages": 11420,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:34644",
+        "owners": [
+          1661300
+        ],
+        "counters": {
+          "bytes_sent": 1227,
+          "bytes_acked": 1227,
+          "bytes_received": 1371
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "garbage_keys": [
+    "electric/cb-dcf547651717c5eb/0/00000000000000000071/p/00000000000000000019/00000000000000000000/00000000000008388608/59be85dace6d85a1adf8aa6a6bec608a9e263c80d7e1794b86cd86f013e7b431",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000101/p/00000000000000000020/00000000000000000000/00000000000008388608/e1f691b53f24159b9b72ac2329e83db1da21fac29e4c947d958b522798bcb9ac",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000136/p/00000000000000000021/00000000000000000000/00000000000008388608/e694e252ea5cf0ff42913ae0894e396f21d044349f3fca7d66ee41ee56a940a5",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000167/p/00000000000000000022/00000000000000000000/00000000000008388608/5f021da2d089eeb602873f581fcfcfde0b3eb6994e8fb5bf53061c1cb283fc5e",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000211/p/00000000000000000019/00000000000008388608/00000000000008388608/3692890c8ba65b13d22a1fe4ab0ecd81d9cf1f98e7d5945f6991f0be720a2bac",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000224/p/00000000000000000020/00000000000008388608/00000000000008388608/6081fa8cfbc0152c1e5c9c25e3d8f71aa502a8fe922c42562f25180b84c18878",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000226/p/00000000000000000021/00000000000008388608/00000000000008388608/c6e230b64c5e55eade397084db004b0830cff82368fe53775b60e179d29c722a",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000228/p/00000000000000000022/00000000000008388608/00000000000008388608/f9dce949925cfd50f70b04639c9e96c73a378f7ff768c9b342ba972d0c5f6b3c",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000231/p/00000000000000000019/00000000000016777216/00000000000008388608/bcce656a1fc4f4797a9fccd642970dd9ed0d4fbe0fac5fdf20e11ab6906fa06b",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000233/p/00000000000000000020/00000000000016777216/00000000000008388608/76d802e4dd6d78f6976ee9a2a252eacce34f043df539ad63cd136a09eb7dc62f",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000237/p/00000000000000000021/00000000000016777216/00000000000008388608/3fc2b9619b6f45db82cb4b62506f93083610e716251293b7e1d72858a219eb35",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000239/p/00000000000000000022/00000000000016777216/00000000000008388608/c529c5cb966a7533dda1151d7ae6e6c1ebba79a6b575eb6abae953ebd9cccef5",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000241/p/00000000000000000019/00000000000025165824/00000000000008388608/990925c094a67d29178d96db1250a6da10c84d307345cc47fec4dd8a5838af89",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000243/p/00000000000000000020/00000000000025165824/00000000000008388608/c290ce2a8693963ecee85df631c2a40fe25b235f80457dfcbfdcb3a7f33e6ff6",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000245/p/00000000000000000021/00000000000025165824/00000000000008388608/d9f7ee589d871382d59820284d31ea8ff629e6a24c7279b1c4903de8f0f4aa5e",
+    "electric/cb-dcf547651717c5eb/0/00000000000000000247/p/00000000000000000022/00000000000025165824/00000000000008388608/97ad5e9669d79536aeaf2aef9abef8245cabc509948d141daa59c8b34a9fe090",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000055/p/00000000000000000003/00000000000000000000/00000000000008388608/0977e53f3d85b1a716fe59ea610ef405d3824b55f04a536fdd8e6c0f38a539ac",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000086/p/00000000000000000005/00000000000000000000/00000000000008388608/18aab23de26e811f042f9596080217212272e35b2db1d69efca049c123f7a4df",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000113/p/00000000000000000004/00000000000000000000/00000000000008388608/abccbd0db37bf486652340c7bd2689547f692cec34bc389188dca48f3042880e",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000147/p/00000000000000000002/00000000000000000000/00000000000008388608/d462ec8ac7704e7e6d648b70f041b8aebdba72b40c7a76fa0b74928e3d63fe99",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000178/p/00000000000000000003/00000000000008388608/00000000000008388608/d67c0ceba26585049a2d787c81f6b83a86854cdcb3373ec4eb6e662d553904f2",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000180/p/00000000000000000005/00000000000008388608/00000000000008388608/7ada09e95bb2cb701fea74669b6e71f13ff8ab16f6da3692073b75f1d4233068",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000182/p/00000000000000000004/00000000000008388608/00000000000008388608/22d62286a84f133b684f694c50ec8202823be056220aca48e2f9577bf3b6e635",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000184/p/00000000000000000002/00000000000008388608/00000000000008388608/2fe0da1d21db048e9afac633671587750d84eb2c39502a4a308598fc469bf5e0",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000187/p/00000000000000000003/00000000000016777216/00000000000008388608/1677345d992055a4d34bf49817cbfebe1955f5b6619418511bf5478b65e9550b",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000189/p/00000000000000000005/00000000000016777216/00000000000008388608/19bafbcbcbb3602eb6db73bc4fa100ebe4a438a930678aea865a1524c4c31b0d",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000193/p/00000000000000000004/00000000000016777216/00000000000008388608/e50c8f01c0e73f36c1138965263d7f4674e22c82c3b8379a8bc8dd41ba6590cb",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000195/p/00000000000000000002/00000000000016777216/00000000000008388608/76ab46643b26e9752c622d5d94f39aefff71185126b5530df07c122d592d2762",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000197/p/00000000000000000003/00000000000025165824/00000000000008388608/9f658d38836e712ac5eb4ddb97227a9e219425628b5c837d121203d18b3a225a",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000199/p/00000000000000000005/00000000000025165824/00000000000008388608/4ebd6137ac6d91f722008a08177722a23570b960df5c7960c5bdfa99befe4b57",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000201/p/00000000000000000004/00000000000025165824/00000000000008388608/2541ba3b806bcc8a214371bb1ee83a7670b9d615dab9f1a5ab48eadb6d359fec",
+    "electric/cb-dcf547651717c5eb/1/00000000000000000203/p/00000000000000000002/00000000000025165824/00000000000008388608/c845e4c69fda4042472b7cbfc6125855ca257c87004fddc07e5ece300f0240db"
+  ],
+  "precondition": {
+    "time_ns": 170163106766852,
+    "remote_keys": [
+      "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a"
+    ],
+    "listing_keys": [
+      "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a"
+    ],
+    "local_payload_bytes": 0,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 0,
+        "file_base": 8388608,
+        "segments": [
+          {
+            "logical_start": 0,
+            "len": 8388608,
+            "remote_key": "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a",
+            "local_file": null
+          }
+        ]
+      }
+    ]
+  },
+  "client_object_keys": [
+    "/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a"
+  ],
+  "before_client": {
+    "time_ns": 170163107423334,
+    "free_bytes": 9255800832,
+    "storage": {
+      "1": {
+        "logical": 151024846,
+        "allocated": 151071744,
+        "files": 32,
+        "payload": 6,
+        "segments": 0,
+        "metadata": 13361
+      }
+    },
+    "object_store": {
+      "count": 37,
+      "bytes": 276825008
+    },
+    "garbage_objects_remaining": 32,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 248,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 230
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 229
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390834885511,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390834885534
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 248
+            }
+          }
+        },
+        "cold": {
+          "applied": 248,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 229,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 9,
+            "delete_attempts": 2,
+            "delete_completed": 2,
+            "inventory_incomplete": 4,
+            "inventory_put_attempts": 4,
+            "publications": 21,
+            "put_attempts": 17,
+            "resume_incomplete": 5,
+            "scan_rounds": 95,
+            "scanned": 285
+          },
+          "floor": 229,
+          "inventory": {
+            "birth": 230,
+            "kind": {
+              "Inventory": {
+                "cut": 229
+              }
+            },
+            "len": 416,
+            "sha256": "5fd4ac2af05865fa31060f8e398c422e710be71d039b997f2bdd3b18c14f47ee"
+          },
+          "live_objects": 17,
+          "local_payload_bytes": 0,
+          "objects": [
+            {
+              "birth": 23,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a",
+              "len": 8388608
+            },
+            {
+              "birth": 71,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000071/p/00000000000000000019/00000000000000000000/00000000000008388608/59be85dace6d85a1adf8aa6a6bec608a9e263c80d7e1794b86cd86f013e7b431",
+              "len": 8388608
+            },
+            {
+              "birth": 101,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000101/p/00000000000000000020/00000000000000000000/00000000000008388608/e1f691b53f24159b9b72ac2329e83db1da21fac29e4c947d958b522798bcb9ac",
+              "len": 8388608
+            },
+            {
+              "birth": 136,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000136/p/00000000000000000021/00000000000000000000/00000000000008388608/e694e252ea5cf0ff42913ae0894e396f21d044349f3fca7d66ee41ee56a940a5",
+              "len": 8388608
+            },
+            {
+              "birth": 167,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000167/p/00000000000000000022/00000000000000000000/00000000000008388608/5f021da2d089eeb602873f581fcfcfde0b3eb6994e8fb5bf53061c1cb283fc5e",
+              "len": 8388608
+            },
+            {
+              "birth": 211,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000211/p/00000000000000000019/00000000000008388608/00000000000008388608/3692890c8ba65b13d22a1fe4ab0ecd81d9cf1f98e7d5945f6991f0be720a2bac",
+              "len": 8388608
+            },
+            {
+              "birth": 224,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000224/p/00000000000000000020/00000000000008388608/00000000000008388608/6081fa8cfbc0152c1e5c9c25e3d8f71aa502a8fe922c42562f25180b84c18878",
+              "len": 8388608
+            },
+            {
+              "birth": 226,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000226/p/00000000000000000021/00000000000008388608/00000000000008388608/c6e230b64c5e55eade397084db004b0830cff82368fe53775b60e179d29c722a",
+              "len": 8388608
+            },
+            {
+              "birth": 228,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000228/p/00000000000000000022/00000000000008388608/00000000000008388608/f9dce949925cfd50f70b04639c9e96c73a378f7ff768c9b342ba972d0c5f6b3c",
+              "len": 8388608
+            },
+            {
+              "birth": 231,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000231/p/00000000000000000019/00000000000016777216/00000000000008388608/bcce656a1fc4f4797a9fccd642970dd9ed0d4fbe0fac5fdf20e11ab6906fa06b",
+              "len": 8388608
+            },
+            {
+              "birth": 233,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000233/p/00000000000000000020/00000000000016777216/00000000000008388608/76d802e4dd6d78f6976ee9a2a252eacce34f043df539ad63cd136a09eb7dc62f",
+              "len": 8388608
+            },
+            {
+              "birth": 237,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000237/p/00000000000000000021/00000000000016777216/00000000000008388608/3fc2b9619b6f45db82cb4b62506f93083610e716251293b7e1d72858a219eb35",
+              "len": 8388608
+            },
+            {
+              "birth": 239,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000239/p/00000000000000000022/00000000000016777216/00000000000008388608/c529c5cb966a7533dda1151d7ae6e6c1ebba79a6b575eb6abae953ebd9cccef5",
+              "len": 8388608
+            },
+            {
+              "birth": 241,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000241/p/00000000000000000019/00000000000025165824/00000000000008388608/990925c094a67d29178d96db1250a6da10c84d307345cc47fec4dd8a5838af89",
+              "len": 8388608
+            },
+            {
+              "birth": 243,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000243/p/00000000000000000020/00000000000025165824/00000000000008388608/c290ce2a8693963ecee85df631c2a40fe25b235f80457dfcbfdcb3a7f33e6ff6",
+              "len": 8388608
+            },
+            {
+              "birth": 245,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000245/p/00000000000000000021/00000000000025165824/00000000000008388608/d9f7ee589d871382d59820284d31ea8ff629e6a24c7279b1c4903de8f0f4aa5e",
+              "len": 8388608
+            },
+            {
+              "birth": 247,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000247/p/00000000000000000022/00000000000025165824/00000000000008388608/97ad5e9669d79536aeaf2aef9abef8245cabc509948d141daa59c8b34a9fe090",
+              "len": 8388608
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 229
+          },
+          "pending": {},
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 204,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 204
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 204
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 204
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 204
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 186
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 185
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390938221345,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390938221374
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 204
+            }
+          }
+        },
+        "cold": {
+          "applied": 204,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 185,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 8,
+            "delete_attempts": 2,
+            "delete_completed": 2,
+            "inventory_incomplete": 4,
+            "inventory_put_attempts": 4,
+            "publications": 20,
+            "put_attempts": 16,
+            "resume_incomplete": 4,
+            "scan_rounds": 94,
+            "scanned": 181
+          },
+          "floor": 185,
+          "inventory": {
+            "birth": 186,
+            "kind": {
+              "Inventory": {
+                "cut": 185
+              }
+            },
+            "len": 376,
+            "sha256": "92d72c257586b2ce43f1186988ddd0164ecebc157844572f87d1175df5f4e321"
+          },
+          "live_objects": 16,
+          "local_payload_bytes": 0,
+          "objects": [
+            {
+              "birth": 55,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000055/p/00000000000000000003/00000000000000000000/00000000000008388608/0977e53f3d85b1a716fe59ea610ef405d3824b55f04a536fdd8e6c0f38a539ac",
+              "len": 8388608
+            },
+            {
+              "birth": 86,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000086/p/00000000000000000005/00000000000000000000/00000000000008388608/18aab23de26e811f042f9596080217212272e35b2db1d69efca049c123f7a4df",
+              "len": 8388608
+            },
+            {
+              "birth": 113,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000113/p/00000000000000000004/00000000000000000000/00000000000008388608/abccbd0db37bf486652340c7bd2689547f692cec34bc389188dca48f3042880e",
+              "len": 8388608
+            },
+            {
+              "birth": 147,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000147/p/00000000000000000002/00000000000000000000/00000000000008388608/d462ec8ac7704e7e6d648b70f041b8aebdba72b40c7a76fa0b74928e3d63fe99",
+              "len": 8388608
+            },
+            {
+              "birth": 178,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000178/p/00000000000000000003/00000000000008388608/00000000000008388608/d67c0ceba26585049a2d787c81f6b83a86854cdcb3373ec4eb6e662d553904f2",
+              "len": 8388608
+            },
+            {
+              "birth": 180,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000180/p/00000000000000000005/00000000000008388608/00000000000008388608/7ada09e95bb2cb701fea74669b6e71f13ff8ab16f6da3692073b75f1d4233068",
+              "len": 8388608
+            },
+            {
+              "birth": 182,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000182/p/00000000000000000004/00000000000008388608/00000000000008388608/22d62286a84f133b684f694c50ec8202823be056220aca48e2f9577bf3b6e635",
+              "len": 8388608
+            },
+            {
+              "birth": 184,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000184/p/00000000000000000002/00000000000008388608/00000000000008388608/2fe0da1d21db048e9afac633671587750d84eb2c39502a4a308598fc469bf5e0",
+              "len": 8388608
+            },
+            {
+              "birth": 187,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000187/p/00000000000000000003/00000000000016777216/00000000000008388608/1677345d992055a4d34bf49817cbfebe1955f5b6619418511bf5478b65e9550b",
+              "len": 8388608
+            },
+            {
+              "birth": 189,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000189/p/00000000000000000005/00000000000016777216/00000000000008388608/19bafbcbcbb3602eb6db73bc4fa100ebe4a438a930678aea865a1524c4c31b0d",
+              "len": 8388608
+            },
+            {
+              "birth": 193,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000193/p/00000000000000000004/00000000000016777216/00000000000008388608/e50c8f01c0e73f36c1138965263d7f4674e22c82c3b8379a8bc8dd41ba6590cb",
+              "len": 8388608
+            },
+            {
+              "birth": 195,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000195/p/00000000000000000002/00000000000016777216/00000000000008388608/76ab46643b26e9752c622d5d94f39aefff71185126b5530df07c122d592d2762",
+              "len": 8388608
+            },
+            {
+              "birth": 197,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000197/p/00000000000000000003/00000000000025165824/00000000000008388608/9f658d38836e712ac5eb4ddb97227a9e219425628b5c837d121203d18b3a225a",
+              "len": 8388608
+            },
+            {
+              "birth": 199,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000199/p/00000000000000000005/00000000000025165824/00000000000008388608/4ebd6137ac6d91f722008a08177722a23570b960df5c7960c5bdfa99befe4b57",
+              "len": 8388608
+            },
+            {
+              "birth": 201,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000201/p/00000000000000000004/00000000000025165824/00000000000008388608/2541ba3b806bcc8a214371bb1ee83a7670b9d615dab9f1a5ab48eadb6d359fec",
+              "len": 8388608
+            },
+            {
+              "birth": 203,
+              "key": "electric/cb-dcf547651717c5eb/1/00000000000000000203/p/00000000000000000002/00000000000025165824/00000000000008388608/c845e4c69fda4042472b7cbfc6125855ca257c87004fddc07e5ece300f0240db",
+              "len": 8388608
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 185
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "client_window": {
+    "start_ns": 170163129011433,
+    "start_unix_ms": 1791651405569,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 170187187135220,
+    "end_unix_ms": 1791651429627
+  },
+  "gc_delete_window": {
+    "start_ns": 170164131892924,
+    "start_unix_ms": 1791651406572,
+    "end_ns": 170164173302626
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 170187187807278,
+    "free_bytes": 8953282560,
+    "storage": {
+      "1": {
+        "logical": 29849846,
+        "allocated": 29871104,
+        "files": 16,
+        "payload": 7687430,
+        "segments": 0,
+        "metadata": 1311
+      }
+    },
+    "object_store": {
+      "count": 7,
+      "bytes": 25166288
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 15238,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15238
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15238
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15238
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15238
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 13862
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 13830
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390834885516,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390834885536
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 15238
+            }
+          }
+        },
+        "cold": {
+          "applied": 15238,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 13830,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 26,
+            "delete_attempts": 26,
+            "delete_completed": 26,
+            "inventory_incomplete": 12,
+            "inventory_put_attempts": 12,
+            "publications": 31,
+            "put_attempts": 19,
+            "resume_incomplete": 14,
+            "retirements": 16,
+            "scan_rounds": 305,
+            "scanned": 1373
+          },
+          "floor": 13830,
+          "inventory": {
+            "birth": 13831,
+            "kind": {
+              "Inventory": {
+                "cut": 13830
+              }
+            },
+            "len": 176,
+            "sha256": "44443cd640241f1ac066423d53839b893157923381bdcbe4b99752bcc2565dcb"
+          },
+          "live_objects": 3,
+          "local_payload_bytes": 7687424,
+          "objects": [
+            {
+              "birth": 23,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a",
+              "len": 8388608
+            },
+            {
+              "birth": 5315,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000005315/p/00000000000000000002/00000000000008388608/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8",
+              "len": 8388608
+            },
+            {
+              "birth": 10503,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000010503/p/00000000000000000002/00000000000016777216/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8",
+              "len": 8388608
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 13830
+          },
+          "pending": {},
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 248,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 246
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 245
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390938221324,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390938221342
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 248
+            }
+          }
+        },
+        "cold": {
+          "applied": 248,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 245,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 24,
+            "delete_attempts": 26,
+            "delete_completed": 26,
+            "inventory_incomplete": 12,
+            "inventory_put_attempts": 12,
+            "publications": 28,
+            "put_attempts": 16,
+            "resume_incomplete": 12,
+            "retirements": 16,
+            "scan_rounds": 305,
+            "scanned": 880
+          },
+          "floor": 245,
+          "inventory": {
+            "birth": 246,
+            "kind": {
+              "Inventory": {
+                "cut": 245
+              }
+            },
+            "len": 56,
+            "sha256": "a6895bea7b9cef1f1250e57094ca52c3bb57b1bdf2971359b0a54f0f41f3b632"
+          },
+          "live_objects": 0,
+          "local_payload_bytes": 0,
+          "objects": [],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 245
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "target_bytes": 32853248,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 32853248,
+      "offsets": [
+        32853248
+      ]
+    }
+  ],
+  "drain_seconds": 0.001282491022720933,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 32853248,
+      "sha256": "c9e7de28962b6e4e8f0746dc4750abc52e08199cc911c30c5f3c843dce494ba8",
+      "expected_sha256": "c9e7de28962b6e4e8f0746dc4750abc52e08199cc911c30c5f3c843dce494ba8",
+      "offset": 32853248
+    }
+  ],
+  "gc_observed_complete_ns": 170187791728637,
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 24,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {
+        "GET": 893,
+        "HEAD": 571,
+        "POST": 32,
+        "PUT": 18,
+        "DELETE": 48
+      },
+      "statuses": {
+        "206": 472,
+        "200": 1040,
+        "204": 48,
+        "404": 2
+      },
+      "request_body_bytes": 16782184,
+      "response_body_bytes": 17901194,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 1,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 170187798058751,
+    "free_bytes": 8939880448,
+    "storage": {
+      "1": {
+        "logical": 29849846,
+        "allocated": 29871104,
+        "files": 16,
+        "payload": 7687430,
+        "segments": 0,
+        "metadata": 1311
+      }
+    },
+    "object_store": {
+      "count": 8,
+      "bytes": 25166464
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 15239,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15239
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15239
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15239
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 15239
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 13862
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 13830
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390834885502,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390834885537
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 15239
+            }
+          }
+        },
+        "cold": {
+          "applied": 15239,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 13830,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 27,
+            "delete_attempts": 26,
+            "delete_completed": 26,
+            "http_cold_bodies_started": 1,
+            "inventory_incomplete": 13,
+            "inventory_put_attempts": 13,
+            "publications": 31,
+            "put_attempts": 19,
+            "resume_incomplete": 14,
+            "retirements": 16,
+            "scan_rounds": 310,
+            "scanned": 1393
+          },
+          "floor": 13830,
+          "inventory": {
+            "birth": 13831,
+            "kind": {
+              "Inventory": {
+                "cut": 13830
+              }
+            },
+            "len": 176,
+            "sha256": "44443cd640241f1ac066423d53839b893157923381bdcbe4b99752bcc2565dcb"
+          },
+          "live_objects": 3,
+          "local_payload_bytes": 7687424,
+          "objects": [
+            {
+              "birth": 23,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a",
+              "len": 8388608
+            },
+            {
+              "birth": 5315,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000005315/p/00000000000000000002/00000000000008388608/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8",
+              "len": 8388608
+            },
+            {
+              "birth": 10503,
+              "key": "electric/cb-dcf547651717c5eb/0/00000000000000010503/p/00000000000000000002/00000000000016777216/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8",
+              "len": 8388608
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": 15239,
+          "participants": {
+            "1": 13830
+          },
+          "pending": {
+            "15239": {
+              "birth": 15239,
+              "kind": {
+                "Inventory": {
+                  "cut": 15238
+                }
+              },
+              "len": 176,
+              "sha256": "abfd249e360fde46223b92e6f2115ea69ca79d5d015ce0f3a016a767fdf1541e"
+            }
+          },
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 248,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 248
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 246
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 245
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791651390938221319,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791651390938221350
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 248
+            }
+          }
+        },
+        "cold": {
+          "applied": 248,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 245,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 24,
+            "delete_attempts": 26,
+            "delete_completed": 26,
+            "inventory_incomplete": 12,
+            "inventory_put_attempts": 12,
+            "publications": 28,
+            "put_attempts": 16,
+            "resume_incomplete": 12,
+            "retirements": 16,
+            "scan_rounds": 310,
+            "scanned": 885
+          },
+          "floor": 245,
+          "inventory": {
+            "birth": 246,
+            "kind": {
+              "Inventory": {
+                "cut": 245
+              }
+            },
+            "len": 56,
+            "sha256": "a6895bea7b9cef1f1250e57094ca52c3bb57b1bdf2971359b0a54f0f41f3b632"
+          },
+          "live_objects": 0,
+          "local_payload_bytes": 0,
+          "objects": [],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 245
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "data_files": {
+    "object-fault-1.json": 43,
+    "cb-dcf547651717c5eb-minio.log": 438,
+    "cb-dcf547651717c5eb-s3-1.log": 0,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/tmp/.trash/d507ab3b-528c-45fa-9590-fa5ff9d9717e": 356,
+    "minio/.minio.sys/tmp/.trash/59027325-4b55-4655-b6d0-98507e5ec810": 356,
+    "minio/.minio.sys/tmp/.trash/0bfafc93-6552-4e8c-8751-1e7ee2793804": 386,
+    "minio/.minio.sys/tmp/.trash/d5cf0498-708f-4599-94e6-0da98847daac": 356,
+    "minio/.minio.sys/tmp/.trash/5cc214c1-e587-4aeb-ba78-d957c3582d07": 356,
+    "minio/.minio.sys/tmp/.trash/215da0a9-d4c3-43ac-85d5-beec9cfe354c": 65,
+    "minio/.minio.sys/tmp/.trash/e9830508-469b-40ea-aebd-2ac968894fbc": 386,
+    "minio/.minio.sys/tmp/.trash/1a5ce0eb-c3a1-4c13-aefb-1afd483bcad8": 356,
+    "minio/.minio.sys/tmp/.trash/a3fb2353-9146-43fe-9ff6-bfe382b616c4": 356,
+    "minio/.minio.sys/tmp/.trash/20677c1b-e35c-483e-b931-84ea53c4e233": 65,
+    "minio/.minio.sys/tmp/.trash/3fcca29d-3fb5-454a-9d91-424fc1fade07": 65,
+    "minio/.minio.sys/tmp/.trash/2081983e-d014-4e1e-b617-acbfdd939205": 386,
+    "minio/.minio.sys/tmp/.trash/cbe70403-046d-4218-a197-8e46b978f0b3": 356,
+    "minio/.minio.sys/tmp/.trash/87c2f9c3-5aa8-472f-a3fb-ec7d8ebc24ce": 356,
+    "minio/.minio.sys/tmp/.trash/6ff79aa2-dc1c-448a-9564-02eaead1ef34": 379,
+    "minio/.minio.sys/tmp/.trash/46627d40-c462-4028-ae8f-8251e2db316f": 69,
+    "minio/.minio.sys/tmp/.trash/0871c6a1-18ef-4c5b-8933-3c43ba3077ca": 356,
+    "minio/.minio.sys/tmp/.trash/b90f2182-c7e4-41d2-a4f6-6e008786a257": 356,
+    "minio/.minio.sys/tmp/.trash/5768909c-b304-48ef-8f09-5ffd8abc95f7": 356,
+    "minio/.minio.sys/tmp/.trash/0ec42a28-279c-46a5-adc9-dfc66d20e8d8": 379,
+    "minio/.minio.sys/tmp/.trash/6e105592-92b9-49a7-94ba-3c4719a2274c": 69,
+    "minio/.minio.sys/tmp/.trash/4d9b75e2-d112-4aad-9ee0-fc5fca1b8229": 356,
+    "minio/.minio.sys/tmp/.trash/3cecb4af-de8d-48e1-a28e-401b8538219c": 379,
+    "minio/.minio.sys/tmp/.trash/ab06d6df-0d51-43b4-a01a-5d7946a74ebc": 386,
+    "minio/.minio.sys/tmp/.trash/bacc9145-c398-41c9-9788-5ed17878ef8b": 379,
+    "minio/.minio.sys/tmp/.trash/8bef03ef-231e-4b6e-8956-845b0a30016f": 69,
+    "minio/.minio.sys/tmp/.trash/0b325a95-4962-43ad-b49e-0e5651e2db45": 69,
+    "minio/.minio.sys/tmp/.trash/a59fbd43-78eb-4152-9887-5ff5af597d88": 356,
+    "minio/.minio.sys/tmp/.trash/34c8c4d5-0a2c-43ec-b1f6-adba7d7de1ca": 379,
+    "minio/.minio.sys/tmp/.trash/a7631fbe-d975-48cc-aa64-ba7980a697db": 356,
+    "minio/.minio.sys/tmp/.trash/8eb63275-e69c-4d4a-8b58-497671cb932d": 356,
+    "minio/.minio.sys/tmp/.trash/ee4af01f-bd0c-4279-9aad-dfaa1655d621": 65,
+    "minio/.minio.sys/tmp/.trash/51dd3dea-10ea-4c6f-ade4-fbbd7c581ff5": 386,
+    "minio/.minio.sys/tmp/.trash/8ccf3f2b-cf70-4c89-8169-c76a90871fb6": 65,
+    "minio/.minio.sys/tmp/.trash/67000539-3c40-4716-bdd3-bdab346bf4e5": 356,
+    "minio/.minio.sys/tmp/.trash/b02e090d-a2e6-4059-8c2e-bde4ed5812d6": 69,
+    "minio/.minio.sys/tmp/.trash/870f7564-c72a-47bd-b6d3-9bda6711c4f9": 356,
+    "minio/.minio.sys/tmp/.trash/b60bc6f7-d757-4d74-b2cd-a9721a399a4e": 65,
+    "minio/.minio.sys/tmp/.trash/3a94b3a5-d999-4c29-8a20-0a846a3d00f5": 379,
+    "minio/.minio.sys/tmp/.trash/e3923dc7-4877-48df-95bf-770764c2a024": 69,
+    "minio/.minio.sys/tmp/.trash/ed3585ad-8212-41a2-9169-d9a69bd2d042": 69,
+    "minio/.minio.sys/tmp/.trash/2848277b-9389-4ccd-81e1-16bbc9425815": 356,
+    "minio/.minio.sys/tmp/.trash/e33088eb-8166-4a3c-bf2d-7a1548b92914": 65,
+    "minio/.minio.sys/tmp/.trash/2bf076d6-bc50-4c80-a7b7-69e76645d431": 379,
+    "minio/.minio.sys/tmp/.trash/501269a9-2028-4934-8a52-340e1884f044": 65,
+    "minio/.minio.sys/tmp/.trash/24b0eed1-f725-4da7-a1e3-5041d9cfc991": 69,
+    "minio/.minio.sys/tmp/.trash/64a6f040-e3bf-4688-bc55-7eea67d22659": 386,
+    "minio/.minio.sys/tmp/.trash/ae1e9069-bf0d-4182-a5c6-81823ce204af": 356,
+    "minio/.minio.sys/tmp/.trash/914fbf3c-e28b-43ea-8cf7-2b35142117f6": 379,
+    "minio/.minio.sys/tmp/.trash/d55808a4-3d02-4eb5-8be8-c9d5db9b7d02": 386,
+    "minio/.minio.sys/tmp/.trash/8cf49833-c7f6-4938-a3c6-c3388acb2139": 356,
+    "minio/.minio.sys/tmp/.trash/e43ef74a-2f5d-4f93-87fa-07d3f757e0c4": 356,
+    "minio/.minio.sys/tmp/.trash/7a924d14-b6d1-40d0-8e02-f8d7a0ea6db8": 386,
+    "minio/.minio.sys/tmp/.trash/95822093-a36c-40fd-b449-61751bcf3ef6": 65,
+    "minio/.minio.sys/tmp/.trash/08870ae1-83c4-42fc-9524-48770c7d558d": 379,
+    "minio/.minio.sys/tmp/.trash/035b6ed5-8d1e-4bd0-b89f-d5fd1b5c3c63": 356,
+    "minio/.minio.sys/tmp/.trash/5f67cd43-f6d6-48e5-94e6-bae47ec42d91": 356,
+    "minio/.minio.sys/tmp/.trash/15f01f1a-b2dc-473b-9a7e-82cc70fbbcff": 65,
+    "minio/.minio.sys/tmp/.trash/d542ce11-504d-48f2-9939-7e1427417c3d": 356,
+    "minio/.minio.sys/tmp/.trash/6035235f-b130-4de0-af5d-f6e3bb285293": 65,
+    "minio/.minio.sys/tmp/.trash/83a2e30b-029e-4cf1-b93c-acdc4d13dbc3": 379,
+    "minio/.minio.sys/tmp/.trash/6b0022a5-f627-4c63-8c85-adba5602a055": 356,
+    "minio/.minio.sys/tmp/.trash/1ddfe0bb-8076-484a-ae4a-e4c26638b5c3": 65,
+    "minio/.minio.sys/tmp/.trash/b4a4c322-79a9-4fff-a04c-92661870036d": 69,
+    "minio/.minio.sys/tmp/.trash/5d1c4122-446d-42b3-ab74-6421a4006127": 69,
+    "minio/.minio.sys/tmp/.trash/2ac3c0cd-9eb2-4890-84bb-d06ae1901a7a": 356,
+    "minio/.minio.sys/tmp/.trash/923d3c3b-6faa-49ec-a46b-bbd9d9ea38c6": 356,
+    "minio/.minio.sys/tmp/.trash/b1711416-3a83-46dd-8380-083a09d59f67": 379,
+    "minio/.minio.sys/tmp/.trash/9abbf960-95c0-498f-abed-9a5692cb95f9": 356,
+    "minio/.minio.sys/tmp/.trash/913bfc73-ab2d-4732-969a-882bf1b7050e": 356,
+    "minio/.minio.sys/tmp/.trash/1559a6a6-e03f-4c2e-8a66-2dc130592b66": 356,
+    "minio/.minio.sys/tmp/.trash/7bed99ae-11b2-4c90-bfff-7404e034fbd1": 379,
+    "minio/.minio.sys/tmp/.trash/c31ffad1-8f52-4244-8b17-a0f1df39e7dc": 65,
+    "minio/.minio.sys/tmp/.trash/2eb21c32-8ba9-49e9-b77c-6ebe588773f6": 356,
+    "minio/.minio.sys/tmp/.trash/c93c5be0-b5f9-4d01-995d-abdfc0187860": 65,
+    "minio/.minio.sys/tmp/.trash/93ebdf5d-cbf7-4120-8025-a21384183c4a": 65,
+    "minio/.minio.sys/tmp/.trash/86d784fb-8e4c-4d1c-8381-6a595fcfbe70": 356,
+    "minio/.minio.sys/tmp/.trash/eb67898c-5901-482c-a7f5-cf317b0b189c": 379,
+    "minio/.minio.sys/tmp/.trash/0fde9c6c-ac60-4ad0-add9-cfca7678f6b2": 65,
+    "minio/.minio.sys/tmp/.trash/a0ff23a4-d6b9-4a2e-bd09-a8f23366276e/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/cab514fd-f23a-4707-b9ab-e5a99463c9c8/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/31bf7016-4be6-459f-a5f9-eaadb45912f5/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/5b3987ad-0940-44ff-b74f-3662eed47287/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/c0b5ca31-5d59-4d5f-b13b-46782be6620a/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/1f7bbeaa-0935-460d-aa69-96dff8ab56fd/part.1": 168,
+    "minio/.minio.sys/tmp/.trash/e8d1c883-e8af-48bb-80fa-3328ae139280/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/229476ae-f2b1-4b51-9dca-3b692895dcb6/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/ddfa58c5-9bce-44d4-bdc8-d4fda9cc1bea/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/9dca5ba3-49fa-4a32-b87d-7b8e7a9a3a38/part.1": 128,
+    "minio/.minio.sys/tmp/.trash/2d159ef4-91dd-4dae-ae41-e4277d381ad6/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/88ce556d-99e6-4841-8bbb-c89da8bce714/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/0808a854-5aa0-4cba-a6f7-7ecd40ee9028/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/de4a4d39-b194-456c-acc1-2d6d0e9954cd/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/6e1fe612-9b06-40e3-97cb-5c64de870582/part.1": 128,
+    "minio/.minio.sys/tmp/.trash/b41b4857-81f9-45eb-90c7-9b64b4d1a345/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/1eef8b9d-bfbe-4d05-ab26-a43da4b6cfb4/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/4f196f48-a74a-4236-b87e-f56ef74ede03/part.1": 448,
+    "minio/.minio.sys/tmp/.trash/8753f010-e2da-4b80-985d-e55d68f8d10c/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/980929ee-12be-448d-bb47-5c5c59387421/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/b8ba599e-59e8-45b4-a6ab-0c533964626b/part.1": 728,
+    "minio/.minio.sys/tmp/.trash/1ab53656-3138-4518-a0d9-17c006963d75/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/b8b044f9-adef-4ec1-95cb-70e47a3fd335/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/ce2820e9-d46d-49cc-98a1-1aa4749a4bbf/part.1": 168,
+    "minio/.minio.sys/tmp/.trash/247aa6af-6e06-4c85-b8c1-29dbb74e2361/part.1": 408,
+    "minio/.minio.sys/tmp/.trash/6b59d888-6d79-4383-bdd0-d432ba1e93a8/part.1": 128,
+    "minio/.minio.sys/tmp/.trash/27b98e49-4ca5-4aad-a4e5-c15962a0e2e6/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/2191e6b8-16e2-4f7f-a4ba-b5b98533cb57/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/40b49bb5-e6cf-48ce-b915-4b8fd36576b9/part.1": 168,
+    "minio/.minio.sys/tmp/.trash/5362fb3f-fa3d-468e-b628-9a9e3297a918/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/0e26d0f3-2610-4e4d-bdb2-56de6c094872/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/9b60bc11-3850-49b7-9a3f-bac6fcb8c266/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/579ecf5b-0658-4e77-a9f8-f59eaac43c7c/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a1b9f282-fae7-4535-bdcd-f1352ee45e36/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/8bc463ad-3aa2-4af0-bd04-4ccb71b1a898/part.1": 128,
+    "minio/.minio.sys/tmp/.trash/52e58b0f-574c-4385-b2f8-631b17771d6f/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/3baf1b42-4606-45cc-8c5f-251f9537ef82/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/7819ad6c-a34b-4114-b3fb-365aa9ed69d7/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/24607e1b-8be5-4736-b358-04586c02da99/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/ff3bdbe2-17cc-4bb0-b29a-000e19469fc4/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/7b4e914a-083a-4c60-a2a6-500b7cb2fd42/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a9184549-4809-4277-b28d-95514ad6cd21/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/4c0155f7-a641-41fb-9170-677edc5f1cfe/part.1": 48,
+    "minio/.minio.sys/tmp/.trash/bae16f74-1c8b-43bd-8f10-a04c18680e05/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/921286d6-f0fd-40d5-8ebc-4bfe713b2877/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/f17f5f58-3f15-452d-a7c1-96dc04d633d5/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/297c66d4-2642-4c20-a0b6-946e610d7d9d/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/0da26717-5498-4a0a-9e45-6e2707a5d255/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/9e116a5c-7aed-4796-9ace-f6705e9f6db0/part.1": 768,
+    "minio/.minio.sys/tmp/.trash/3e60154b-1140-49d8-b173-c3f0956c1c69/part.1": 208,
+    "minio/.minio.sys/tmp/.trash/c1d72747-c4dd-4cdc-96ed-824f8e4de747/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/c7cfd3c2-59ae-4732-8f55-1d562065fbb8/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/abf02f72-1c5d-4c93-a815-ef6d040b3dfc/part.1": 8388864,
+    "minio/.minio.sys/pool.bin/xl.meta": 580,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000013831/i/00000000000000000000/00000000000000013830/00000000000000000176/44443cd640241f1ac066423d53839b893157923381bdcbe4b99752bcc2565dcb/xl.meta": 386,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000013831/i/00000000000000000000/00000000000000013830/00000000000000000176/44443cd640241f1ac066423d53839b893157923381bdcbe4b99752bcc2565dcb/07a08082-e13d-4e31-b6f9-a010504cf402/part.1": 208,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000010503/p/00000000000000000002/00000000000016777216/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8/xl.meta": 356,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000010503/p/00000000000000000002/00000000000016777216/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8/aa69b442-a529-4582-b80b-49b8eae97649/part.1": 8388864,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a/xl.meta": 356,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000000023/p/00000000000000000002/00000000000000000000/00000000000008388608/f6e0706f6ed06f007d016b5b3842f4c8c29a1e4f59169042e186662ff152ff4a/249cdaa0-7fd7-410f-8b9e-367245494408/part.1": 8388864,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000015239/i/00000000000000000000/00000000000000015238/00000000000000000176/abfd249e360fde46223b92e6f2115ea69ca79d5d015ce0f3a016a767fdf1541e/xl.meta": 386,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000015239/i/00000000000000000000/00000000000000015238/00000000000000000176/abfd249e360fde46223b92e6f2115ea69ca79d5d015ce0f3a016a767fdf1541e/25dfc0a6-b13d-416f-b713-c4bcd363f4e8/part.1": 208,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000005315/p/00000000000000000002/00000000000008388608/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8/xl.meta": 356,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/0/00000000000000005315/p/00000000000000000002/00000000000008388608/00000000000008388608/7a5b46680b731fcff6c3a5dc7457c0d96a7a9220e24681c0476c7e2994bdecf8/b6ae7382-8fbe-4f28-b21a-c4a6bb7ffd2d/part.1": 8388864,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000249/i/00000000000000000000/00000000000000000248/00000000000000000056/daf2b62d16c9e1528544a9a18ccba2808d1e765bd398696b95f3bb5e01629795/xl.meta": 379,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000249/i/00000000000000000000/00000000000000000248/00000000000000000056/daf2b62d16c9e1528544a9a18ccba2808d1e765bd398696b95f3bb5e01629795/e245a439-840e-438c-b5fa-1b5b928ae139/part.1": 88,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000243/i/00000000000000000000/00000000000000000242/00000000000000000056/4330f0316650d3fe9c0af498053f20d08c4cc70d74b05344fd9e2ca908830056/xl.meta": 379,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000243/i/00000000000000000000/00000000000000000242/00000000000000000056/4330f0316650d3fe9c0af498053f20d08c4cc70d74b05344fd9e2ca908830056/d597282f-e8d9-4d38-948a-05a19fbb7e20/part.1": 88,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000246/i/00000000000000000000/00000000000000000245/00000000000000000056/a6895bea7b9cef1f1250e57094ca52c3bb57b1bdf2971359b0a54f0f41f3b632/xl.meta": 379,
+    "minio/cold-fixture/electric/cb-dcf547651717c5eb/1/00000000000000000246/i/00000000000000000000/00000000000000000245/00000000000000000056/a6895bea7b9cef1f1250e57094ca52c3bb57b1bdf2971359b0a54f0f41f3b632/30a271a1-a291-4304-8bde-a8ac9259831d/part.1": 88,
+    "1/IDENTITY": 254,
+    "1/LOCK": 0,
+    "1/0/wal/journal-checkpoint": 443,
+    "1/0/wal/25861.wal": 8388608,
+    "1/0/state/cold-certificate": 128,
+    "1/0/state/snapshot-1791651430243396983": 7690220,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2": 7687424,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2.meta": 1311,
+    "1/0/state/hot/streams/.lane": 1,
+    "1/0/state/hot/streams/.lanes": 2,
+    "1/1/wal/journal-checkpoint": 443,
+    "1/1/wal/340.wal": 8388608,
+    "1/1/state/cold-certificate": 126,
+    "1/1/state/snapshot-1791651430610987802": 819,
+    "1/1/state/hot/streams/.lane": 1,
+    "1/1/state/hot/streams/.lanes": 2
+  },
+  "variant": "baseline"
+}

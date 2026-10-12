@@ -134,6 +134,15 @@ impl Journal {
         }))
     }
 
+    /// Conservatively include every retained frame after the materialized cut,
+    /// even uncommitted entries and metadata. Caller excludes concurrent apply.
+    pub(super) fn unapplied_bytes(&self, applied: Option<LogId>) -> u64 {
+        let first = applied.map_or(0, |id| id.index.saturating_add(1));
+        self.index.lock().unwrap().entries.range(first..)
+            .map(|(_, (_, location))| location.len as u64)
+            .fold(0u64, u64::saturating_add)
+    }
+
     /// One worker per group, owned by the server lifecycle, not one task per
     /// purge. A stored Notify permit coalesces work arriving during filesystem
     /// I/O; consume it before capture, never after completing the old work.
@@ -697,19 +706,24 @@ mod tests {
         #[test]
         fn cold_native_replay_cuts_readers_transfers_and_irreversible_retirement(
             sizes in prop::collection::vec(1024usize..4096, 2..5), json in any::<bool>(),
-            replay_fork in any::<bool>(),
+            replay_fork in any::<bool>(), legacy_checkpoint in any::<bool>(),
         ) {
             use cold::{Action, Kind, Object};
             let _mode = crate::handlers::test_support::DurabilityGuard::memory();
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 let dir = tempfile::tempdir().unwrap();
-                let options = cold_io::Options { node: 1, genesis: vec![1], tier: crate::tier::TierConfig {
-                    kind: crate::tier::TierKind::Local, consensus_managed: true,
-                    local_dir: Some(dir.path().join("objects")), key_prefix: "test/group".into(),
-                    segment_bytes: 1024, compact_bytes: 1024, ..Default::default()
-                }};
+                // Exercise the actual replicated configuration with short
+                // published tails, not a test-only compaction threshold.
+                let config = cold_io::Config {
+                    backend: "local".into(), local_dir: Some(dir.path().join("objects")),
+                    bucket: None, endpoint: None, region: None, allow_http: false,
+                    segment_bytes: 64 * 1024, inventory_interval_ms: 1000,
+                };
+                let options = cold_io::Options { node: 1, genesis: vec![1], tier: config.tier("test/group".into()).unwrap() };
+                let mut initial = options.clone();
+                if legacy_checkpoint { initial.tier.compact_bytes = 64 * 1024; }
                 let mut machine = machine::Machine::open_with_cold(dir.path().join("state"),
-                    Journal::open(dir.path().join("wal"),8192).unwrap(),Some(options)).await.unwrap();
+                    Journal::open(dir.path().join("wal"),8192).unwrap(),Some(initial)).await.unwrap();
                 for (generation, size) in sizes.iter().enumerate() {
                     let (body, wire, child_body, child_expected, sub) = if json {
                         let first = serde_json::json!({"generation":generation,"text":"x".repeat(*size)});
@@ -761,6 +775,15 @@ mod tests {
                     assert_eq!(cold_control(&mut machine,Action::Abort {birth:captured.birth}).await.status,204);
                     blob.put(&key,wire.clone().into()).await.unwrap();
                     assert_eq!(cold_control(&mut machine,Action::Publish {birth:object.birth}).await.status,204);
+                    if generation == 0 && legacy_checkpoint {
+                        let st = machine.view.read().await.store.get("/cold").unwrap();
+                        assert_eq!(std::fs::metadata(&st.file_path).unwrap().len(),wire.len() as u64,
+                            "fixture must retain the old short published prefix");
+                        drop(machine.build_snapshot().await.unwrap());
+                        drop(machine);
+                        machine = machine::Machine::open_with_cold(dir.path().join("state"),
+                            Journal::open(dir.path().join("wal"),8192).unwrap(),Some(options.clone())).await.unwrap();
+                    }
                     {
                         let view=machine.view.read().await;
                         let st=view.store.get("/cold").unwrap();

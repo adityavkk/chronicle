@@ -1,0 +1,23 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1875:1
+     |
+1875 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 58.55s
+     Running unittests src/main.rs (target/debug/deps/durable_streams_server-485865a18929f236)
+
+running 1 test
+test replication::cold_admission::tests::admission_never_reuses_unobserved_growth ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 152 filtered out; finished in 0.03s
+

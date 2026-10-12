@@ -75,7 +75,15 @@ impl Network {
                 } else {
                     RPCError::Network(NetworkError::new(&e))
                 }
-            })?
+            })?;
+        if matches!(response.status().as_u16(), 429 | 507) {
+            // Pressure is not a transient packet error: use the existing peer
+            // backoff rather than spinning the replication retry loop.
+            return Err(RPCError::Unreachable(Unreachable::new(&io::Error::other(
+                "replica storage admission unavailable",
+            ))));
+        }
+        let response = response
             .error_for_status()
             .map_err(|e| RPCError::Network(NetworkError::new(&e)))?
             .bytes()

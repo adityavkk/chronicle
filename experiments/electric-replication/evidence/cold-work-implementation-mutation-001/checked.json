@@ -1,0 +1,46 @@
+{
+  "verdict": "NEGATIVE_CONTROL_DETECTED",
+  "control_exit": 0,
+  "mutant_exit": 101,
+  "control_source_sha256": "1627bf90c0f885c22723bda37148103d16ebe372f7a13df35fb0f0d10add1ff1",
+  "mutant_source_sha256": "b0658af649e18034897fab9091da310eea26b3271b7acfb9421d35f75fe6127e",
+  "mutant_test_binary_sha256": "0b95dd6f31323bdb191b34d534c39ad8510bcbb49d7f4f4b9cd05c25007e5054",
+  "runtime_binary_sha256": "3035f73be03e4600e396fdb2b9fb3e2c6ea51cb744a2d910041a074d90d46ce3",
+  "minimal_operations": [
+    [
+      0,
+      28
+    ],
+    [
+      0,
+      8
+    ],
+    [
+      0,
+      18
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      0,
+      11
+    ]
+  ],
+  "independent_violation": "Three tickets promise 54 bytes. Completing the 18-byte ticket without carrying its spent credit permits 11 more, promising 65 under a 64-byte bound.",
+  "scope": "Actual cloned Rust implementation mutation, not a changed expectation or a model-only mutation. Main runtime sources and release binary unchanged.",
+  "command": "CARGO_TARGET_DIR=experiments/electric-replication/engine/target cargo test --manifest-path .tmp/cold-work-mutation/Cargo.toml --release --locked --offline --features replication,tier --bin durable-streams-server replication::cold_admission::tests::admission_never_reuses_unobserved_growth -- --exact --nocapture",
+  "evidence_sha256": {
+    "minimized.txt": "673b0b74857e252167291653a4c52cefa1f0f7342727ec984591ad0f3a066cc0",
+    "mutant-exit.txt": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "mutant-source.sha256": "e570dfd914dcbdbe1868e5d78c6a2c0d2c015a78af7ba5acc5daab0b85e978ab",
+    "mutant.log": "2c44eb20b2074c1a5b939cdb7a1d5287205788ef0e6693e8ed339ee498e84d54",
+    "mutation.patch": "3e9363a1119b79687f275f73d308adf664e5b68972e0cc89cbae1b84a20a848b",
+    "positive-binary.json": "b18f0a11faf426e683602a8f17e2479383d56f97a24f5f6599fe9eea4728e6bd",
+    "positive-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "positive-sources.sha256": "2212b22676a4bbd9937772823403534d82b98aaf2744a758613e009e86bdc183",
+    "positive.log": "1a24bcecb96e24a5303d7a8fd4fdd91c06a1e54b1da451cdadb7e574be762da5",
+    "toolchain.txt": "f64c55ed9f210d80a9b248206104a47175faf5ec94a093e4ad132549209089fc"
+  }
+}

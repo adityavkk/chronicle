@@ -1,0 +1,283 @@
+{
+  "passed": 2,
+  "total": 2,
+  "cells": [
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 577,
+      "read_remote_bytes": 1572864,
+      "cycles": 3,
+      "cell": "cold-generations-smoke-002-native-cold-r1",
+      "arm": "native",
+      "cold": true,
+      "elapsed_seconds": 9.009774368,
+      "completion_ops_per_second": 64.10184497574706,
+      "latency_ms": {
+        "count": 577,
+        "p50": 1.201579,
+        "p99": 3.835523,
+        "max": 15.813849
+      },
+      "schedule_lateness_ms": {
+        "count": 577,
+        "p50": 0.151793,
+        "p99": 1.475888,
+        "max": 5.272238
+      },
+      "gc_seconds": {
+        "count": 3,
+        "p50": 0.106772243,
+        "p99": 0.108904416,
+        "max": 0.108904416
+      },
+      "gc_unpinned_seconds": {
+        "count": 3,
+        "p50": 0.106772243,
+        "p99": 0.108904416,
+        "max": 0.108904416
+      },
+      "gc_pinned_seconds": null,
+      "generation_overrun_seconds": {
+        "count": 3,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 9,
+          "sampled_seconds": 8.107352748,
+          "cpu_cores": 0.046871033222742414,
+          "peak_rss_bytes": 8462336,
+          "io_delta": {
+            "rchar": 1706628,
+            "wchar": 6974050,
+            "syscr": 74,
+            "syscw": 3083,
+            "read_bytes": 0,
+            "write_bytes": 7741440,
+            "cancelled_write_bytes": 1626112
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 9,
+          "sampled_seconds": 8.107352748,
+          "cpu_cores": 0.03947034376651993,
+          "peak_rss_bytes": 172826624,
+          "io_delta": {
+            "rchar": 5485122,
+            "wchar": 3410278,
+            "syscr": 916,
+            "syscw": 283,
+            "read_bytes": 0,
+            "write_bytes": 1855488,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 9,
+          "sampled_seconds": 8.107352748,
+          "cpu_cores": 0.060438963892483634,
+          "peak_rss_bytes": 58765312,
+          "io_delta": {
+            "rchar": 220952,
+            "wchar": 149012,
+            "syscr": 1537,
+            "syscw": 552,
+            "read_bytes": 0,
+            "write_bytes": 135168,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 9,
+      "peak_object_bytes": 589824,
+      "peak_local_allocated_bytes": 17575424,
+      "final_objects": {
+        "count": 0,
+        "bytes": 0
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 1,
+          "bytes": 65536
+        }
+      ],
+      "peak_pending_replicated_descriptors": 0,
+      "methods": {
+        "GET": 27,
+        "PUT": 26,
+        "HEAD": 26,
+        "DELETE": 26
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 1
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 919,
+      "read_remote_bytes": 4718592,
+      "cycles": 3,
+      "cell": "cold-generations-smoke-002-quorum3-cold-r1",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 14.374413079,
+      "completion_ops_per_second": 64.06117837125154,
+      "latency_ms": {
+        "count": 919,
+        "p50": 1.774836,
+        "p99": 4.089315,
+        "max": 10.312621
+      },
+      "schedule_lateness_ms": {
+        "count": 919,
+        "p50": 0.143979,
+        "p99": 2.182507,
+        "max": 4.850568
+      },
+      "gc_seconds": {
+        "count": 3,
+        "p50": 2.035958541,
+        "p99": 7.456756489,
+        "max": 7.456756489
+      },
+      "gc_unpinned_seconds": {
+        "count": 2,
+        "p50": 1.180652273,
+        "p99": 2.035958541,
+        "max": 2.035958541
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.456756489,
+        "p99": 7.456756489,
+        "max": 7.456756489
+      },
+      "generation_overrun_seconds": {
+        "count": 3,
+        "p50": 0,
+        "p99": 5.344057006994262,
+        "max": 5.344057006994262
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 15,
+          "sampled_seconds": 14.351207902,
+          "cpu_cores": 0.25712121413039785,
+          "peak_rss_bytes": 134246400,
+          "io_delta": {
+            "rchar": 16295153,
+            "wchar": 23016589,
+            "syscr": 6924,
+            "syscw": 85819,
+            "read_bytes": 0,
+            "write_bytes": 43155456,
+            "cancelled_write_bytes": 5603328
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 15,
+          "sampled_seconds": 14.351207902,
+          "cpu_cores": 0.23133941217152326,
+          "peak_rss_bytes": 377470976,
+          "io_delta": {
+            "rchar": 17033135,
+            "wchar": 10848082,
+            "syscr": 13154,
+            "syscw": 3005,
+            "read_bytes": 0,
+            "write_bytes": 2584576,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 15,
+          "sampled_seconds": 14.351207902,
+          "cpu_cores": 0.07943582225166762,
+          "peak_rss_bytes": 53178368,
+          "io_delta": {
+            "rchar": 757483,
+            "wchar": 627309,
+            "syscr": 3557,
+            "syscw": 1018,
+            "read_bytes": 0,
+            "write_bytes": 507904,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 15,
+      "peak_object_bytes": 721200,
+      "peak_local_allocated_bytes": 51876864,
+      "final_objects": {
+        "count": 4,
+        "bytes": 344
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 6,
+          "bytes": 131376
+        },
+        {
+          "count": 7,
+          "bytes": 197032
+        }
+      ],
+      "peak_pending_replicated_descriptors": 3,
+      "methods": {
+        "GET": 779,
+        "HEAD": 612,
+        "PUT": 37,
+        "POST": 20,
+        "DELETE": 33
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 2
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true
+      }
+    }
+  ]
+}

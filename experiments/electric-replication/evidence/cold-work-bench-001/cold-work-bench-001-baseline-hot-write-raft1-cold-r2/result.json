@@ -1,0 +1,2617 @@
+{
+  "version": 1,
+  "arm": "raft1",
+  "cold": true,
+  "workload": "hot-write",
+  "repetition": 2,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 65536,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 24,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "none",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 10240684032,
+  "startup_seconds": 2.2011525350098964,
+  "roles": {
+    "sut": [
+      2795428
+    ],
+    "provider": [
+      2795386,
+      2795410
+    ],
+    "client": [
+      2795584
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791638694059,
+    "monotonic_ns": 157534806584299,
+    "processes": {
+      "2795428": {
+        "cpu_ticks": 10,
+        "rss_pages": 8803,
+        "io": {
+          "rchar": 21650547,
+          "wchar": 1644,
+          "syscr": 2530,
+          "syscw": 50,
+          "read_bytes": 0,
+          "write_bytes": 36864,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "2795386": {
+        "cpu_ticks": 57,
+        "rss_pages": 26852,
+        "io": {
+          "rchar": 161259721,
+          "wchar": 14782,
+          "syscr": 5488,
+          "syscw": 22,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "2795410": {
+        "cpu_ticks": 24,
+        "rss_pages": 11424,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:58064",
+        "owners": [
+          2795386
+        ],
+        "counters": {
+          "bytes_sent": 1227,
+          "bytes_acked": 1227,
+          "bytes_received": 1371
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "garbage_keys": [
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000016/p/00000000000000000004/00000000000000000000/00000000000000065536/3428ee0ddfdac87a5d7ea2f7e98a0f52d4294a28d25a8db5f5f9f05ca0b6147d",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000022/p/00000000000000000005/00000000000000000000/00000000000000065536/0d1118e83127022a77ca384873149a2e9f8e4afd87e5703d019a964d264c4cda",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000024/p/00000000000000000006/00000000000000000000/00000000000000065536/554064fb7b8ed5abd2b3d334ecf89980a75cd063a7b7010d725768ed6fd8d876",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000026/p/00000000000000000007/00000000000000000000/00000000000000065536/b6cb44028cb8da4bcd949d410ce552cf58578f4b34d1b9376fc309c17c395aa0",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000030/p/00000000000000000004/00000000000000065536/00000000000000065536/2cf5dd4a4809377d9851482d8d7474f2a229c7e6cee1532e6414a36cd1bfa410",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000032/p/00000000000000000005/00000000000000065536/00000000000000065536/7dc7520ba5201e4399449d16d35bc1860e414e7a10ec0ec392ffeabd3bab0235",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000034/p/00000000000000000006/00000000000000065536/00000000000000065536/f095b0ae3fe2c6a4b60363138fdacb1b816d0f2cb9d8a8be725177ecc5ee6f4e",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000036/p/00000000000000000007/00000000000000065536/00000000000000065536/49e4ad7c3b2e1fbf96d57b496d41e01a69d43bd3369c3b037da05aef8eefbd09",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000038/p/00000000000000000004/00000000000000131072/00000000000000065536/16d4e8ea20cea0851a83a6ca9c9d87ebd07975d306db95d1158964a7e1fbb814",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000040/p/00000000000000000005/00000000000000131072/00000000000000065536/2baf120e6e53b3e6151be9784334a859cd9118a4e89ab8e09009b46f50d507d0",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000042/p/00000000000000000006/00000000000000131072/00000000000000065536/0ea456896369e127cc11fe9a006ceffe6fb59be92d4b09e28ab054492a621336",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000044/p/00000000000000000007/00000000000000131072/00000000000000065536/d976947f2dc127fa36b987d8b7a70ec4b3ecdc15ffa4b0adf7f3838cb0362eea",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000046/p/00000000000000000004/00000000000000196608/00000000000000065536/7bfdd9356108fe9c08c2349d76a9775940207e78013b9fd465f43eeaa3664fe9",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000048/p/00000000000000000005/00000000000000196608/00000000000000065536/2a13e3f6884d76f63e267af8b0893d0593165b802bd65c6e7503ebdfcab840d9",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000050/p/00000000000000000006/00000000000000196608/00000000000000065536/4b4d4e5abe91a0e79cd6d5fbe6853e6dd00904c44374da3e7db52f607dae0bf5",
+    "electric/cb-e614c1bf21ba18a2/0/00000000000000000052/p/00000000000000000007/00000000000000196608/00000000000000065536/1d150ef7262e00fa593842d4b3ef19101ad1b4c9b15ee645e0142f92cac91dbe",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000013/p/00000000000000000003/00000000000000000000/00000000000000065536/4b58b0eb647230b60d4e427a3def4bc172689ad103a9d8fc61e36f66c924dba1",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000019/p/00000000000000000002/00000000000000000000/00000000000000065536/c892ebd8a962047dcdd7d73265d63bf360df51a023d93f7e2df48c981cf339df",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000021/p/00000000000000000005/00000000000000000000/00000000000000065536/b6347a7eecfa3afd7b21899c52bcde94be5956c985c521c6a6baef9dce4977eb",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000023/p/00000000000000000004/00000000000000000000/00000000000000065536/ec7ec3120add9477b863cd521f839cdc829042a48f002ef8a38938c9828f6151",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000025/p/00000000000000000003/00000000000000065536/00000000000000065536/349e70eac8090d41265e71db8262a38e29f277e2e16daa5733c73a4137ea183c",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000027/p/00000000000000000002/00000000000000065536/00000000000000065536/786f00642595b3049cd52c3d411b58e894e56e7071eafbf27fd7efd899c0cc25",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000029/p/00000000000000000005/00000000000000065536/00000000000000065536/3cff92e7d6abb79de94839613fdfb11510bee10e37ce5acc3a68987c427db21e",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000031/p/00000000000000000004/00000000000000065536/00000000000000065536/cdb81987e8cdbeae941821937293100827be618425524646328e1e0fcfb72f35",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000033/p/00000000000000000003/00000000000000131072/00000000000000065536/816b723dfa5f48449c5e2d66499e22ca3b4daf23c7c0ce246588b73b5307478c",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000035/p/00000000000000000002/00000000000000131072/00000000000000065536/6debb686d75ebe9af0ddbffdc8c32e263da7fa895813cbee8b8658563f7ca235",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000037/p/00000000000000000005/00000000000000131072/00000000000000065536/61e3a6d88bffce60c766503f8ab3ce2a8756fbdce4aacf6f776c4141e15f05af",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000039/p/00000000000000000004/00000000000000131072/00000000000000065536/57230146fe526b655104f922826abbd268eb5648683302350ac491b8ecdec39d",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000041/p/00000000000000000003/00000000000000196608/00000000000000065536/0e21fbe7544fdb6b50734d3e8f3c6bb83b7ebcc87e4c4e233949d6948196bd4e",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000043/p/00000000000000000002/00000000000000196608/00000000000000065536/50381726ebdee636513494f1bcec2eee3d515a1cff4e58c900a7e72854afade5",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000045/p/00000000000000000005/00000000000000196608/00000000000000065536/bd6f18ded96375de823f9d3a0a6cc98a35c8e5344292995866e1429d9816d51c",
+    "electric/cb-e614c1bf21ba18a2/1/00000000000000000047/p/00000000000000000004/00000000000000196608/00000000000000065536/36f4462a86922bf8cea3fb820687a42afc51be692d0f611e726676e3ea8d27ae"
+  ],
+  "precondition": {
+    "time_ns": 157537267793592,
+    "remote_keys": [
+      "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea"
+    ],
+    "listing_keys": [
+      "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea"
+    ],
+    "local_payload_bytes": 0,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 0,
+        "file_base": 65536,
+        "segments": [
+          {
+            "logical_start": 0,
+            "len": 65536,
+            "remote_key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea",
+            "local_file": null
+          }
+        ]
+      }
+    ]
+  },
+  "client_object_keys": [
+    "/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea"
+  ],
+  "before_client": {
+    "time_ns": 157537268356253,
+    "free_bytes": 10220904448,
+    "storage": {
+      "1": {
+        "logical": 16790911,
+        "allocated": 16821248,
+        "files": 28,
+        "payload": 6,
+        "segments": 0,
+        "metadata": 13189
+      }
+    },
+    "object_store": {
+      "count": 33,
+      "bytes": 2162688
+    },
+    "garbage_objects_remaining": 32,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 53,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 53
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 53
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 53
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 53
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693849069888,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693849069908
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 53
+            }
+          }
+        },
+        "cold": {
+          "applied": 53,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 0,
+            "registered": true
+          },
+          "counters": {
+            "publications": 17,
+            "put_attempts": 17
+          },
+          "floor": 0,
+          "inventory": null,
+          "live_objects": 17,
+          "local_payload_bytes": 0,
+          "objects": [
+            {
+              "birth": 16,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000016/p/00000000000000000004/00000000000000000000/00000000000000065536/3428ee0ddfdac87a5d7ea2f7e98a0f52d4294a28d25a8db5f5f9f05ca0b6147d",
+              "len": 65536
+            },
+            {
+              "birth": 22,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000022/p/00000000000000000005/00000000000000000000/00000000000000065536/0d1118e83127022a77ca384873149a2e9f8e4afd87e5703d019a964d264c4cda",
+              "len": 65536
+            },
+            {
+              "birth": 24,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000024/p/00000000000000000006/00000000000000000000/00000000000000065536/554064fb7b8ed5abd2b3d334ecf89980a75cd063a7b7010d725768ed6fd8d876",
+              "len": 65536
+            },
+            {
+              "birth": 26,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000026/p/00000000000000000007/00000000000000000000/00000000000000065536/b6cb44028cb8da4bcd949d410ce552cf58578f4b34d1b9376fc309c17c395aa0",
+              "len": 65536
+            },
+            {
+              "birth": 28,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea",
+              "len": 65536
+            },
+            {
+              "birth": 30,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000030/p/00000000000000000004/00000000000000065536/00000000000000065536/2cf5dd4a4809377d9851482d8d7474f2a229c7e6cee1532e6414a36cd1bfa410",
+              "len": 65536
+            },
+            {
+              "birth": 32,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000032/p/00000000000000000005/00000000000000065536/00000000000000065536/7dc7520ba5201e4399449d16d35bc1860e414e7a10ec0ec392ffeabd3bab0235",
+              "len": 65536
+            },
+            {
+              "birth": 34,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000034/p/00000000000000000006/00000000000000065536/00000000000000065536/f095b0ae3fe2c6a4b60363138fdacb1b816d0f2cb9d8a8be725177ecc5ee6f4e",
+              "len": 65536
+            },
+            {
+              "birth": 36,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000036/p/00000000000000000007/00000000000000065536/00000000000000065536/49e4ad7c3b2e1fbf96d57b496d41e01a69d43bd3369c3b037da05aef8eefbd09",
+              "len": 65536
+            },
+            {
+              "birth": 38,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000038/p/00000000000000000004/00000000000000131072/00000000000000065536/16d4e8ea20cea0851a83a6ca9c9d87ebd07975d306db95d1158964a7e1fbb814",
+              "len": 65536
+            },
+            {
+              "birth": 40,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000040/p/00000000000000000005/00000000000000131072/00000000000000065536/2baf120e6e53b3e6151be9784334a859cd9118a4e89ab8e09009b46f50d507d0",
+              "len": 65536
+            },
+            {
+              "birth": 42,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000042/p/00000000000000000006/00000000000000131072/00000000000000065536/0ea456896369e127cc11fe9a006ceffe6fb59be92d4b09e28ab054492a621336",
+              "len": 65536
+            },
+            {
+              "birth": 44,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000044/p/00000000000000000007/00000000000000131072/00000000000000065536/d976947f2dc127fa36b987d8b7a70ec4b3ecdc15ffa4b0adf7f3838cb0362eea",
+              "len": 65536
+            },
+            {
+              "birth": 46,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000046/p/00000000000000000004/00000000000000196608/00000000000000065536/7bfdd9356108fe9c08c2349d76a9775940207e78013b9fd465f43eeaa3664fe9",
+              "len": 65536
+            },
+            {
+              "birth": 48,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000048/p/00000000000000000005/00000000000000196608/00000000000000065536/2a13e3f6884d76f63e267af8b0893d0593165b802bd65c6e7503ebdfcab840d9",
+              "len": 65536
+            },
+            {
+              "birth": 50,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000050/p/00000000000000000006/00000000000000196608/00000000000000065536/4b4d4e5abe91a0e79cd6d5fbe6853e6dd00904c44374da3e7db52f607dae0bf5",
+              "len": 65536
+            },
+            {
+              "birth": 52,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000052/p/00000000000000000007/00000000000000196608/00000000000000065536/1d150ef7262e00fa593842d4b3ef19101ad1b4c9b15ee645e0142f92cac91dbe",
+              "len": 65536
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 0
+          },
+          "pending": {},
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 48,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693951746408,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693951746400
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 48
+            }
+          }
+        },
+        "cold": {
+          "applied": 48,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 0,
+            "registered": true
+          },
+          "counters": {
+            "publications": 16,
+            "put_attempts": 16
+          },
+          "floor": 0,
+          "inventory": null,
+          "live_objects": 16,
+          "local_payload_bytes": 0,
+          "objects": [
+            {
+              "birth": 13,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000013/p/00000000000000000003/00000000000000000000/00000000000000065536/4b58b0eb647230b60d4e427a3def4bc172689ad103a9d8fc61e36f66c924dba1",
+              "len": 65536
+            },
+            {
+              "birth": 19,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000019/p/00000000000000000002/00000000000000000000/00000000000000065536/c892ebd8a962047dcdd7d73265d63bf360df51a023d93f7e2df48c981cf339df",
+              "len": 65536
+            },
+            {
+              "birth": 21,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000021/p/00000000000000000005/00000000000000000000/00000000000000065536/b6347a7eecfa3afd7b21899c52bcde94be5956c985c521c6a6baef9dce4977eb",
+              "len": 65536
+            },
+            {
+              "birth": 23,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000023/p/00000000000000000004/00000000000000000000/00000000000000065536/ec7ec3120add9477b863cd521f839cdc829042a48f002ef8a38938c9828f6151",
+              "len": 65536
+            },
+            {
+              "birth": 25,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000025/p/00000000000000000003/00000000000000065536/00000000000000065536/349e70eac8090d41265e71db8262a38e29f277e2e16daa5733c73a4137ea183c",
+              "len": 65536
+            },
+            {
+              "birth": 27,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000027/p/00000000000000000002/00000000000000065536/00000000000000065536/786f00642595b3049cd52c3d411b58e894e56e7071eafbf27fd7efd899c0cc25",
+              "len": 65536
+            },
+            {
+              "birth": 29,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000029/p/00000000000000000005/00000000000000065536/00000000000000065536/3cff92e7d6abb79de94839613fdfb11510bee10e37ce5acc3a68987c427db21e",
+              "len": 65536
+            },
+            {
+              "birth": 31,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000031/p/00000000000000000004/00000000000000065536/00000000000000065536/cdb81987e8cdbeae941821937293100827be618425524646328e1e0fcfb72f35",
+              "len": 65536
+            },
+            {
+              "birth": 33,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000033/p/00000000000000000003/00000000000000131072/00000000000000065536/816b723dfa5f48449c5e2d66499e22ca3b4daf23c7c0ce246588b73b5307478c",
+              "len": 65536
+            },
+            {
+              "birth": 35,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000035/p/00000000000000000002/00000000000000131072/00000000000000065536/6debb686d75ebe9af0ddbffdc8c32e263da7fa895813cbee8b8658563f7ca235",
+              "len": 65536
+            },
+            {
+              "birth": 37,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000037/p/00000000000000000005/00000000000000131072/00000000000000065536/61e3a6d88bffce60c766503f8ab3ce2a8756fbdce4aacf6f776c4141e15f05af",
+              "len": 65536
+            },
+            {
+              "birth": 39,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000039/p/00000000000000000004/00000000000000131072/00000000000000065536/57230146fe526b655104f922826abbd268eb5648683302350ac491b8ecdec39d",
+              "len": 65536
+            },
+            {
+              "birth": 41,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000041/p/00000000000000000003/00000000000000196608/00000000000000065536/0e21fbe7544fdb6b50734d3e8f3c6bb83b7ebcc87e4c4e233949d6948196bd4e",
+              "len": 65536
+            },
+            {
+              "birth": 43,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000043/p/00000000000000000002/00000000000000196608/00000000000000065536/50381726ebdee636513494f1bcec2eee3d515a1cff4e58c900a7e72854afade5",
+              "len": 65536
+            },
+            {
+              "birth": 45,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000045/p/00000000000000000005/00000000000000196608/00000000000000065536/bd6f18ded96375de823f9d3a0a6cc98a35c8e5344292995866e1429d9816d51c",
+              "len": 65536
+            },
+            {
+              "birth": 47,
+              "key": "electric/cb-e614c1bf21ba18a2/1/00000000000000000047/p/00000000000000000004/00000000000000196608/00000000000000065536/36f4462a86922bf8cea3fb820687a42afc51be692d0f611e726676e3ea8d27ae",
+              "len": 65536
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 0
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "client_window": {
+    "start_ns": 157537283220326,
+    "start_unix_ms": 1791638696536,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 157561292998058,
+    "end_unix_ms": 1791638720546
+  },
+  "gc_delete_window": {
+    "start_ns": 157538283746241,
+    "start_unix_ms": 1791638697536,
+    "end_ns": 157538296150313
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 157561293417073,
+    "free_bytes": 10185510912,
+    "storage": {
+      "1": {
+        "logical": 42082891,
+        "allocated": 42105856,
+        "files": 16,
+        "payload": 13027334,
+        "segments": 0,
+        "metadata": 26586
+      }
+    },
+    "object_store": {
+      "count": 107,
+      "bytes": 6757432
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 45352,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45352
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45352
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45352
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45352
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 42319
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 42280
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693849069908,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693849069927
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 45352
+            }
+          }
+        },
+        "cold": {
+          "applied": 45352,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 42280,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 16,
+            "delete_attempts": 22,
+            "delete_completed": 22,
+            "inventory_incomplete": 8,
+            "inventory_put_attempts": 8,
+            "publications": 127,
+            "put_attempts": 119,
+            "resume_incomplete": 8,
+            "retirements": 16,
+            "scan_rounds": 200,
+            "scanned": 9702
+          },
+          "floor": 42280,
+          "inventory": {
+            "birth": 42283,
+            "kind": {
+              "Inventory": {
+                "cut": 42280
+              }
+            },
+            "len": 3816,
+            "sha256": "58c8bbe95fda6efe45ea26cc8140c967a5b92d0a0199a758e4236b7462b7829b"
+          },
+          "live_objects": 103,
+          "local_payload_bytes": 13027328,
+          "objects": [
+            {
+              "birth": 28,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea",
+              "len": 65536
+            },
+            {
+              "birth": 352,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000352/p/00000000000000000002/00000000000000065536/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 754,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000754/p/00000000000000000002/00000000000000131072/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 1221,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000001221/p/00000000000000000002/00000000000000196608/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 1630,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000001630/p/00000000000000000002/00000000000000262144/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2057,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002057/p/00000000000000000002/00000000000000327680/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2507,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002507/p/00000000000000000002/00000000000000393216/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2983,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002983/p/00000000000000000002/00000000000000458752/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 3417,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000003417/p/00000000000000000002/00000000000000524288/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 3840,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000003840/p/00000000000000000002/00000000000000589824/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 4284,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000004284/p/00000000000000000002/00000000000000655360/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 4800,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000004800/p/00000000000000000002/00000000000000720896/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 5242,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000005242/p/00000000000000000002/00000000000000786432/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 5670,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000005670/p/00000000000000000002/00000000000000851968/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 6068,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000006068/p/00000000000000000002/00000000000000917504/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 6522,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000006522/p/00000000000000000002/00000000000000983040/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7024,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007024/p/00000000000000000002/00000000000001048576/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7453,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007453/p/00000000000000000002/00000000000001114112/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7958,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007958/p/00000000000000000002/00000000000001179648/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 8333,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000008333/p/00000000000000000002/00000000000001245184/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 8761,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000008761/p/00000000000000000002/00000000000001310720/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 9167,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000009167/p/00000000000000000002/00000000000001376256/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 9560,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000009560/p/00000000000000000002/00000000000001441792/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10003,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010003/p/00000000000000000002/00000000000001507328/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10393,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010393/p/00000000000000000002/00000000000001572864/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10894,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010894/p/00000000000000000002/00000000000001638400/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 11333,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000011333/p/00000000000000000002/00000000000001703936/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 11706,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000011706/p/00000000000000000002/00000000000001769472/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12158,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012158/p/00000000000000000002/00000000000001835008/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12546,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012546/p/00000000000000000002/00000000000001900544/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12943,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012943/p/00000000000000000002/00000000000001966080/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 13455,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000013455/p/00000000000000000002/00000000000002031616/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 13885,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000013885/p/00000000000000000002/00000000000002097152/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 14350,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000014350/p/00000000000000000002/00000000000002162688/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 14765,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000014765/p/00000000000000000002/00000000000002228224/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 15160,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000015160/p/00000000000000000002/00000000000002293760/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 15610,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000015610/p/00000000000000000002/00000000000002359296/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 16220,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000016220/p/00000000000000000002/00000000000002424832/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 16698,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000016698/p/00000000000000000002/00000000000002490368/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 17154,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000017154/p/00000000000000000002/00000000000002555904/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 17610,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000017610/p/00000000000000000002/00000000000002621440/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 18001,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000018001/p/00000000000000000002/00000000000002686976/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 18500,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000018500/p/00000000000000000002/00000000000002752512/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19001,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019001/p/00000000000000000002/00000000000002818048/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19461,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019461/p/00000000000000000002/00000000000002883584/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19911,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019911/p/00000000000000000002/00000000000002949120/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 20323,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000020323/p/00000000000000000002/00000000000003014656/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 20782,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000020782/p/00000000000000000002/00000000000003080192/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21182,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021182/p/00000000000000000002/00000000000003145728/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21550,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021550/p/00000000000000000002/00000000000003211264/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21960,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021960/p/00000000000000000002/00000000000003276800/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 22417,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000022417/p/00000000000000000002/00000000000003342336/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 22829,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000022829/p/00000000000000000002/00000000000003407872/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 23204,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000023204/p/00000000000000000002/00000000000003473408/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 23676,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000023676/p/00000000000000000002/00000000000003538944/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 24196,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000024196/p/00000000000000000002/00000000000003604480/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 24599,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000024599/p/00000000000000000002/00000000000003670016/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25066,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025066/p/00000000000000000002/00000000000003735552/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25497,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025497/p/00000000000000000002/00000000000003801088/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25918,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025918/p/00000000000000000002/00000000000003866624/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 26402,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000026402/p/00000000000000000002/00000000000003932160/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 26823,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000026823/p/00000000000000000002/00000000000003997696/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 27277,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000027277/p/00000000000000000002/00000000000004063232/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 27789,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000027789/p/00000000000000000002/00000000000004128768/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 28249,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000028249/p/00000000000000000002/00000000000004194304/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 28684,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000028684/p/00000000000000000002/00000000000004259840/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 29106,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000029106/p/00000000000000000002/00000000000004325376/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 29558,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000029558/p/00000000000000000002/00000000000004390912/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 30067,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000030067/p/00000000000000000002/00000000000004456448/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 30547,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000030547/p/00000000000000000002/00000000000004521984/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31035,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031035/p/00000000000000000002/00000000000004587520/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31461,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031461/p/00000000000000000002/00000000000004653056/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31942,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031942/p/00000000000000000002/00000000000004718592/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 32322,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000032322/p/00000000000000000002/00000000000004784128/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 32885,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000032885/p/00000000000000000002/00000000000004849664/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 33418,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000033418/p/00000000000000000002/00000000000004915200/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 33892,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000033892/p/00000000000000000002/00000000000004980736/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 34425,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000034425/p/00000000000000000002/00000000000005046272/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 34989,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000034989/p/00000000000000000002/00000000000005111808/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 35358,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000035358/p/00000000000000000002/00000000000005177344/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 35880,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000035880/p/00000000000000000002/00000000000005242880/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 36369,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000036369/p/00000000000000000002/00000000000005308416/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 36768,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000036768/p/00000000000000000002/00000000000005373952/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 37195,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000037195/p/00000000000000000002/00000000000005439488/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 37649,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000037649/p/00000000000000000002/00000000000005505024/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 38194,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000038194/p/00000000000000000002/00000000000005570560/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 38649,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000038649/p/00000000000000000002/00000000000005636096/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 39107,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000039107/p/00000000000000000002/00000000000005701632/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 39607,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000039607/p/00000000000000000002/00000000000005767168/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 40097,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000040097/p/00000000000000000002/00000000000005832704/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 40622,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000040622/p/00000000000000000002/00000000000005898240/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 41082,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000041082/p/00000000000000000002/00000000000005963776/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 41587,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000041587/p/00000000000000000002/00000000000006029312/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42073,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042073/p/00000000000000000002/00000000000006094848/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42477,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042477/p/00000000000000000002/00000000000006160384/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42779,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042779/p/00000000000000000002/00000000000006225920/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43065,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043065/p/00000000000000000002/00000000000006291456/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43451,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043451/p/00000000000000000002/00000000000006356992/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43859,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043859/p/00000000000000000002/00000000000006422528/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44303,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044303/p/00000000000000000002/00000000000006488064/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44679,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044679/p/00000000000000000002/00000000000006553600/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44944,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044944/p/00000000000000000002/00000000000006619136/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 45218,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000045218/p/00000000000000000002/00000000000006684672/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": 45352,
+          "participants": {
+            "1": 42280
+          },
+          "pending": {},
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 92,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 90
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 89
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693951746407,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693951746409
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 92
+            }
+          }
+        },
+        "cold": {
+          "applied": 92,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 89,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 16,
+            "delete_attempts": 22,
+            "delete_completed": 22,
+            "inventory_incomplete": 8,
+            "inventory_put_attempts": 8,
+            "publications": 24,
+            "put_attempts": 16,
+            "resume_incomplete": 8,
+            "retirements": 16,
+            "scan_rounds": 215,
+            "scanned": 657
+          },
+          "floor": 89,
+          "inventory": {
+            "birth": 90,
+            "kind": {
+              "Inventory": {
+                "cut": 89
+              }
+            },
+            "len": 56,
+            "sha256": "b76f2be36bc6053d99edbc04a1dfdd4e544f041e2366b32b89f19f0cc781bff2"
+          },
+          "live_objects": 0,
+          "local_payload_bytes": 0,
+          "objects": [],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 89
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "target_bytes": 19777536,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 19777536,
+      "offsets": [
+        19777536
+      ]
+    }
+  ],
+  "drain_seconds": 0.0011145960015710443,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 19777536,
+      "sha256": "c6a4521588bbdefc3ad0acd86193ae4a7099718e1e54b20c62f19efb7c406403",
+      "expected_sha256": "c6a4521588bbdefc3ad0acd86193ae4a7099718e1e54b20c62f19efb7c406403",
+      "offset": 19777536
+    }
+  ],
+  "gc_observed_complete_ns": 157561743086043,
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 24,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {
+        "HEAD": 763,
+        "PUT": 118,
+        "GET": 980,
+        "POST": 32,
+        "DELETE": 44
+      },
+      "statuses": {
+        "404": 102,
+        "200": 1226,
+        "206": 565,
+        "204": 44
+      },
+      "request_body_bytes": 6704440,
+      "response_body_bytes": 11930006,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 157561751109149,
+    "free_bytes": 10172424192,
+    "storage": {
+      "1": {
+        "logical": 54940993,
+        "allocated": 54967296,
+        "files": 18,
+        "payload": 12961798,
+        "segments": 0,
+        "metadata": 12950224
+      }
+    },
+    "object_store": {
+      "count": 109,
+      "bytes": 6888504
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 45356,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45356
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45356
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45356
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 45356
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 42319
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 42280
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693849069917,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693849069925
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 45356
+            }
+          }
+        },
+        "cold": {
+          "applied": 45356,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 42280,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 16,
+            "delete_attempts": 22,
+            "delete_completed": 22,
+            "http_cold_bodies_started": 1,
+            "inventory_incomplete": 8,
+            "inventory_put_attempts": 8,
+            "publications": 129,
+            "put_attempts": 121,
+            "resume_incomplete": 8,
+            "retirements": 16,
+            "scan_rounds": 204,
+            "scanned": 10082
+          },
+          "floor": 42280,
+          "inventory": {
+            "birth": 42283,
+            "kind": {
+              "Inventory": {
+                "cut": 42280
+              }
+            },
+            "len": 3816,
+            "sha256": "58c8bbe95fda6efe45ea26cc8140c967a5b92d0a0199a758e4236b7462b7829b"
+          },
+          "live_objects": 105,
+          "local_payload_bytes": 12896256,
+          "objects": [
+            {
+              "birth": 28,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea",
+              "len": 65536
+            },
+            {
+              "birth": 352,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000352/p/00000000000000000002/00000000000000065536/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 754,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000000754/p/00000000000000000002/00000000000000131072/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 1221,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000001221/p/00000000000000000002/00000000000000196608/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 1630,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000001630/p/00000000000000000002/00000000000000262144/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2057,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002057/p/00000000000000000002/00000000000000327680/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2507,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002507/p/00000000000000000002/00000000000000393216/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 2983,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000002983/p/00000000000000000002/00000000000000458752/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 3417,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000003417/p/00000000000000000002/00000000000000524288/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 3840,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000003840/p/00000000000000000002/00000000000000589824/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 4284,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000004284/p/00000000000000000002/00000000000000655360/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 4800,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000004800/p/00000000000000000002/00000000000000720896/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 5242,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000005242/p/00000000000000000002/00000000000000786432/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 5670,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000005670/p/00000000000000000002/00000000000000851968/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 6068,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000006068/p/00000000000000000002/00000000000000917504/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 6522,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000006522/p/00000000000000000002/00000000000000983040/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7024,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007024/p/00000000000000000002/00000000000001048576/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7453,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007453/p/00000000000000000002/00000000000001114112/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 7958,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000007958/p/00000000000000000002/00000000000001179648/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 8333,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000008333/p/00000000000000000002/00000000000001245184/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 8761,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000008761/p/00000000000000000002/00000000000001310720/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 9167,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000009167/p/00000000000000000002/00000000000001376256/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 9560,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000009560/p/00000000000000000002/00000000000001441792/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10003,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010003/p/00000000000000000002/00000000000001507328/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10393,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010393/p/00000000000000000002/00000000000001572864/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 10894,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000010894/p/00000000000000000002/00000000000001638400/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 11333,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000011333/p/00000000000000000002/00000000000001703936/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 11706,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000011706/p/00000000000000000002/00000000000001769472/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12158,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012158/p/00000000000000000002/00000000000001835008/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12546,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012546/p/00000000000000000002/00000000000001900544/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 12943,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000012943/p/00000000000000000002/00000000000001966080/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 13455,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000013455/p/00000000000000000002/00000000000002031616/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 13885,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000013885/p/00000000000000000002/00000000000002097152/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 14350,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000014350/p/00000000000000000002/00000000000002162688/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 14765,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000014765/p/00000000000000000002/00000000000002228224/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 15160,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000015160/p/00000000000000000002/00000000000002293760/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 15610,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000015610/p/00000000000000000002/00000000000002359296/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 16220,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000016220/p/00000000000000000002/00000000000002424832/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 16698,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000016698/p/00000000000000000002/00000000000002490368/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 17154,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000017154/p/00000000000000000002/00000000000002555904/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 17610,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000017610/p/00000000000000000002/00000000000002621440/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 18001,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000018001/p/00000000000000000002/00000000000002686976/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 18500,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000018500/p/00000000000000000002/00000000000002752512/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19001,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019001/p/00000000000000000002/00000000000002818048/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19461,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019461/p/00000000000000000002/00000000000002883584/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 19911,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000019911/p/00000000000000000002/00000000000002949120/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 20323,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000020323/p/00000000000000000002/00000000000003014656/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 20782,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000020782/p/00000000000000000002/00000000000003080192/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21182,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021182/p/00000000000000000002/00000000000003145728/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21550,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021550/p/00000000000000000002/00000000000003211264/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 21960,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000021960/p/00000000000000000002/00000000000003276800/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 22417,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000022417/p/00000000000000000002/00000000000003342336/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 22829,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000022829/p/00000000000000000002/00000000000003407872/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 23204,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000023204/p/00000000000000000002/00000000000003473408/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 23676,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000023676/p/00000000000000000002/00000000000003538944/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 24196,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000024196/p/00000000000000000002/00000000000003604480/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 24599,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000024599/p/00000000000000000002/00000000000003670016/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25066,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025066/p/00000000000000000002/00000000000003735552/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25497,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025497/p/00000000000000000002/00000000000003801088/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 25918,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000025918/p/00000000000000000002/00000000000003866624/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 26402,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000026402/p/00000000000000000002/00000000000003932160/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 26823,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000026823/p/00000000000000000002/00000000000003997696/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 27277,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000027277/p/00000000000000000002/00000000000004063232/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 27789,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000027789/p/00000000000000000002/00000000000004128768/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 28249,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000028249/p/00000000000000000002/00000000000004194304/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 28684,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000028684/p/00000000000000000002/00000000000004259840/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 29106,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000029106/p/00000000000000000002/00000000000004325376/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 29558,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000029558/p/00000000000000000002/00000000000004390912/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 30067,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000030067/p/00000000000000000002/00000000000004456448/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 30547,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000030547/p/00000000000000000002/00000000000004521984/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31035,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031035/p/00000000000000000002/00000000000004587520/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31461,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031461/p/00000000000000000002/00000000000004653056/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 31942,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000031942/p/00000000000000000002/00000000000004718592/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 32322,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000032322/p/00000000000000000002/00000000000004784128/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 32885,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000032885/p/00000000000000000002/00000000000004849664/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 33418,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000033418/p/00000000000000000002/00000000000004915200/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 33892,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000033892/p/00000000000000000002/00000000000004980736/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 34425,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000034425/p/00000000000000000002/00000000000005046272/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 34989,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000034989/p/00000000000000000002/00000000000005111808/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 35358,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000035358/p/00000000000000000002/00000000000005177344/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 35880,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000035880/p/00000000000000000002/00000000000005242880/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 36369,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000036369/p/00000000000000000002/00000000000005308416/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 36768,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000036768/p/00000000000000000002/00000000000005373952/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 37195,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000037195/p/00000000000000000002/00000000000005439488/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 37649,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000037649/p/00000000000000000002/00000000000005505024/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 38194,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000038194/p/00000000000000000002/00000000000005570560/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 38649,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000038649/p/00000000000000000002/00000000000005636096/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 39107,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000039107/p/00000000000000000002/00000000000005701632/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 39607,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000039607/p/00000000000000000002/00000000000005767168/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 40097,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000040097/p/00000000000000000002/00000000000005832704/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 40622,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000040622/p/00000000000000000002/00000000000005898240/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 41082,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000041082/p/00000000000000000002/00000000000005963776/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 41587,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000041587/p/00000000000000000002/00000000000006029312/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42073,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042073/p/00000000000000000002/00000000000006094848/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42477,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042477/p/00000000000000000002/00000000000006160384/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 42779,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000042779/p/00000000000000000002/00000000000006225920/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43065,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043065/p/00000000000000000002/00000000000006291456/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43451,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043451/p/00000000000000000002/00000000000006356992/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 43859,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000043859/p/00000000000000000002/00000000000006422528/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44303,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044303/p/00000000000000000002/00000000000006488064/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44679,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044679/p/00000000000000000002/00000000000006553600/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 44944,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000044944/p/00000000000000000002/00000000000006619136/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 45218,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000045218/p/00000000000000000002/00000000000006684672/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 45353,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000045353/p/00000000000000000002/00000000000006750208/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            },
+            {
+              "birth": 45355,
+              "key": "electric/cb-e614c1bf21ba18a2/0/00000000000000045355/p/00000000000000000002/00000000000006815744/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b",
+              "len": 65536
+            }
+          ],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 42280
+          },
+          "pending": {},
+          "version": 1
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 92,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 92
+          },
+          "snapshot": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 90
+          },
+          "purged": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 89
+          },
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791638693951746410,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791638693951746410
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 92
+            }
+          }
+        },
+        "cold": {
+          "applied": 92,
+          "certificate": {
+            "bootstrap": false,
+            "floor": 89,
+            "registered": true
+          },
+          "counters": {
+            "certificate_blocked": 16,
+            "delete_attempts": 22,
+            "delete_completed": 22,
+            "inventory_incomplete": 8,
+            "inventory_put_attempts": 8,
+            "publications": 24,
+            "put_attempts": 16,
+            "resume_incomplete": 8,
+            "retirements": 16,
+            "scan_rounds": 219,
+            "scanned": 661
+          },
+          "floor": 89,
+          "inventory": {
+            "birth": 90,
+            "kind": {
+              "Inventory": {
+                "cut": 89
+              }
+            },
+            "len": 56,
+            "sha256": "b76f2be36bc6053d99edbc04a1dfdd4e544f041e2366b32b89f19f0cc781bff2"
+          },
+          "live_objects": 0,
+          "local_payload_bytes": 0,
+          "objects": [],
+          "objects_truncated": false,
+          "oldest_pin": null,
+          "participants": {
+            "1": 89
+          },
+          "pending": {},
+          "version": 1
+        }
+      }
+    },
+    "pressure": {
+      "1": null
+    }
+  },
+  "data_files": {
+    "object-fault-1.json": 43,
+    "cb-e614c1bf21ba18a2-s3-1.log": 0,
+    "cb-e614c1bf21ba18a2-minio.log": 438,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/tmp/.trash/1cfe7f45-f936-47b9-afcd-5aa4696c75e2": 65971,
+    "minio/.minio.sys/tmp/.trash/e5f4df41-664c-4b77-a084-d905ff8364a7": 386,
+    "minio/.minio.sys/tmp/.trash/7a2620d9-0e69-49e1-9555-d0e8ab0d449d": 65971,
+    "minio/.minio.sys/tmp/.trash/6cd52440-360e-40e9-af52-d0fa0d955e8c": 65971,
+    "minio/.minio.sys/tmp/.trash/c8debdbb-02cc-46be-a3da-3c4527e2a5a8": 69,
+    "minio/.minio.sys/tmp/.trash/fb5b0dfe-504e-4072-8b1c-aa7fef777e91": 65971,
+    "minio/.minio.sys/tmp/.trash/7c035154-d448-4395-9c3e-fc93c1170cdf": 69,
+    "minio/.minio.sys/tmp/.trash/51585569-e220-48c2-9316-67bfc184a799": 65971,
+    "minio/.minio.sys/tmp/.trash/c3ac98ff-2b38-4c8d-87c8-ee37a43d7e1b": 65971,
+    "minio/.minio.sys/tmp/.trash/33b2feec-e8ec-4ad1-b37b-5a14cf60d8af": 65971,
+    "minio/.minio.sys/tmp/.trash/9a34cbaf-1994-42d8-a033-a091f984200c": 65971,
+    "minio/.minio.sys/tmp/.trash/d37e779e-697d-471b-b238-800188ac8aab": 65971,
+    "minio/.minio.sys/tmp/.trash/f5f01c7d-99f5-436f-9152-19ef5ba8ccf6": 65971,
+    "minio/.minio.sys/tmp/.trash/a0d3d1fb-2f9f-44ea-b7bd-b4b3446346d0": 65,
+    "minio/.minio.sys/tmp/.trash/0c34369d-538c-4acb-ad88-568ce2c1be80": 65,
+    "minio/.minio.sys/tmp/.trash/180fb414-e2a0-4404-b2b1-209ce7111bfa": 65971,
+    "minio/.minio.sys/tmp/.trash/5f6f95ff-f3c5-4ff3-994b-78499674c42d": 65971,
+    "minio/.minio.sys/tmp/.trash/cd5f81b0-f677-4063-9461-fb7c11cf6ceb": 387,
+    "minio/.minio.sys/tmp/.trash/794fd766-2045-45aa-811d-d7a5b59f9ec5": 65971,
+    "minio/.minio.sys/tmp/.trash/d32bed82-4e58-49a4-b774-e8989028fab9": 69,
+    "minio/.minio.sys/tmp/.trash/ce8e96e8-e3c6-44f8-ba66-ff10062da958": 387,
+    "minio/.minio.sys/tmp/.trash/53ddef49-97bd-40d9-a3cd-1d23dbd0ae5d": 69,
+    "minio/.minio.sys/tmp/.trash/cabdf19a-5949-4bf6-8e68-a8c78856e2f4": 379,
+    "minio/.minio.sys/tmp/.trash/59c76151-a868-42ef-aae9-290d6134fcbb": 65971,
+    "minio/.minio.sys/tmp/.trash/179c5d6e-e0a4-422a-93d8-400eef83e655": 65971,
+    "minio/.minio.sys/tmp/.trash/00769768-2093-43b8-9256-ede28cff0177": 65,
+    "minio/.minio.sys/tmp/.trash/28ea53c2-1a2f-4ecc-9904-6ab922a9ec11": 65971,
+    "minio/.minio.sys/tmp/.trash/7f6f3da7-cb2f-43d9-a7cf-ddae4693a5d4": 69,
+    "minio/.minio.sys/tmp/.trash/8e89e559-ca3e-4aae-ba7a-40720ff88718": 69,
+    "minio/.minio.sys/tmp/.trash/7a890b5a-7c08-4aa3-b4e8-f5b39f1909e2": 379,
+    "minio/.minio.sys/tmp/.trash/a5194d35-d55d-45d9-afbf-f2f6428ac6d9": 65971,
+    "minio/.minio.sys/tmp/.trash/b6e2ea11-de81-4938-aa75-28760c5f38f1": 65971,
+    "minio/.minio.sys/tmp/.trash/c2699387-5b30-4855-b53f-9e06a96d2537": 65971,
+    "minio/.minio.sys/tmp/.trash/a0188367-9590-4fc2-85f4-69e6e7c90102": 69,
+    "minio/.minio.sys/tmp/.trash/04827beb-7ef4-4164-820a-de87043a4c6f": 65971,
+    "minio/.minio.sys/tmp/.trash/0f87299d-9dad-4a7f-b4c4-bb666b7cfbb7": 65971,
+    "minio/.minio.sys/tmp/.trash/10150a5a-af4f-4f52-8467-a4e10cc4b950": 65971,
+    "minio/.minio.sys/tmp/.trash/9599b3fb-1736-4d99-8a48-30d55b3f7d2a": 387,
+    "minio/.minio.sys/tmp/.trash/c27116e3-e10b-40dd-9ab6-aa39a9df743e": 65,
+    "minio/.minio.sys/tmp/.trash/5edff845-a9de-4ce9-8f9f-348da9f6c52c": 65971,
+    "minio/.minio.sys/tmp/.trash/83374cca-33f7-40d8-9299-792098830de3": 65971,
+    "minio/.minio.sys/tmp/.trash/e7748acd-2d03-42f8-89dd-30883a17b22c": 65971,
+    "minio/.minio.sys/tmp/.trash/54d2fed1-9e2e-4849-b1dd-02dde240ca16": 379,
+    "minio/.minio.sys/tmp/.trash/df4d1d21-410b-4394-93ca-219203c0efe0": 65,
+    "minio/.minio.sys/tmp/.trash/2397aecd-6575-402b-a240-98b626f15ba3": 65971,
+    "minio/.minio.sys/tmp/.trash/51c376f4-2ea9-4f5f-b3fe-97b169d0f9b5": 379,
+    "minio/.minio.sys/tmp/.trash/37668e6f-775a-45a3-a388-b168e5fa0f32": 387,
+    "minio/.minio.sys/tmp/.trash/a48812c6-34fe-41cd-a1d3-96c281934979": 65971,
+    "minio/.minio.sys/tmp/.trash/ae58ce0a-bad8-422f-895a-a37be3890f22": 386,
+    "minio/.minio.sys/tmp/.trash/b59f6bc9-947b-4e35-bf72-a076a42f1fce": 65971,
+    "minio/.minio.sys/tmp/.trash/9513bfa8-0f24-4bf2-9677-dc50ba0af7d7": 69,
+    "minio/.minio.sys/tmp/.trash/97397844-0ef1-43ae-9e28-48f6de7874fd": 69,
+    "minio/.minio.sys/tmp/.trash/063926b3-3262-4c65-9001-1442febf87ba": 65,
+    "minio/.minio.sys/tmp/.trash/dd811e51-884e-413b-8c25-9ec9993296fc": 65,
+    "minio/.minio.sys/tmp/.trash/771ac110-d112-436c-b485-8321f22f7719": 65971,
+    "minio/.minio.sys/tmp/.trash/ec99552c-d62d-4593-96bd-7c7b2a397c7a": 65971,
+    "minio/.minio.sys/tmp/.trash/63adcf2f-4939-4e11-a9c8-82ed67619524": 386,
+    "minio/.minio.sys/tmp/.trash/986ed1ea-b876-48ba-81d3-aee486fa5a46": 65971,
+    "minio/.minio.sys/tmp/.trash/064bc06f-9e89-4b28-af62-95fd21e24a13": 379,
+    "minio/.minio.sys/tmp/.trash/228840c4-442d-4bd4-9900-18b5bee186be": 65971,
+    "minio/.minio.sys/tmp/.trash/8d8418c1-8b10-440f-8b10-5bbf055f41a8/part.1": 2808,
+    "minio/.minio.sys/tmp/.trash/da651428-063f-4919-8db2-5ee75415fdab/part.1": 768,
+    "minio/.minio.sys/tmp/.trash/b6250695-4813-4d04-b969-229e234679fa/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/aa4239dd-b219-47d3-be39-7deabd1a5e82/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/abe0bf07-d271-45ab-896c-58fe2fbed6e2/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/1f9fb226-5fa8-4b5f-a33d-518f6bf90587/part.1": 2288,
+    "minio/.minio.sys/tmp/.trash/9c11791b-9fd8-47ee-908c-98975c2fe1d3/part.1": 688,
+    "minio/.minio.sys/tmp/.trash/9e04f3eb-4725-436c-bad2-db67b666601d/part.1": 1248,
+    "minio/.minio.sys/tmp/.trash/a5d21fef-9c97-4f6b-89bc-2091c99df234/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/dfa6b874-dee2-4f1c-9c66-e4a967adf2a3/part.1": 1768,
+    "minio/.minio.sys/tmp/.trash/a092c173-f85c-4832-b602-8474f04e633d/part.1": 88,
+    "minio/.minio.sys/tmp/.trash/dbbdda98-e972-4bf5-9d17-e3811f450777/part.1": 728,
+    "minio/.minio.sys/pool.bin/xl.meta": 580,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000045355/p/00000000000000000002/00000000000006815744/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000036369/p/00000000000000000002/00000000000005308416/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000040097/p/00000000000000000002/00000000000005832704/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000030547/p/00000000000000000002/00000000000004521984/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000001221/p/00000000000000000002/00000000000000196608/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000007453/p/00000000000000000002/00000000000001114112/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000044303/p/00000000000000000002/00000000000006488064/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000012943/p/00000000000000000002/00000000000001966080/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000035358/p/00000000000000000002/00000000000005177344/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000011706/p/00000000000000000002/00000000000001769472/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000044944/p/00000000000000000002/00000000000006619136/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000024196/p/00000000000000000002/00000000000003604480/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000041587/p/00000000000000000002/00000000000006029312/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000041082/p/00000000000000000002/00000000000005963776/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000000352/p/00000000000000000002/00000000000000065536/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000033892/p/00000000000000000002/00000000000004980736/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000040622/p/00000000000000000002/00000000000005898240/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000023204/p/00000000000000000002/00000000000003473408/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000005242/p/00000000000000000002/00000000000000786432/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000031461/p/00000000000000000002/00000000000004653056/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000020782/p/00000000000000000002/00000000000003080192/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000022417/p/00000000000000000002/00000000000003342336/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000012546/p/00000000000000000002/00000000000001900544/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000042477/p/00000000000000000002/00000000000006160384/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000015610/p/00000000000000000002/00000000000002359296/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000019001/p/00000000000000000002/00000000000002818048/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000003417/p/00000000000000000002/00000000000000524288/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000038649/p/00000000000000000002/00000000000005636096/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000037195/p/00000000000000000002/00000000000005439488/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000027277/p/00000000000000000002/00000000000004063232/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000039107/p/00000000000000000002/00000000000005701632/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000002983/p/00000000000000000002/00000000000000458752/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000025497/p/00000000000000000002/00000000000003801088/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000015160/p/00000000000000000002/00000000000002293760/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000007958/p/00000000000000000002/00000000000001179648/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000001630/p/00000000000000000002/00000000000000262144/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000038194/p/00000000000000000002/00000000000005570560/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000020323/p/00000000000000000002/00000000000003014656/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000037649/p/00000000000000000002/00000000000005505024/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000043065/p/00000000000000000002/00000000000006291456/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000003840/p/00000000000000000002/00000000000000589824/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000032885/p/00000000000000000002/00000000000004849664/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000029558/p/00000000000000000002/00000000000004390912/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000026402/p/00000000000000000002/00000000000003932160/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000018500/p/00000000000000000002/00000000000002752512/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000021182/p/00000000000000000002/00000000000003145728/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000027789/p/00000000000000000002/00000000000004128768/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000043451/p/00000000000000000002/00000000000006356992/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000026823/p/00000000000000000002/00000000000003997696/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000014350/p/00000000000000000002/00000000000002162688/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000019911/p/00000000000000000002/00000000000002949120/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000014765/p/00000000000000000002/00000000000002228224/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000042779/p/00000000000000000002/00000000000006225920/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000011333/p/00000000000000000002/00000000000001703936/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000010894/p/00000000000000000002/00000000000001638400/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000036119/i/00000000000000000000/00000000000000036116/00000000000000003296/40f2268420a0157662acec8ac75df0ecc47f7aa22f92c78f6eceabe6c0e32972/xl.meta": 387,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000036119/i/00000000000000000000/00000000000000036116/00000000000000003296/40f2268420a0157662acec8ac75df0ecc47f7aa22f92c78f6eceabe6c0e32972/3d15328d-9f39-43ac-96ac-8b185fa2b46a/part.1": 3328,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000028249/p/00000000000000000002/00000000000004194304/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000039607/p/00000000000000000002/00000000000005767168/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000022829/p/00000000000000000002/00000000000003407872/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000021550/p/00000000000000000002/00000000000003211264/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000025918/p/00000000000000000002/00000000000003866624/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000036768/p/00000000000000000002/00000000000005373952/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000004284/p/00000000000000000002/00000000000000655360/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000013455/p/00000000000000000002/00000000000002031616/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000042073/p/00000000000000000002/00000000000006094848/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000017610/p/00000000000000000002/00000000000002621440/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000034989/p/00000000000000000002/00000000000005111808/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000010393/p/00000000000000000002/00000000000001572864/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000034425/p/00000000000000000002/00000000000005046272/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000002057/p/00000000000000000002/00000000000000327680/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000009167/p/00000000000000000002/00000000000001376256/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000025066/p/00000000000000000002/00000000000003735552/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000043859/p/00000000000000000002/00000000000006422528/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000045357/p/00000000000000000002/00000000000006881280/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000029106/p/00000000000000000002/00000000000004325376/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000030067/p/00000000000000000002/00000000000004456448/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000018001/p/00000000000000000002/00000000000002686976/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000031035/p/00000000000000000002/00000000000004587520/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000016220/p/00000000000000000002/00000000000002424832/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000004800/p/00000000000000000002/00000000000000720896/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000010003/p/00000000000000000002/00000000000001507328/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000045353/p/00000000000000000002/00000000000006750208/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000042283/i/00000000000000000000/00000000000000042280/00000000000000003816/58c8bbe95fda6efe45ea26cc8140c967a5b92d0a0199a758e4236b7462b7829b/xl.meta": 387,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000042283/i/00000000000000000000/00000000000000042280/00000000000000003816/58c8bbe95fda6efe45ea26cc8140c967a5b92d0a0199a758e4236b7462b7829b/956e5923-1fba-4a23-8c89-887a3cc8dc08/part.1": 3848,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000031942/p/00000000000000000002/00000000000004718592/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000012158/p/00000000000000000002/00000000000001835008/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000023676/p/00000000000000000002/00000000000003538944/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000007024/p/00000000000000000002/00000000000001048576/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000019461/p/00000000000000000002/00000000000002883584/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000009560/p/00000000000000000002/00000000000001441792/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000006068/p/00000000000000000002/00000000000000917504/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000035880/p/00000000000000000002/00000000000005242880/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000006522/p/00000000000000000002/00000000000000983040/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000033418/p/00000000000000000002/00000000000004915200/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000024599/p/00000000000000000002/00000000000003670016/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000000754/p/00000000000000000002/00000000000000131072/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000008333/p/00000000000000000002/00000000000001245184/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000013885/p/00000000000000000002/00000000000002097152/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000017154/p/00000000000000000002/00000000000002555904/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000021960/p/00000000000000000002/00000000000003276800/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000032322/p/00000000000000000002/00000000000004784128/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000008761/p/00000000000000000002/00000000000001310720/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000044679/p/00000000000000000002/00000000000006553600/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000028684/p/00000000000000000002/00000000000004259840/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000045218/p/00000000000000000002/00000000000006684672/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000002507/p/00000000000000000002/00000000000000393216/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000016698/p/00000000000000000002/00000000000002490368/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000000028/p/00000000000000000002/00000000000000000000/00000000000000065536/102cf9e7f9b2dcf585f09ea4b189734ca04f2dac602d33c88a00572df93ddaea/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/0/00000000000000005670/p/00000000000000000002/00000000000000851968/00000000000000065536/d4b2f3f2d8660fa4d9ae89bcc3e405d5da049614f7260fd94fe53f6daacd858b/xl.meta": 65971,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/1/00000000000000000087/i/00000000000000000000/00000000000000000086/00000000000000000056/3e63f91807e20dfbb5edf4e7b64fe3bc122c3784a9400911f13ebfaf7724ed57/xl.meta": 379,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/1/00000000000000000087/i/00000000000000000000/00000000000000000086/00000000000000000056/3e63f91807e20dfbb5edf4e7b64fe3bc122c3784a9400911f13ebfaf7724ed57/ab3d7d13-eb09-43a5-ab76-058e3986eb2e/part.1": 88,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/1/00000000000000000090/i/00000000000000000000/00000000000000000089/00000000000000000056/b76f2be36bc6053d99edbc04a1dfdd4e544f041e2366b32b89f19f0cc781bff2/xl.meta": 379,
+    "minio/cold-fixture/electric/cb-e614c1bf21ba18a2/1/00000000000000000090/i/00000000000000000000/00000000000000000089/00000000000000000056/b76f2be36bc6053d99edbc04a1dfdd4e544f041e2366b32b89f19f0cc781bff2/2f9b5f2e-34b8-478c-937c-043d98fd5a4b/part.1": 88,
+    "1/IDENTITY": 252,
+    "1/LOCK": 0,
+    "1/0/wal/78089.wal": 8388608,
+    "1/0/wal/journal-checkpoint": 12987,
+    "1/0/state/cold-certificate": 128,
+    "1/0/state/snapshot-1791638718391499506": 12237008,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2": 12830720,
+    "1/0/state/hot/streams/+v1+stream+s00000000~2.meta": 27345,
+    "1/0/state/hot/streams/.lane": 1,
+    "1/0/state/hot/streams/.lanes": 2,
+    "1/1/wal/journal-checkpoint": 443,
+    "1/1/wal/1.wal": 8388608,
+    "1/1/state/cold-certificate": 125,
+    "1/1/state/snapshot-1791638718465641303": 812,
+    "1/1/state/hot/streams/.lane": 1,
+    "1/1/state/hot/streams/.lanes": 2
+  },
+  "variant": "baseline"
+}

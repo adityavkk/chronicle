@@ -1,0 +1,425 @@
+{
+  "version": 1,
+  "arm": "native",
+  "cold": true,
+  "workload": "hot-write",
+  "repetition": 1,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 65536,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 4,
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "372370093f47a578fa1623b4450b37bb0179a38eef8a87d18d3440ee8ac40be0",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 21537157120,
+  "startup_seconds": 2.116700287995627,
+  "roles": {
+    "sut": [
+      4066272
+    ],
+    "provider": [
+      4066217,
+      4066247
+    ],
+    "client": [
+      4066371
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791609485436,
+    "monotonic_ns": 133192779904054,
+    "processes": {
+      "4066272": {
+        "cpu_ticks": 12,
+        "rss_pages": 1480,
+        "io": {
+          "rchar": 19851457,
+          "wchar": 365,
+          "syscr": 952,
+          "syscw": 16,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "4066217": {
+        "cpu_ticks": 56,
+        "rss_pages": 27145,
+        "io": {
+          "rchar": 161259008,
+          "wchar": 14020,
+          "syscr": 5485,
+          "syscw": 21,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "4066247": {
+        "cpu_ticks": 31,
+        "rss_pages": 11428,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:35214",
+        "owners": [
+          4066217
+        ],
+        "counters": {
+          "bytes_sent": 472,
+          "bytes_acked": 472,
+          "bytes_received": 701
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "precondition": {
+    "time_ns": 133193112422106,
+    "remote_keys": [
+      "cb-d2dfded6867db3f6/+v1+stream+s00000000~8184032951265504/0000000000000000"
+    ],
+    "listing_keys": [
+      "cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000000000"
+    ],
+    "local_payload_bytes": 0,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 0,
+        "file_base": 65536,
+        "segments": [
+          {
+            "logical_start": 0,
+            "len": 65536,
+            "remote_key": "cb-d2dfded6867db3f6/+v1+stream+s00000000~8184032951265504/0000000000000000",
+            "local_file": null
+          }
+        ]
+      }
+    ]
+  },
+  "client_object_keys": [
+    "/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000000000"
+  ],
+  "before_client": {
+    "time_ns": 133193113037587,
+    "free_bytes": 21517934592,
+    "storage": {
+      "1": {
+        "logical": 16786569,
+        "allocated": 16815616,
+        "files": 23,
+        "payload": 3,
+        "segments": 0,
+        "metadata": 9349
+      }
+    },
+    "object_store": {
+      "count": 33,
+      "bytes": 2162688
+    }
+  },
+  "client_window": {
+    "start_ns": 133193123102874,
+    "start_unix_ms": 1791609485779,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 133197147002966,
+    "end_unix_ms": 1791609489803
+  },
+  "gc_delete_window": {
+    "start_ns": 133193124001072,
+    "end_ns": 133193138022848
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 133197147449534,
+    "free_bytes": 21500157952,
+    "storage": {
+      "1": {
+        "logical": 25229693,
+        "allocated": 25234944,
+        "files": 12,
+        "payload": 44035,
+        "segments": 0,
+        "metadata": 19899
+      }
+    },
+    "object_store": {
+      "count": 133,
+      "bytes": 8716288
+    }
+  },
+  "target_bytes": 8760320,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 8760320,
+      "offsets": [
+        8760320
+      ]
+    }
+  ],
+  "drain_seconds": 0.0012492169917095453,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 8760320,
+      "sha256": "5a8225ff976f01a83dfb20400323d09da3b76f36cf952c73a097d596fccae226",
+      "expected_sha256": "5a8225ff976f01a83dfb20400323d09da3b76f36cf952c73a097d596fccae226",
+      "offset": 8760320
+    }
+  ],
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 4,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {
+        "DELETE": 32,
+        "PUT": 132,
+        "HEAD": 132
+      },
+      "statuses": {
+        "204": 32,
+        "200": 264
+      },
+      "request_body_bytes": 8650752,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 133197497319292,
+    "free_bytes": 21500104704,
+    "storage": {
+      "1": {
+        "logical": 25229693,
+        "allocated": 25234944,
+        "files": 12,
+        "payload": 44035,
+        "segments": 0,
+        "metadata": 19899
+      }
+    },
+    "object_store": {
+      "count": 133,
+      "bytes": 8716288
+    }
+  },
+  "data_files": {
+    "cb-d2dfded6867db3f6-s3-1.log": 0,
+    "object-fault-1.json": 43,
+    "cb-d2dfded6867db3f6-minio.log": 438,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/tmp/.trash/8f278c46-0c8f-4aad-a27c-f2e368b57031": 65971,
+    "minio/.minio.sys/tmp/.trash/2813bfb5-0527-46c7-9f7f-243ea148f000": 65971,
+    "minio/.minio.sys/tmp/.trash/0ad904f9-2045-4781-b22c-d7a0b3632234": 65971,
+    "minio/.minio.sys/tmp/.trash/32ae78bf-a6d8-4b52-9d7c-880dec8e14dc": 65971,
+    "minio/.minio.sys/tmp/.trash/726f7ae5-30c6-43c3-a9d3-66749c7f40f9": 65971,
+    "minio/.minio.sys/tmp/.trash/79efc78b-cb75-4439-8001-bbce2ed46ed6": 65971,
+    "minio/.minio.sys/tmp/.trash/a8ec9b1f-0dc2-4535-a933-27002f3b8720": 65971,
+    "minio/.minio.sys/tmp/.trash/31570cc3-e62c-47cf-a0aa-e7e279c85cc8": 65971,
+    "minio/.minio.sys/tmp/.trash/0984cd05-4174-4d11-856f-497805039759": 65971,
+    "minio/.minio.sys/tmp/.trash/a00edd71-cf43-4eb6-88a8-8930d68ef649": 65971,
+    "minio/.minio.sys/tmp/.trash/9c02b00e-a41b-42cf-8eae-6f528388ab9c": 65971,
+    "minio/.minio.sys/tmp/.trash/cb692b08-3bc5-44b1-94c7-4c4b455a8c79": 65971,
+    "minio/.minio.sys/tmp/.trash/75d866fa-8946-4a3f-bc7a-2bcf1bb1a61f": 65971,
+    "minio/.minio.sys/tmp/.trash/199d1993-50d2-4b96-a421-2473c0d12d5f": 65971,
+    "minio/.minio.sys/tmp/.trash/65d23882-3639-4829-91e7-e879f47a5994": 65971,
+    "minio/.minio.sys/tmp/.trash/539ccb30-6909-4dd7-803b-f87893460074": 65971,
+    "minio/.minio.sys/tmp/.trash/025b0979-0f2f-4003-bc49-c1120cb496ac": 65971,
+    "minio/.minio.sys/tmp/.trash/835a5e50-dfcf-4f5f-a1d2-fb097b507495": 65971,
+    "minio/.minio.sys/tmp/.trash/ca99a03c-ee7c-494a-8ec7-aec02ca10425": 65971,
+    "minio/.minio.sys/tmp/.trash/6baf3486-5c9d-4155-8e4c-41fd685642b4": 65971,
+    "minio/.minio.sys/tmp/.trash/a7dd9c25-e975-4c6c-984a-87849621bcc4": 65971,
+    "minio/.minio.sys/tmp/.trash/7c576232-895b-421c-8fa3-1c7af74b2fa5": 65971,
+    "minio/.minio.sys/tmp/.trash/1461e1cd-c147-436c-ba3c-82ec94f3ba09": 65971,
+    "minio/.minio.sys/tmp/.trash/5078db5b-3837-4ee0-a745-9dc722e2a795": 65971,
+    "minio/.minio.sys/tmp/.trash/b6438a4d-0c43-4051-adf9-cc1dc0992732": 65971,
+    "minio/.minio.sys/tmp/.trash/8dc7d5c6-a99d-461e-bc89-b095779171c9": 65971,
+    "minio/.minio.sys/tmp/.trash/f8174f53-e90e-4ffc-9984-42b9e49c9aee": 65971,
+    "minio/.minio.sys/tmp/.trash/1baa263e-dc29-4853-911f-54cacbb4c888": 65971,
+    "minio/.minio.sys/tmp/.trash/6cebaaf0-ef57-4b6b-8f30-0a5a4d8823ba": 65971,
+    "minio/.minio.sys/tmp/.trash/2d5ca23a-94f5-40a2-8e64-7ab110f548f2": 65971,
+    "minio/.minio.sys/tmp/.trash/19aeef65-0796-409f-ae48-f561e5672fa4": 65971,
+    "minio/.minio.sys/tmp/.trash/03bd60ec-50d0-4c79-bb06-bdda56aec0aa": 65971,
+    "minio/.minio.sys/pool.bin/xl.meta": 573,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004456448/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008519680/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005373952/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007471104/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007602176/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006619136/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004063232/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002490368/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005046272/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004128768/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008454144/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000262144/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004784128/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005701632/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000589824/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000458752/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004915200/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007012352/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003735552/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001572864/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002162688/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001769472/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006094848/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005505024/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001048576/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008192000/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002949120/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003342336/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007077888/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001376256/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002424832/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002752512/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007208960/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000655360/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003866624/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003801088/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003538944/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006684672/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007274496/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003276800/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006750208/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003473408/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002883584/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007340032/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005177344/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002686976/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001638400/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005963776/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005898240/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006488064/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000524288/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008388608/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000327680/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007667712/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001703936/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006815744/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003080192/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006160384/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007733248/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008650752/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002097152/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006291456/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008257536/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003211264/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005832704/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001441792/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003145728/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000917504/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008323072/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005570560/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001835008/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002621440/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006029312/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006946816/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008060928/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000786432/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004259840/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005308416/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004194304/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004521984/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003997696/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006881280/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000131072/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006422528/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001245184/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008585216/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004587520/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007864320/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005439488/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005636096/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007995392/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005111808/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003407872/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003932160/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004849664/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001179648/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007798784/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003014656/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003604480/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004325376/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000196608/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004390912/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002359296/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005767168/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002031616/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000720896/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000983040/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007143424/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007536640/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000005242880/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000008126464/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004718592/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002555904/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002228224/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002293760/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000002818048/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006553600/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004653056/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000851968/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006356992/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000006225920/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000004980736/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000003670016/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001507328/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001310720/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007929856/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001966080/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001114112/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000393216/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000000000/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000001900544/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000000065536/xl.meta": 65971,
+    "minio/cold-fixture/cb-d2dfded6867db3f6/+v1+stream+s00000000%7E8184032951265504/0000000007405568/xl.meta": 65971,
+    "1/wal/shards": 1,
+    "1/wal/0/1.wal": 8388608,
+    "1/wal/0/tails": 96,
+    "1/wal/0/checkpoint": 2,
+    "1/wal/1/24758.wal": 8388608,
+    "1/wal/1/1.wal": 8388318,
+    "1/wal/1/tails": 121,
+    "1/wal/1/checkpoint": 5,
+    "1/streams/+v1+stream+s00000000~8184032951265504": 44032,
+    "1/streams/.lane": 1,
+    "1/streams/+v1+stream+s00000000~8184032951265504.meta": 19899,
+    "1/streams/.lanes": 2
+  }
+}

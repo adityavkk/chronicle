@@ -1,0 +1,59 @@
+"""Hash-check the audited bytes and scan only the subsequent public audit/docs."""
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path
+import re
+import subprocess
+import tarfile
+
+ROOT=Path('/home/user/workspace/repo')
+EXP='experiments/electric-replication/'
+AUDIT=ROOT/'.tmp/cold-work-audit-003'
+OUT=ROOT/'.tmp/cold-work-audit-closure'
+OUT.mkdir(exist_ok=False)
+known={row['path']:row['decoded_sha256'] for row in json.loads((AUDIT/'map.json').read_text())}
+git=lambda *args:subprocess.check_output(['git',*args],cwd=ROOT,text=True).splitlines()
+paths=set(git('diff','--name-only','HEAD'))|set(git('ls-files','--others','--exclude-standard',EXP))
+docs={EXP+'README.md',EXP+'evidence/README.md'}
+prefix=EXP+'evidence/cold-work-qualification-001/'
+changed=[]
+verified=0
+for path in sorted(paths):
+    p=ROOT/path
+    data=p.read_bytes()
+    if path.endswith('.gz'):data=gzip.decompress(data)
+    if path.endswith('.zst'):data=subprocess.check_output(['zstd','-dq','-c',str(p)])
+    if path.endswith('.tar.gz'):
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            members={path+'::'+m.name:hashlib.sha256(archive.extractfile(m).read()).hexdigest() for m in archive}
+        assert members=={k:v for k,v in known.items() if k.startswith(path+'::')},path
+        verified+=1
+        continue
+    digest=hashlib.sha256(data).hexdigest()
+    if known.get(path)==digest:
+        verified+=1
+        continue
+    assert path in docs or (path not in known and path.startswith(prefix)),path
+    text=data.decode()
+    assert not re.search(r'Bearer\s+[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}',text,re.I),path
+    # Real private resource names/endpoints, not a detector's own vocabulary.
+    private=re.compile(rb'https?://[^\s<>"()]*?(?:gecgithub01|walmart\.(?:com|net)|wal-mart\.com|homeoffice|wmlink)|\.iam\.gserviceaccount\.com|workloadIdentityPools/[A-Za-z0-9_-]+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|fixture-[0-9a-f]{16}',re.I)
+    assert not private.search(data),path
+    target=OUT/(digest+'.txt')
+    target.write_bytes(data)
+    changed.append(dict(path=path,decoded_sha256=digest,bytes=len(data)))
+assert set(k.split('::')[0] for k in known)<=paths,'An audited file disappeared'
+command=['env','-u','GITLEAKS_CONFIG','-u','GITLEAKS_CONFIG_TOML',
+    str(ROOT/'.tmp/publication-audit/tools/gitleaks'),'dir',str(OUT),'--redact=100',
+    '--no-banner','--no-color','--ignore-gitleaks-allow','--gitleaks-ignore-path','/dev/null',
+    '--max-target-megabytes','0','--report-format','json','--report-path',str(AUDIT/'gitleaks-closure.json')]
+with (AUDIT/'gitleaks-closure.txt').open('w') as log:
+    status=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT).returncode
+assert status==0 and json.loads((AUDIT/'gitleaks-closure.json').read_text())==[],status
+report=dict(verdict='PASS_AUDIT_CLOSURE',audited_files_unchanged=verified,
+    later_public_report_and_doc_files=len(changed),scanner_exit=status,files=changed,
+    command=command,scope='Only new audit reports and two edited public documentation files; all previously audited byte contents remain identical. Not a full-history publication audit.')
+(AUDIT/'closure.json').write_text(json.dumps(report,indent=2)+'\n')
+print(json.dumps({k:v for k,v in report.items() if k not in ('files','command')},indent=2))

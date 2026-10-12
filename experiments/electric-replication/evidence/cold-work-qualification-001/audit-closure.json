@@ -1,0 +1,101 @@
+{
+  "verdict": "PASS_AUDIT_CLOSURE",
+  "audited_files_unchanged": 6891,
+  "later_public_report_and_doc_files": 14,
+  "scanner_exit": 0,
+  "files": [
+    {
+      "path": "experiments/electric-replication/README.md",
+      "decoded_sha256": "784577b290470d5e6449625d40471a502bfd6243457d74fda78670465d41cbd5",
+      "bytes": 65878
+    },
+    {
+      "path": "experiments/electric-replication/evidence/README.md",
+      "decoded_sha256": "d89893186d3e6f9b667e2793d951471dac74ac3db1560a2b95a295865384f666",
+      "bytes": 77084
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/audit-export.py.txt",
+      "decoded_sha256": "b23312add13fae8ce49fa181e185b37bb20cdb7c7fec03ab0ea085f0bb96b700",
+      "bytes": 10478
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/audit-inventory.json",
+      "decoded_sha256": "622e77e0091b78b7dd259887674861921ba2477df77bd1bd62ec4af59a981c7b",
+      "bytes": 1277
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/audit-map.json.gz",
+      "decoded_sha256": "15248be88f5bdf5b17de54f1f858382a173e90246de696235a7d9bf600c1d0d5",
+      "bytes": 3417637
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/audit-review.py.txt",
+      "decoded_sha256": "cb3946f68cc2973763d740187a4a18bd319c5d19a94bc4ca415737092c75c1df",
+      "bytes": 3723
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/findings-review.json",
+      "decoded_sha256": "a13909dfcfa7fc19fc55e394f7027e07fa6767f8fed116e1e2c507fabeb3a03e",
+      "bytes": 14097
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/findings-review.txt",
+      "decoded_sha256": "c3ac90aa8cb9f20e1bcc0a38171a550c555e77303258a87fe8870c7ded5ec837",
+      "bytes": 707
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/gitleaks-exit.txt",
+      "decoded_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/gitleaks-version.txt",
+      "decoded_sha256": "c9fd9ccb6682c54b5fcb0363757b6c6873564e7c067f70b3b5581b611528b9f4",
+      "bytes": 7
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/gitleaks.json",
+      "decoded_sha256": "4a39d76e31b4dcd8b358da49027ae359f8718a4fe06ed99bf43ed10d9c2ccc1f",
+      "bytes": 48252
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/gitleaks.txt",
+      "decoded_sha256": "db5b63894f3522d9fb7a4e13e36cf3577081fdd497168398e305fd4172583162",
+      "bytes": 83
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/public-links.txt",
+      "decoded_sha256": "11d9a62327928a2a3e9207a1d5daa42ae4b5eea413f2c31117b40afbe02667a4",
+      "bytes": 85
+    },
+    {
+      "path": "experiments/electric-replication/evidence/cold-work-qualification-001/recompression-check.txt",
+      "decoded_sha256": "43bf11536094a9106bdd9e6373351eb56fc643c6474e799421ef874b38a98fec",
+      "bytes": 3456
+    }
+  ],
+  "command": [
+    "env",
+    "-u",
+    "GITLEAKS_CONFIG",
+    "-u",
+    "GITLEAKS_CONFIG_TOML",
+    "/home/user/workspace/repo/.tmp/publication-audit/tools/gitleaks",
+    "dir",
+    "/home/user/workspace/repo/.tmp/cold-work-audit-closure",
+    "--redact=100",
+    "--no-banner",
+    "--no-color",
+    "--ignore-gitleaks-allow",
+    "--gitleaks-ignore-path",
+    "/dev/null",
+    "--max-target-megabytes",
+    "0",
+    "--report-format",
+    "json",
+    "--report-path",
+    "/home/user/workspace/repo/.tmp/cold-work-audit-003/gitleaks-closure.json"
+  ],
+  "scope": "Only new audit reports and two edited public documentation files; all previously audited byte contents remain identical. Not a full-history publication audit."
+}

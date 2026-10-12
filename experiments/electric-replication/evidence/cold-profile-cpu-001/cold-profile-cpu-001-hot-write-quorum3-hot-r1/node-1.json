@@ -1,0 +1,25 @@
+{
+  "cluster": "cb-dc304da8246c48c1",
+  "node": 1,
+  "listen": "127.0.0.1:20601",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/cold-profile-cpu-001-hot-write-quorum3-hot-r1/1",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": true,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:20601"
+    },
+    "2": {
+      "addr": "127.0.0.1:20602"
+    },
+    "3": {
+      "addr": "127.0.0.1:20603"
+    }
+  },
+  "stats_secs": 1,
+  "pending_commands": 1024,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync"
+}

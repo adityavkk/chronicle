@@ -17,6 +17,19 @@ pub struct View {
     pub(super) cold: Option<cold::State>,
 }
 
+impl View {
+    /// A restored checkpoint may contain published short prefixes retained by
+    /// an older compaction threshold. Reclaim them before serving/admission;
+    /// no new upload or consensus ownership transition is needed.
+    async fn reclaim_cold_prefixes(&self) -> io::Result<()> {
+        if self.cold.is_some() {
+            let streams: Vec<_> = self.store.streams.iter().map(|s| s.clone()).collect();
+            for stream in streams { self.store.maybe_compact(&stream).await?; }
+        }
+        Ok(())
+    }
+}
+
 pub struct Machine {
     pub view: RwLock<View>,
     pub journal: Arc<journal::Journal>,
@@ -122,6 +135,7 @@ impl Machine {
                 from = end;
             }
         }
+        machine.view.read().await.reclaim_cold_prefixes().await?;
         machine.cleanup_snapshots()?;
         Ok(machine)
     }
@@ -292,6 +306,7 @@ impl Machine {
         }
         drop(view);
         self.journal.changed.notify_waiters();
+        if let Some(cold) = &self.cold { cold.ready.notify_one(); }
         Ok(replies)
     }
 }
@@ -366,6 +381,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
                 cold,
             }))
         }).map_err(storage_error)?;
+        restored.reclaim_cold_prefixes().await.map_err(storage_error)?;
         self.journal
             .save_snapshot(reference)
             .await
@@ -374,6 +390,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         *view = restored;
         drop(view);
         self.journal.changed.notify_waiters();
+        if let Some(cold) = &self.cold { cold.ready.notify_one(); }
         Ok(())
     }
     async fn get_current_snapshot(&mut self) -> io::Result<Option<Snapshot>> {

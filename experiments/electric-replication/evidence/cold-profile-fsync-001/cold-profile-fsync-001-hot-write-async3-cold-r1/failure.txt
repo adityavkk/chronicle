@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 463, in cell
+    stop_trace()
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 368, in stop_trace
+    result["fsync"]=summarize_fsync_trace(events)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark_summary.py", line 115, in summarize_fsync_trace
+    raise ValueError(f"unrecognized fsync call on line {number}")
+ValueError: unrecognized fsync call on line 304

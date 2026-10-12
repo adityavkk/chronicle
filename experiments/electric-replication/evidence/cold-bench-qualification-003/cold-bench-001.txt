@@ -1,0 +1,406 @@
+{
+  "passed": 118,
+  "total": 120,
+  "aggregates": [
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.76255303193194,
+      "min_ops_per_sec": 127.6864759613395,
+      "max_ops_per_sec": 127.78993611142934
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.80968763689366,
+      "min_ops_per_sec": 127.65780773444185,
+      "max_ops_per_sec": 127.85624158704006
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.88341343094396,
+      "min_ops_per_sec": 127.75181002462139,
+      "max_ops_per_sec": 127.89209380421008
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.68651588532431,
+      "min_ops_per_sec": 127.61281418048009,
+      "max_ops_per_sec": 127.74215166092877
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.7025098395214,
+      "min_ops_per_sec": 127.61486055745758,
+      "max_ops_per_sec": 127.9087593023347
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.72971107874743,
+      "min_ops_per_sec": 127.68283480789972,
+      "max_ops_per_sec": 127.77305017653822
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.81894767318983,
+      "min_ops_per_sec": 127.79776468601248,
+      "max_ops_per_sec": 127.86111618477885
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "fanout",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 127.72472368276009,
+      "min_ops_per_sec": 127.57447558428191,
+      "max_ops_per_sec": 127.82852286303152
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 6203.666666666667,
+      "min_ops_per_sec": 6187.791666666667,
+      "max_ops_per_sec": 6726.875
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 8627.25,
+      "min_ops_per_sec": 8198.333333333334,
+      "max_ops_per_sec": 8867.208333333334
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 10707.208333333334,
+      "min_ops_per_sec": 9168.166666666666,
+      "max_ops_per_sec": 12003.541666666666
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 13526.333333333334,
+      "min_ops_per_sec": 13172.75,
+      "max_ops_per_sec": 14180.041666666666
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 4733.416666666667,
+      "min_ops_per_sec": 4371.041666666667,
+      "max_ops_per_sec": 4850.458333333333
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 5927.041666666667,
+      "min_ops_per_sec": 5794.291666666667,
+      "max_ops_per_sec": 6461.958333333333
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 6451.875,
+      "min_ops_per_sec": 5808.5,
+      "max_ops_per_sec": 6687.208333333333
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "hot-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 7257.791666666667,
+      "min_ops_per_sec": 6869.375,
+      "max_ops_per_sec": 7704.625
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 2817.4166666666665,
+      "min_ops_per_sec": 2501.2916666666665,
+      "max_ops_per_sec": 3947.5833333333335
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 2,
+      "median_ops_per_sec": 4938.854166666666,
+      "min_ops_per_sec": 4467.958333333333,
+      "max_ops_per_sec": 5409.75
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 2,
+      "median_ops_per_sec": 5964.25,
+      "min_ops_per_sec": 5416.458333333333,
+      "max_ops_per_sec": 6512.041666666667
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 8422.208333333334,
+      "min_ops_per_sec": 6893.041666666667,
+      "max_ops_per_sec": 10303.708333333334
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 2823.625,
+      "min_ops_per_sec": 2533.25,
+      "max_ops_per_sec": 2878.0833333333335
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 3348.4583333333335,
+      "min_ops_per_sec": 2603.5416666666665,
+      "max_ops_per_sec": 3491.5416666666665
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 4982.125,
+      "min_ops_per_sec": 4932.541666666667,
+      "max_ops_per_sec": 5746.666666666667
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 5335.0,
+      "min_ops_per_sec": 5321.333333333333,
+      "max_ops_per_sec": 6143.708333333333
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "mixed",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "min_ops_per_sec": 512.6666666666666,
+      "max_ops_per_sec": 512.6666666666666
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 36.291666666666664,
+      "min_ops_per_sec": 34.041666666666664,
+      "max_ops_per_sec": 36.833333333333336
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 3385.2916666666665,
+      "min_ops_per_sec": 3140.375,
+      "max_ops_per_sec": 3588.5416666666665
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 40.458333333333336,
+      "min_ops_per_sec": 39.875,
+      "max_ops_per_sec": 41.583333333333336
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 4177.75,
+      "min_ops_per_sec": 3894.3333333333335,
+      "max_ops_per_sec": 4200.541666666667
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 36.166666666666664,
+      "min_ops_per_sec": 34.25,
+      "max_ops_per_sec": 37.0
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 3425.6666666666665,
+      "min_ops_per_sec": 3185.4583333333335,
+      "max_ops_per_sec": 3468.375
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 36.541666666666664,
+      "min_ops_per_sec": 36.541666666666664,
+      "max_ops_per_sec": 37.958333333333336
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "replay",
+      "cells": 3,
+      "passed": 3,
+      "median_ops_per_sec": 3998.625,
+      "min_ops_per_sec": 3941.75,
+      "max_ops_per_sec": 4098.0
+    }
+  ]
+}

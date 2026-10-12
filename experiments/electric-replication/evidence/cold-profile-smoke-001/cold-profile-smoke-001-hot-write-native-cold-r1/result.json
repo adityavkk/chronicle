@@ -1,0 +1,525 @@
+{
+  "version": 1,
+  "arm": "native",
+  "cold": true,
+  "workload": "hot-write",
+  "repetition": 1,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 65536,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 4,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "kernel",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "372370093f47a578fa1623b4450b37bb0179a38eef8a87d18d3440ee8ac40be0",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 21456388096,
+  "startup_seconds": 2.1792360919935163,
+  "roles": {
+    "sut": [
+      4132954
+    ],
+    "provider": [
+      4132913,
+      4132937
+    ],
+    "client": [
+      4133056
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791610942431,
+    "monotonic_ns": 134649775738730,
+    "processes": {
+      "4132954": {
+        "cpu_ticks": 8,
+        "rss_pages": 1301,
+        "io": {
+          "rchar": 19851457,
+          "wchar": 375,
+          "syscr": 952,
+          "syscw": 17,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "4132913": {
+        "cpu_ticks": 57,
+        "rss_pages": 26739,
+        "io": {
+          "rchar": 161259008,
+          "wchar": 14022,
+          "syscr": 5485,
+          "syscw": 21,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "4132937": {
+        "cpu_ticks": 25,
+        "rss_pages": 11461,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:52798",
+        "owners": [
+          4132913
+        ],
+        "counters": {
+          "bytes_sent": 472,
+          "bytes_acked": 472,
+          "bytes_received": 701
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "garbage_keys": [
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-0%7E8185489929059397/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-0%7E8185489929059397/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-0%7E8185489929059397/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-0%7E8185489929059397/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-1%7E8185489929059398/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-1%7E8185489929059398/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-1%7E8185489929059398/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-1%7E8185489929059398/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-2%7E8185489929059399/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-2%7E8185489929059399/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-2%7E8185489929059399/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-2%7E8185489929059399/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-3%7E8185489929059400/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-3%7E8185489929059400/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-3%7E8185489929059400/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-3%7E8185489929059400/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-4%7E8185489929059401/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-4%7E8185489929059401/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-4%7E8185489929059401/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-4%7E8185489929059401/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-5%7E8185489929059403/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-5%7E8185489929059403/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-5%7E8185489929059403/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-5%7E8185489929059403/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-6%7E8185489929059404/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-6%7E8185489929059404/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-6%7E8185489929059404/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-6%7E8185489929059404/0000000000196608",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-7%7E8185489929059402/0000000000000000",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-7%7E8185489929059402/0000000000065536",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-7%7E8185489929059402/0000000000131072",
+    "cb-082174c66d38ebaf/+v1+stream+gc-prefill-7%7E8185489929059402/0000000000196608"
+  ],
+  "precondition": {
+    "time_ns": 134651000238078,
+    "remote_keys": [
+      "cb-082174c66d38ebaf/+v1+stream+s00000000~8185489929059396/0000000000000000"
+    ],
+    "listing_keys": [
+      "cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000000000"
+    ],
+    "local_payload_bytes": 0,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 0,
+        "file_base": 65536,
+        "segments": [
+          {
+            "logical_start": 0,
+            "len": 65536,
+            "remote_key": "cb-082174c66d38ebaf/+v1+stream+s00000000~8185489929059396/0000000000000000",
+            "local_file": null
+          }
+        ]
+      }
+    ]
+  },
+  "client_object_keys": [
+    "/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000000000"
+  ],
+  "before_client": {
+    "time_ns": 134651000763528,
+    "free_bytes": 21437165568,
+    "storage": {
+      "1": {
+        "logical": 16786569,
+        "allocated": 16815616,
+        "files": 23,
+        "payload": 3,
+        "segments": 0,
+        "metadata": 9349
+      }
+    },
+    "object_store": {
+      "count": 33,
+      "bytes": 2162688
+    },
+    "garbage_objects_remaining": 32
+  },
+  "client_window": {
+    "start_ns": 134651311246916,
+    "start_unix_ms": 1791610943967,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 134655367148331,
+    "end_unix_ms": 1791610948023
+  },
+  "gc_delete_window": {
+    "start_ns": 134652311994629,
+    "start_unix_ms": 1791610944968,
+    "end_ns": 134652321189623
+  },
+  "client_exit_code": 0,
+  "fsync": {
+    "started": 5197,
+    "matched": 5197,
+    "unmatched_exits": 1,
+    "incomplete": [],
+    "errors": {},
+    "first_64_slow_calls": [],
+    "successful": {
+      "count": 5197,
+      "total_ns": 2355119637,
+      "p50_ns": 410647,
+      "p99_ns": 1630127,
+      "max_ns": 6884694,
+      "at_least_100ms": 0
+    },
+    "scope": "Matched per-thread kernel fsync/fdatasync tracepoints in the whole capture, including setup/drain. Incomplete boundaries are not durations. Wall time includes kernel work, blocking and descheduling, not pure device latency; tracing still perturbs execution. Unused argument registers are omitted from the exported events; the raw capture remains local-only."
+  },
+  "after_client": {
+    "time_ns": 134656596106985,
+    "free_bytes": 21423611904,
+    "storage": {
+      "1": {
+        "logical": 16835610,
+        "allocated": 16842240,
+        "files": 11,
+        "payload": 32259,
+        "segments": 0,
+        "metadata": 25909
+      }
+    },
+    "object_store": {
+      "count": 174,
+      "bytes": 11403264
+    },
+    "garbage_objects_remaining": 0
+  },
+  "target_bytes": 11435520,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 11435520,
+      "offsets": [
+        11435520
+      ]
+    }
+  ],
+  "drain_seconds": 0.0015663230151403695,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 11435520,
+      "sha256": "7baf7627cb66c0a36b1e6055468ce128006ed9b8d167a8f09686015eb2d6c810",
+      "expected_sha256": "7baf7627cb66c0a36b1e6055468ce128006ed9b8d167a8f09686015eb2d6c810",
+      "offset": 11435520
+    }
+  ],
+  "gc_observed_complete_ns": 134657110423820,
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 4,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {
+        "PUT": 173,
+        "HEAD": 173,
+        "DELETE": 32
+      },
+      "statuses": {
+        "200": 346,
+        "204": 32
+      },
+      "request_body_bytes": 11337728,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 134657111667575,
+    "free_bytes": 21423546368,
+    "storage": {
+      "1": {
+        "logical": 16835610,
+        "allocated": 16842240,
+        "files": 11,
+        "payload": 32259,
+        "segments": 0,
+        "metadata": 25909
+      }
+    },
+    "object_store": {
+      "count": 174,
+      "bytes": 11403264
+    },
+    "garbage_objects_remaining": 0
+  },
+  "data_files": {
+    "object-fault-1.json": 43,
+    "cb-082174c66d38ebaf-minio.log": 438,
+    "cb-082174c66d38ebaf-s3-1.log": 0,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/tmp/.trash/e1be2590-6c23-48ba-86bd-cc418296e459": 65971,
+    "minio/.minio.sys/tmp/.trash/993d3314-1b59-4397-b273-2618b3d87a7e": 65971,
+    "minio/.minio.sys/tmp/.trash/e7922666-5990-4d5b-bcbf-1609eba819f5": 65971,
+    "minio/.minio.sys/tmp/.trash/a95858a6-4645-4df7-8d50-8bea96e5def3": 65971,
+    "minio/.minio.sys/tmp/.trash/33743a13-9e37-48f1-8c4b-27ea11ac92e4": 65971,
+    "minio/.minio.sys/tmp/.trash/739ad6f3-25a9-4d77-b20d-cc8b93a3d219": 65971,
+    "minio/.minio.sys/tmp/.trash/c89e1396-b64e-414b-ac1c-95298e1d5730": 65971,
+    "minio/.minio.sys/tmp/.trash/4a12238a-5037-4368-b68d-719835908221": 65971,
+    "minio/.minio.sys/tmp/.trash/6168bd18-36a2-40a8-bfec-a451d0af09ac": 65971,
+    "minio/.minio.sys/tmp/.trash/9a923bab-11b6-41e9-9913-405ee4798070": 65971,
+    "minio/.minio.sys/tmp/.trash/e46f5d37-ee96-4ba9-9890-ac21ce3d803b": 65971,
+    "minio/.minio.sys/tmp/.trash/8d5dcbe7-952e-49a7-9890-e627f3fee3f0": 65971,
+    "minio/.minio.sys/tmp/.trash/5a6c9e5b-02f7-4822-bd7d-f16a09bfe44a": 65971,
+    "minio/.minio.sys/tmp/.trash/de5021fc-e33d-436e-8525-8f8a3f2e2408": 65971,
+    "minio/.minio.sys/tmp/.trash/283e137b-4421-4894-924e-9970ba701381": 65971,
+    "minio/.minio.sys/tmp/.trash/2defd847-e928-4444-bea9-2cda949b6a42": 65971,
+    "minio/.minio.sys/tmp/.trash/bdf7c71e-8ddc-4054-ad07-809d0d5653d8": 65971,
+    "minio/.minio.sys/tmp/.trash/2a11949a-3584-450b-b4cd-6e8d7cc1f8c5": 65971,
+    "minio/.minio.sys/tmp/.trash/31b855ec-78e6-46c0-b6f8-287273992dc3": 65971,
+    "minio/.minio.sys/tmp/.trash/26436fcb-b6d1-448e-968d-92a96df25ea9": 65971,
+    "minio/.minio.sys/tmp/.trash/2d6ed1b9-06d8-49e5-96c6-efe03b209719": 65971,
+    "minio/.minio.sys/tmp/.trash/6defd7dc-478d-4eb2-bfaa-8ac76ed28492": 65971,
+    "minio/.minio.sys/tmp/.trash/3f7bd4ca-b8df-4f35-a733-0be812385566": 65971,
+    "minio/.minio.sys/tmp/.trash/aa30a9de-90c3-4a61-b8a0-e1ee50cc0a73": 65971,
+    "minio/.minio.sys/tmp/.trash/4400bf3f-c52e-4149-bd73-32f44ed2e6e8": 65971,
+    "minio/.minio.sys/tmp/.trash/b466a4ee-5237-4a6c-80b7-fc83772ae23f": 65971,
+    "minio/.minio.sys/tmp/.trash/af3ab162-48bd-46e4-8d68-d8f205b3cc5d": 65971,
+    "minio/.minio.sys/tmp/.trash/9737b263-3542-40da-a722-a62ee2604ac1": 65971,
+    "minio/.minio.sys/tmp/.trash/89773f3f-34df-461a-b20d-0a6978c62b35": 65971,
+    "minio/.minio.sys/tmp/.trash/33f81546-7513-49b2-b6ba-838a0b41e414": 65971,
+    "minio/.minio.sys/tmp/.trash/f4afcefe-8185-4c0a-99e8-fba90e3e417f": 65971,
+    "minio/.minio.sys/tmp/.trash/44b38b28-472c-4bb4-bff0-2bdb3ea793db": 65971,
+    "minio/.minio.sys/pool.bin/xl.meta": 575,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004456448/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008519680/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005373952/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007471104/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007602176/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009699328/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006619136/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004063232/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002490368/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005046272/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004128768/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008454144/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000262144/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004784128/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008781824/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005701632/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000589824/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000458752/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004915200/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007012352/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009502720/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003735552/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001572864/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002162688/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001769472/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006094848/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005505024/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001048576/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008192000/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009895936/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002949120/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003342336/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009437184/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007077888/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010027008/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001376256/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009240576/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002424832/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002752512/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011206656/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009633792/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011337728/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007208960/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010420224/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000655360/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011272192/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003866624/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003801088/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003538944/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006684672/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007274496/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003276800/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011141120/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006750208/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003473408/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002883584/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007340032/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005177344/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002686976/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001638400/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010944512/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005963776/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005898240/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006488064/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000524288/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010223616/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008388608/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010747904/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000327680/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007667712/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001703936/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006815744/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003080192/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010682368/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006160384/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007733248/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008650752/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002097152/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010616832/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011075584/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006291456/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009371648/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008257536/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003211264/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005832704/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001441792/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003145728/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000917504/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008323072/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005570560/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001835008/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002621440/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006029312/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006946816/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008060928/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008978432/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009961472/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000786432/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008912896/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008716288/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009175040/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009043968/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004259840/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005308416/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004194304/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008847360/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004521984/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010289152/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010878976/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003997696/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006881280/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000131072/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006422528/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009764864/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010354688/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001245184/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000011010048/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010092544/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008585216/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004587520/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009109504/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007864320/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009830400/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005439488/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005636096/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007995392/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005111808/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003407872/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003932160/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004849664/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001179648/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007798784/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003014656/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003604480/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004325376/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000196608/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004390912/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002359296/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005767168/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002031616/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000720896/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000983040/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007143424/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007536640/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009306112/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000005242880/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000008126464/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004718592/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002555904/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002228224/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002293760/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000002818048/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010158080/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006553600/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004653056/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000851968/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006356992/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000006225920/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000004980736/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000003670016/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001507328/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010485760/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001310720/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007929856/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001966080/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001114112/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010551296/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000393216/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000000000/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000001900544/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000000065536/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000010813440/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000009568256/xl.meta": 65971,
+    "minio/cold-fixture/cb-082174c66d38ebaf/+v1+stream+s00000000%7E8185489929059396/0000000007405568/xl.meta": 65971,
+    "1/wal/shards": 1,
+    "1/wal/0/1.wal": 8388608,
+    "1/wal/0/tails": 96,
+    "1/wal/0/checkpoint": 2,
+    "1/wal/1/24758.wal": 8388608,
+    "1/wal/1/tails": 122,
+    "1/wal/1/checkpoint": 5,
+    "1/streams/+v1+stream+s00000000~8185489929059396": 32256,
+    "1/streams/.lane": 1,
+    "1/streams/+v1+stream+s00000000~8185489929059396.meta": 25909,
+    "1/streams/.lanes": 2
+  }
+}

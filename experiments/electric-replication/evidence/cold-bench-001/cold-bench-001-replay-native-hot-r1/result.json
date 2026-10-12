@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "arm": "native",
+  "cold": false,
+  "workload": "replay",
+  "repetition": 1,
+  "replicas": 1,
+  "streams": 4,
+  "seed_bytes": 1048576,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 24,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "none",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "372370093f47a578fa1623b4450b37bb0179a38eef8a87d18d3440ee8ac40be0",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 21369720832,
+  "startup_seconds": 2.0157105160178617,
+  "roles": {
+    "sut": [
+      98349
+    ],
+    "provider": [
+      98308,
+      98331
+    ],
+    "client": [
+      98380
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791612072253,
+    "monotonic_ns": 135779597175484,
+    "processes": {
+      "98349": {
+        "cpu_ticks": 8,
+        "rss_pages": 383,
+        "io": {
+          "rchar": 18952464,
+          "wchar": 369,
+          "syscr": 294,
+          "syscw": 18,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "98308": {
+        "cpu_ticks": 54,
+        "rss_pages": 26594,
+        "io": {
+          "rchar": 161259012,
+          "wchar": 14008,
+          "syscr": 5486,
+          "syscw": 21,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "98331": {
+        "cpu_ticks": 23,
+        "rss_pages": 11421,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 440,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:57028",
+        "owners": [
+          98308
+        ],
+        "counters": {
+          "bytes_sent": 472,
+          "bytes_acked": 472,
+          "bytes_received": 701
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "precondition": {
+    "time_ns": 135779800192823,
+    "remote_keys": [],
+    "local_payload_bytes": 4194304,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/bench-reads-stream-2",
+        "local_bytes": 1048576,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/bench-reads-stream-1",
+        "local_bytes": 1048576,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/bench-reads-stream-0",
+        "local_bytes": 1048576,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/bench-reads-stream-3",
+        "local_bytes": 1048576,
+        "file_base": 0,
+        "segments": []
+      }
+    ]
+  },
+  "client_object_keys": [],
+  "before_client": {
+    "time_ns": 135779800988819,
+    "free_bytes": 21346545664,
+    "storage": {
+      "1": {
+        "logical": 23074576,
+        "allocated": 23119360,
+        "files": 29,
+        "payload": 6291459,
+        "segments": 0,
+        "metadata": 5900
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0
+  },
+  "client_window": {
+    "start_ns": 135779805866631,
+    "start_unix_ms": 1791612072461,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 135803863049548,
+    "end_unix_ms": 1791612096519
+  },
+  "gc_delete_window": {
+    "start_ns": 135780806846731,
+    "start_unix_ms": 1791612073462,
+    "end_ns": 135780815659022
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 135803863708410,
+    "free_bytes": 21348548608,
+    "storage": {
+      "1": {
+        "logical": 20973808,
+        "allocated": 20998656,
+        "files": 17,
+        "payload": 4194307,
+        "segments": 0,
+        "metadata": 1988
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0
+  },
+  "target_bytes": 4194304,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 4194304,
+      "offsets": [
+        1048576,
+        1048576,
+        1048576,
+        1048576
+      ]
+    }
+  ],
+  "drain_seconds": 0.006100279017118737,
+  "probes": [
+    {
+      "node": 1,
+      "name": "bench-reads-stream-0",
+      "bytes": 1048576,
+      "sha256": "46186a39cfa0618691bd13c05dfa94159cb177937fbe49ed69fd3c0b56270b32",
+      "expected_sha256": "46186a39cfa0618691bd13c05dfa94159cb177937fbe49ed69fd3c0b56270b32",
+      "offset": 1048576
+    },
+    {
+      "node": 1,
+      "name": "bench-reads-stream-1",
+      "bytes": 1048576,
+      "sha256": "b5cd4c8121419b4bc2c3de234b9b60415358a719b2f9296377623b61124fef71",
+      "expected_sha256": "b5cd4c8121419b4bc2c3de234b9b60415358a719b2f9296377623b61124fef71",
+      "offset": 1048576
+    },
+    {
+      "node": 1,
+      "name": "bench-reads-stream-2",
+      "bytes": 1048576,
+      "sha256": "e817883acde2adfe477d2601efe543c4bbdf541e4813a14409b8bba4803e5de5",
+      "expected_sha256": "e817883acde2adfe477d2601efe543c4bbdf541e4813a14409b8bba4803e5de5",
+      "offset": 1048576
+    },
+    {
+      "node": 1,
+      "name": "bench-reads-stream-3",
+      "bytes": 1048576,
+      "sha256": "90eb84b6f13327e824d2c050040609dd8dada19ddf415e7447c501448e43510f",
+      "expected_sha256": "90eb84b6f13327e824d2c050040609dd8dada19ddf415e7447c501448e43510f",
+      "offset": 1048576
+    }
+  ],
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 24,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {},
+      "statuses": {},
+      "request_body_bytes": 0,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 135803994907788,
+    "free_bytes": 21348548608,
+    "storage": {
+      "1": {
+        "logical": 20973808,
+        "allocated": 20998656,
+        "files": 17,
+        "payload": 4194307,
+        "segments": 0,
+        "metadata": 1988
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0
+  },
+  "data_files": {
+    "object-fault-1.json": 43,
+    "cb-c89fbda5b54b7022-minio.log": 438,
+    "cb-c89fbda5b54b7022-s3-1.log": 0,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/pool.bin/xl.meta": 563,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "1/wal/shards": 1,
+    "1/wal/0/1.wal": 8388608,
+    "1/wal/0/tails": 146,
+    "1/wal/0/checkpoint": 2,
+    "1/wal/1/1.wal": 8388608,
+    "1/wal/1/tails": 146,
+    "1/wal/1/checkpoint": 2,
+    "1/streams/+v1+stream+bench-reads-stream-2~8186619749895865.meta": 497,
+    "1/streams/.lane": 1,
+    "1/streams/+v1+stream+bench-reads-stream-1~8186619749895864.meta": 497,
+    "1/streams/+v1+stream+bench-reads-stream-2~8186619749895865": 1048576,
+    "1/streams/+v1+stream+bench-reads-stream-0~8186619749895863.meta": 497,
+    "1/streams/+v1+stream+bench-reads-stream-0~8186619749895863": 1048576,
+    "1/streams/.lanes": 2,
+    "1/streams/+v1+stream+bench-reads-stream-3~8186619749895866.meta": 497,
+    "1/streams/+v1+stream+bench-reads-stream-1~8186619749895864": 1048576,
+    "1/streams/+v1+stream+bench-reads-stream-3~8186619749895866": 1048576
+  }
+}

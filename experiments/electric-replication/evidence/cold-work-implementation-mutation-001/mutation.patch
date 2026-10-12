@@ -1,0 +1,12 @@
+diff --git a/experiments/electric-replication/engine/src/replication/cold_admission.rs b/.tmp/cold-work-mutation/src/replication/cold_admission.rs
+index dd076732..bb70fbee 100644
+--- a/experiments/electric-replication/engine/src/replication/cold_admission.rs
++++ b/.tmp/cold-work-mutation/src/replication/cold_admission.rs
+@@ -59,7 +59,6 @@ impl Drop for Ticket {
+         let mut state = self.budget.state.lock().unwrap();
+         state.active.subtract(self.charge);
+         // A reply/drop is not an observation. Never free this credit early.
+-        state.spent = state.spent.add(self.charge);
+     }
+ }
+ 

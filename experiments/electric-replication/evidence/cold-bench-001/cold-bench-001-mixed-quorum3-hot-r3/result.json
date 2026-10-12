@@ -1,0 +1,3491 @@
+{
+  "version": 1,
+  "arm": "quorum3",
+  "cold": false,
+  "workload": "mixed",
+  "repetition": 3,
+  "replicas": 3,
+  "streams": 16,
+  "seed_bytes": 262144,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 24,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "none",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 17899831296,
+  "startup_seconds": 4.705389592010761,
+  "roles": {
+    "sut": [
+      722677,
+      722697,
+      722719
+    ],
+    "provider": [
+      722601,
+      722624,
+      722641,
+      722659
+    ],
+    "client": [
+      722750
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791616562231,
+    "monotonic_ns": 140269575101096,
+    "processes": {
+      "722677": {
+        "cpu_ticks": 5,
+        "rss_pages": 9089,
+        "io": {
+          "rchar": 17723637,
+          "wchar": 8201,
+          "syscr": 1014,
+          "syscw": 1398,
+          "read_bytes": 0,
+          "write_bytes": 36864,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722697": {
+        "cpu_ticks": 4,
+        "rss_pages": 8553,
+        "io": {
+          "rchar": 17722186,
+          "wchar": 1483,
+          "syscr": 1000,
+          "syscw": 51,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722719": {
+        "cpu_ticks": 4,
+        "rss_pages": 8537,
+        "io": {
+          "rchar": 17722186,
+          "wchar": 1395,
+          "syscr": 1000,
+          "syscw": 40,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722601": {
+        "cpu_ticks": 55,
+        "rss_pages": 27130,
+        "io": {
+          "rchar": 161259233,
+          "wchar": 14749,
+          "syscr": 5494,
+          "syscw": 23,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722624": {
+        "cpu_ticks": 26,
+        "rss_pages": 11397,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 441,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722641": {
+        "cpu_ticks": 24,
+        "rss_pages": 11423,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 441,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "722659": {
+        "cpu_ticks": 25,
+        "rss_pages": 11422,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 441,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20602",
+        "peer": "127.0.0.1:40996",
+        "owners": [
+          722697
+        ],
+        "counters": {
+          "bytes_sent": 877,
+          "bytes_acked": 877,
+          "bytes_received": 1517
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:33604",
+        "peer": "127.0.0.1:20603",
+        "owners": [
+          722677
+        ],
+        "counters": {
+          "bytes_sent": 1715,
+          "bytes_acked": 1716,
+          "bytes_received": 877
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:20602",
+        "peer": "127.0.0.1:40990",
+        "owners": [
+          722697
+        ],
+        "counters": {
+          "bytes_sent": 262,
+          "bytes_acked": 262,
+          "bytes_received": 530
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:59134",
+        "owners": [
+          722601
+        ],
+        "counters": {
+          "bytes_sent": 472,
+          "bytes_acked": 472,
+          "bytes_received": 701
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:40990",
+        "peer": "127.0.0.1:20602",
+        "owners": [
+          722677
+        ],
+        "counters": {
+          "bytes_sent": 530,
+          "bytes_acked": 531,
+          "bytes_received": 262
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:20603",
+        "peer": "127.0.0.1:33588",
+        "owners": [
+          722719
+        ],
+        "counters": {
+          "bytes_sent": 262,
+          "bytes_acked": 262,
+          "bytes_received": 332
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:20603",
+        "peer": "127.0.0.1:33604",
+        "owners": [
+          722719
+        ],
+        "counters": {
+          "bytes_sent": 877,
+          "bytes_acked": 877,
+          "bytes_received": 1715
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:33588",
+        "peer": "127.0.0.1:20603",
+        "owners": [
+          722677
+        ],
+        "counters": {
+          "bytes_sent": 332,
+          "bytes_acked": 333,
+          "bytes_received": 262
+        },
+        "replication": false
+      },
+      {
+        "local": "127.0.0.1:40996",
+        "peer": "127.0.0.1:20602",
+        "owners": [
+          722677
+        ],
+        "counters": {
+          "bytes_sent": 1517,
+          "bytes_acked": 1518,
+          "bytes_received": 877
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "precondition": {
+    "time_ns": 140269819906993,
+    "remote_keys": [],
+    "local_payload_bytes": 4194304,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s000011",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000006",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000002",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000015",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000004",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000000",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000008",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000013",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000010",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000001",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000005",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000007",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000012",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000009",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000014",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 1,
+        "path": "/v1/stream/s000003",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000011",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000006",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000002",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000015",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000004",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000000",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000008",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000013",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000010",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000001",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000005",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000007",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000012",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000009",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000014",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 2,
+        "path": "/v1/stream/s000003",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000011",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000006",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000002",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000015",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000004",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000000",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000008",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000013",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000010",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000001",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000005",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000007",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000012",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000009",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000014",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      },
+      {
+        "node": 3,
+        "path": "/v1/stream/s000003",
+        "local_bytes": 262144,
+        "file_base": 0,
+        "segments": []
+      }
+    ]
+  },
+  "client_object_keys": [],
+  "before_client": {
+    "time_ns": 140269823461582,
+    "free_bytes": 17830215680,
+    "storage": {
+      "1": {
+        "logical": 23081558,
+        "allocated": 23169536,
+        "files": 56,
+        "payload": 6291462,
+        "segments": 0,
+        "metadata": 12752
+      },
+      "2": {
+        "logical": 23081558,
+        "allocated": 23169536,
+        "files": 56,
+        "payload": 6291462,
+        "segments": 0,
+        "metadata": 12752
+      },
+      "3": {
+        "logical": 23081558,
+        "allocated": 23169536,
+        "files": 56,
+        "payload": 6291462,
+        "segments": 0,
+        "metadata": 12752
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 46,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791616562479767324,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616562479767349,
+            "2": 1791616562479767351,
+            "3": 1791616562479767350
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 46
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 46
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 46
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 48,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791616562471517574,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616562471517599,
+            "2": 1791616562471517599,
+            "3": 1791616562470468870
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 48
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 48
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 48
+            }
+          }
+        }
+      },
+      "2-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 46,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "2-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 48,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 46,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 46
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 48,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 48
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      }
+    }
+  },
+  "client_window": {
+    "start_ns": 140269833983754,
+    "start_unix_ms": 1791616562490,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 140295889249771,
+    "end_unix_ms": 1791616588545
+  },
+  "gc_delete_window": {
+    "start_ns": 140270834570759,
+    "start_unix_ms": 1791616563490,
+    "end_ns": 140270859070926
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 140295890024664,
+    "free_bytes": 17826103296,
+    "storage": {
+      "1": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      },
+      "2": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      },
+      "3": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 0,
+          "last_quorum_acked": 1791616588539644982,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616588539644998,
+            "2": 1791616588539644989,
+            "3": 1791616588539645022
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 61,
+          "last_quorum_acked": 1791616588490022226,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616588490022234,
+            "2": 1791616588490022260,
+            "3": 1791616588490022252
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            }
+          }
+        }
+      },
+      "2-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "2-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      }
+    }
+  },
+  "target_bytes": 7344128,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 7344128,
+      "offsets": [
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008
+      ]
+    },
+    {
+      "node": 2,
+      "bytes": 7344128,
+      "offsets": [
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008
+      ]
+    },
+    {
+      "node": 3,
+      "bytes": 7344128,
+      "offsets": [
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008,
+        459008
+      ]
+    }
+  ],
+  "drain_seconds": 0.022966071992414072,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s000000",
+      "bytes": 459008,
+      "sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "expected_sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000001",
+      "bytes": 459008,
+      "sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "expected_sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000002",
+      "bytes": 459008,
+      "sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "expected_sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000003",
+      "bytes": 459008,
+      "sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "expected_sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000004",
+      "bytes": 459008,
+      "sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "expected_sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000005",
+      "bytes": 459008,
+      "sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "expected_sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000006",
+      "bytes": 459008,
+      "sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "expected_sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000007",
+      "bytes": 459008,
+      "sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "expected_sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000008",
+      "bytes": 459008,
+      "sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "expected_sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000009",
+      "bytes": 459008,
+      "sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "expected_sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000010",
+      "bytes": 459008,
+      "sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "expected_sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000011",
+      "bytes": 459008,
+      "sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "expected_sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000012",
+      "bytes": 459008,
+      "sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "expected_sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000013",
+      "bytes": 459008,
+      "sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "expected_sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000014",
+      "bytes": 459008,
+      "sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "expected_sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "offset": 459008
+    },
+    {
+      "node": 1,
+      "name": "s000015",
+      "bytes": 459008,
+      "sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "expected_sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000000",
+      "bytes": 459008,
+      "sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "expected_sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000001",
+      "bytes": 459008,
+      "sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "expected_sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000002",
+      "bytes": 459008,
+      "sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "expected_sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000003",
+      "bytes": 459008,
+      "sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "expected_sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000004",
+      "bytes": 459008,
+      "sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "expected_sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000005",
+      "bytes": 459008,
+      "sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "expected_sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000006",
+      "bytes": 459008,
+      "sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "expected_sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000007",
+      "bytes": 459008,
+      "sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "expected_sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000008",
+      "bytes": 459008,
+      "sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "expected_sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000009",
+      "bytes": 459008,
+      "sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "expected_sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000010",
+      "bytes": 459008,
+      "sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "expected_sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000011",
+      "bytes": 459008,
+      "sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "expected_sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000012",
+      "bytes": 459008,
+      "sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "expected_sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000013",
+      "bytes": 459008,
+      "sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "expected_sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000014",
+      "bytes": 459008,
+      "sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "expected_sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "offset": 459008
+    },
+    {
+      "node": 2,
+      "name": "s000015",
+      "bytes": 459008,
+      "sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "expected_sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000000",
+      "bytes": 459008,
+      "sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "expected_sha256": "0bf4968b0c7704a6389594756e874868b57018d6584f08a59d4135642656d424",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000001",
+      "bytes": 459008,
+      "sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "expected_sha256": "ff15daf0415833cb22fabb0c4bc0bb2fb8421e0ee3ea86fa00c1e506433f2051",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000002",
+      "bytes": 459008,
+      "sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "expected_sha256": "24854cd4acd4745d9a1cab7f97664eb230c0ea4f78b1b17c22f792928dbf3988",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000003",
+      "bytes": 459008,
+      "sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "expected_sha256": "8e3b6622da402731fa3f7abd4bcbd5c5370474f15539ab9cbfd5889ca161e9af",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000004",
+      "bytes": 459008,
+      "sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "expected_sha256": "35414614bef8afbde3ca55cfc3cdf18f23f6cc0d2a3bf69e849a3479df01e5c7",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000005",
+      "bytes": 459008,
+      "sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "expected_sha256": "4597b406df4359d5f66fd211fb1cf75d068abdde0a9869e31512cad5bf9007fd",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000006",
+      "bytes": 459008,
+      "sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "expected_sha256": "fad19d4fac7eb6845c637577a6cea525db4c01a39c8d136c36cd4093f569aa35",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000007",
+      "bytes": 459008,
+      "sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "expected_sha256": "1fab6872b43a157dc278df71d646eec79e36ec933c410d4932cb470071088e1c",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000008",
+      "bytes": 459008,
+      "sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "expected_sha256": "50d040dbb168ecd7df5198c32150b2260cacc55844fd5df568a0bf9e20963601",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000009",
+      "bytes": 459008,
+      "sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "expected_sha256": "79f8d65edf9268edb9390f35d9159cf250d4a89bac34182ecc10570cce84f91c",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000010",
+      "bytes": 459008,
+      "sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "expected_sha256": "7add8e0b26beec7e49422b5652681f1b46ef08e6bacc37d578622ce7e7fe523d",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000011",
+      "bytes": 459008,
+      "sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "expected_sha256": "9e81e0e8ad92daae891a0b4d2e486190887cd7e0c2681ebef06117e4e7ed347e",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000012",
+      "bytes": 459008,
+      "sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "expected_sha256": "76de1d71c6482467958bcca745603e2fa8af0352c58f2f567e2796b78a788e54",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000013",
+      "bytes": 459008,
+      "sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "expected_sha256": "aff0a87d47ddde2aa11980bdeaabec0df0719442708cf71f5e89f1a34ea107d5",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000014",
+      "bytes": 459008,
+      "sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "expected_sha256": "a11301b0ffbc23b5cbb9b5cb87c7e1b169982df799f20917b66345a5692e1c0b",
+      "offset": 459008
+    },
+    {
+      "node": 3,
+      "name": "s000015",
+      "bytes": 459008,
+      "sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "expected_sha256": "d8c03eaa68a88efb0c165c48031940dc768237817bce112434382b5c865b99b8",
+      "offset": 459008
+    }
+  ],
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 26,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {},
+      "statuses": {},
+      "request_body_bytes": 0,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 140296331544829,
+    "free_bytes": 17826099200,
+    "storage": {
+      "1": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      },
+      "2": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      },
+      "3": {
+        "logical": 24129950,
+        "allocated": 24250880,
+        "files": 40,
+        "payload": 7344134,
+        "segments": 0,
+        "metadata": 8472
+      }
+    },
+    "object_store": {
+      "count": 0,
+      "bytes": 0
+    },
+    "garbage_objects_remaining": 0,
+    "groups": {
+      "1-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 99,
+          "last_quorum_acked": 1791616588879899250,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616588879899252,
+            "2": 1791616588879899264,
+            "3": 1791616588879899272
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2938
+            }
+          }
+        }
+      },
+      "1-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 1,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Leader",
+          "current_leader": 1,
+          "millis_since_quorum_ack": 40,
+          "last_quorum_acked": 1791616588949871007,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": {
+            "1": 1791616588949871008,
+            "2": 1791616588949871014,
+            "3": 1791616588949871031
+          },
+          "replication": {
+            "1": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            },
+            "2": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            },
+            "3": {
+              "leader_id": {
+                "term": 1,
+                "node_id": 1
+              },
+              "index": 2860
+            }
+          }
+        }
+      },
+      "2-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "2-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 2,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-0": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2938,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2938
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      },
+      "3-1": {
+        "raft": {
+          "running_state": {
+            "Ok": null
+          },
+          "id": 3,
+          "current_term": 1,
+          "vote": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "committed": true
+          },
+          "last_log_index": 2860,
+          "local_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "cluster_committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "committed": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "last_applied": {
+            "leader_id": {
+              "term": 1,
+              "node_id": 1
+            },
+            "index": 2860
+          },
+          "snapshot": null,
+          "purged": null,
+          "state": "Follower",
+          "current_leader": 1,
+          "millis_since_quorum_ack": null,
+          "last_quorum_acked": null,
+          "membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "committed_membership_config": {
+            "log_id": {
+              "leader_id": {
+                "term": 0,
+                "node_id": 1
+              },
+              "index": 0
+            },
+            "membership": {
+              "configs": [
+                [
+                  1,
+                  2,
+                  3
+                ]
+              ],
+              "nodes": {
+                "1": {
+                  "addr": "127.0.0.1:20601"
+                },
+                "2": {
+                  "addr": "127.0.0.1:20602"
+                },
+                "3": {
+                  "addr": "127.0.0.1:20603"
+                }
+              }
+            }
+          },
+          "heartbeat": null,
+          "replication": null
+        }
+      }
+    }
+  },
+  "data_files": {
+    "object-fault-3.json": 43,
+    "object-fault-1.json": 43,
+    "cb-aafac80c6f3d9080-minio.log": 438,
+    "object-fault-2.json": 43,
+    "cb-aafac80c6f3d9080-s3-2.log": 0,
+    "cb-aafac80c6f3d9080-s3-1.log": 0,
+    "cb-aafac80c6f3d9080-s3-3.log": 0,
+    "2/IDENTITY": 128,
+    "2/LOCK": 0,
+    "2/0/wal/1.wal": 8388608,
+    "2/0/state/hot/streams/+v1+stream+s000015~20": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000011~19.meta": 530,
+    "2/0/state/hot/streams/+v1+stream+s000000~2": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000013~21": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000006~5.meta": 529,
+    "2/0/state/hot/streams/.lane": 1,
+    "2/0/state/hot/streams/+v1+stream+s000002~3.meta": 529,
+    "2/0/state/hot/streams/+v1+stream+s000008~15": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000011~19": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000004~4": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000006~5": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000015~20.meta": 530,
+    "2/0/state/hot/streams/.lanes": 2,
+    "2/0/state/hot/streams/+v1+stream+s000004~4.meta": 529,
+    "2/0/state/hot/streams/+v1+stream+s000000~2.meta": 529,
+    "2/0/state/hot/streams/+v1+stream+s000008~15.meta": 530,
+    "2/0/state/hot/streams/+v1+stream+s000002~3": 459008,
+    "2/0/state/hot/streams/+v1+stream+s000013~21.meta": 530,
+    "2/1/wal/1.wal": 8388608,
+    "2/1/state/hot/streams/+v1+stream+s000010~19.meta": 530,
+    "2/1/state/hot/streams/+v1+stream+s000014~21": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000001~2.meta": 529,
+    "2/1/state/hot/streams/.lane": 1,
+    "2/1/state/hot/streams/+v1+stream+s000003~3": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000005~4.meta": 529,
+    "2/1/state/hot/streams/+v1+stream+s000001~2": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000010~19": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000007~5.meta": 529,
+    "2/1/state/hot/streams/+v1+stream+s000012~20": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000007~5": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000012~20.meta": 530,
+    "2/1/state/hot/streams/.lanes": 2,
+    "2/1/state/hot/streams/+v1+stream+s000009~17.meta": 530,
+    "2/1/state/hot/streams/+v1+stream+s000009~17": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000005~4": 459008,
+    "2/1/state/hot/streams/+v1+stream+s000014~21.meta": 530,
+    "2/1/state/hot/streams/+v1+stream+s000003~3.meta": 529,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/pool.bin/xl.meta": 563,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "3/IDENTITY": 128,
+    "3/LOCK": 0,
+    "3/0/wal/1.wal": 8388608,
+    "3/0/state/hot/streams/+v1+stream+s000015~20": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000011~19.meta": 530,
+    "3/0/state/hot/streams/+v1+stream+s000000~2": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000013~21": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000006~5.meta": 529,
+    "3/0/state/hot/streams/.lane": 1,
+    "3/0/state/hot/streams/+v1+stream+s000002~3.meta": 529,
+    "3/0/state/hot/streams/+v1+stream+s000008~15": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000011~19": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000004~4": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000006~5": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000015~20.meta": 530,
+    "3/0/state/hot/streams/.lanes": 2,
+    "3/0/state/hot/streams/+v1+stream+s000004~4.meta": 529,
+    "3/0/state/hot/streams/+v1+stream+s000000~2.meta": 529,
+    "3/0/state/hot/streams/+v1+stream+s000008~15.meta": 530,
+    "3/0/state/hot/streams/+v1+stream+s000002~3": 459008,
+    "3/0/state/hot/streams/+v1+stream+s000013~21.meta": 530,
+    "3/1/wal/1.wal": 8388608,
+    "3/1/state/hot/streams/+v1+stream+s000010~19.meta": 530,
+    "3/1/state/hot/streams/+v1+stream+s000014~21": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000001~2.meta": 529,
+    "3/1/state/hot/streams/.lane": 1,
+    "3/1/state/hot/streams/+v1+stream+s000003~3": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000005~4.meta": 529,
+    "3/1/state/hot/streams/+v1+stream+s000001~2": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000010~19": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000007~5.meta": 529,
+    "3/1/state/hot/streams/+v1+stream+s000012~20": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000007~5": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000012~20.meta": 530,
+    "3/1/state/hot/streams/.lanes": 2,
+    "3/1/state/hot/streams/+v1+stream+s000009~17.meta": 530,
+    "3/1/state/hot/streams/+v1+stream+s000009~17": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000005~4": 459008,
+    "3/1/state/hot/streams/+v1+stream+s000014~21.meta": 530,
+    "3/1/state/hot/streams/+v1+stream+s000003~3.meta": 529,
+    "1/IDENTITY": 128,
+    "1/LOCK": 0,
+    "1/0/wal/1.wal": 8388608,
+    "1/0/state/hot/streams/+v1+stream+s000015~20": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000011~19.meta": 530,
+    "1/0/state/hot/streams/+v1+stream+s000000~2": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000013~21": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000006~5.meta": 529,
+    "1/0/state/hot/streams/.lane": 1,
+    "1/0/state/hot/streams/+v1+stream+s000002~3.meta": 529,
+    "1/0/state/hot/streams/+v1+stream+s000008~15": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000011~19": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000004~4": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000006~5": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000015~20.meta": 530,
+    "1/0/state/hot/streams/.lanes": 2,
+    "1/0/state/hot/streams/+v1+stream+s000004~4.meta": 529,
+    "1/0/state/hot/streams/+v1+stream+s000000~2.meta": 529,
+    "1/0/state/hot/streams/+v1+stream+s000008~15.meta": 530,
+    "1/0/state/hot/streams/+v1+stream+s000002~3": 459008,
+    "1/0/state/hot/streams/+v1+stream+s000013~21.meta": 530,
+    "1/1/wal/1.wal": 8388608,
+    "1/1/state/hot/streams/+v1+stream+s000010~19.meta": 530,
+    "1/1/state/hot/streams/+v1+stream+s000014~21": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000001~2.meta": 529,
+    "1/1/state/hot/streams/.lane": 1,
+    "1/1/state/hot/streams/+v1+stream+s000003~3": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000005~4.meta": 529,
+    "1/1/state/hot/streams/+v1+stream+s000001~2": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000010~19": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000007~5.meta": 529,
+    "1/1/state/hot/streams/+v1+stream+s000012~20": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000007~5": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000012~20.meta": 530,
+    "1/1/state/hot/streams/.lanes": 2,
+    "1/1/state/hot/streams/+v1+stream+s000009~17.meta": 530,
+    "1/1/state/hot/streams/+v1+stream+s000009~17": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000005~4": 459008,
+    "1/1/state/hot/streams/+v1+stream+s000014~21.meta": 530,
+    "1/1/state/hot/streams/+v1+stream+s000003~3.meta": 529
+  }
+}

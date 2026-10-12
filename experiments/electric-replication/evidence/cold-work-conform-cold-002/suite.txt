@@ -1,0 +1,38 @@
+
+ RUN  v4.1.11 /home/user/workspace/repo
+
+ ✓ experiments/electric-replication/conformance.test.ts (332 tests) 25961ms
+     ✓ should wait for new data with long-poll  513ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  510ms
+     ✓ should support offset=now with long-poll mode (waits for data)  1010ms
+     ✓ should support offset=now with long-poll on empty stream  1012ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  1010ms
+     ✓ should return 404 on HEAD after TTL expires  1022ms
+     ✓ should return 404 on GET after TTL expires (idle)  1015ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1019ms
+     ✓ should return 404 on HEAD after Expires-At passes  3025ms
+     ✓ should return 404 on GET after Expires-At passes  3023ms
+     ✓ should return 404 on POST append after Expires-At passes  3018ms
+     ✓ should allow recreating stream after TTL expires  1022ms
+     ✓ should extend TTL on write (sliding window)  3015ms
+     ✓ should extend TTL on read (sliding window)  3011ms
+     ✓ should NOT extend TTL on HEAD  2016ms
+     ✓ should NOT extend Expires-At on read or write  4018ms
+     ✓ should handle chunk-size pagination correctly  892ms
+       ✓ concurrent readers see consistent data during writes  1252ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  582ms
+       ✓ offsets are always monotonically increasing  425ms
+       ✓ replay produces identical content hash  348ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1124ms
+     ✓ should cascade GC through three levels  1082ms
+     ✓ should expire fork based on TTL (releases refcount)  1036ms
+     ✓ should expire source with living forks (source goes 410)  1044ms
+     ✓ should allow fork to outlive source via TTL renewal  2023ms
+     ✓ pull-wake claim, ack, and release use subscription-scoped leases  313ms
+
+ Test Files  1 passed (1)
+      Tests  332 passed (332)
+   Start at  13:01:22
+   Duration  26.32s (transform 30ms, setup 0ms, import 158ms, tests 25.96s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/experiments/electric-replication/evidence/cold-work-conform-cold-002/suite.json

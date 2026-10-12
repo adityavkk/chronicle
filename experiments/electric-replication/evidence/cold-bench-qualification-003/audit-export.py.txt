@@ -1,0 +1,174 @@
+"""Audit this uncommitted evidence increment without printing credential values.
+
+Inventory hash fields are recomputed from observed public object names, and the
+whole ERIC0001 body checksum is verified, before replacing those known hashes
+in the generic-scanner projection. Original evidence is never edited. This
+avoids millions of repeated generic-api-key findings on public object hashes.
+"""
+import base64
+import collections
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path
+import re
+import struct
+import subprocess
+import tarfile
+
+ROOT=Path('/home/user/workspace/repo')
+EXP='experiments/electric-replication/'
+OUT=ROOT/'.tmp/cold-bench-audit-002'
+OUT.mkdir(exist_ok=False)
+(OUT/'decoded').mkdir()
+git=lambda *args:subprocess.check_output(['git',*args],cwd=ROOT).decode()
+paths=set(git('diff','--name-only','HEAD').splitlines())
+paths.update(git('ls-files','--others','--exclude-standard',EXP).splitlines())
+assert all(p.startswith(EXP) for p in paths)
+assert not git('diff','--name-only','HEAD','--',EXP+'engine',EXP+'vendor',EXP+'formal',EXP+'UPSTREAM-TREE.txt')
+bad=re.compile(r'(?:^|/)(?:\.copybara|\.env(?:\..*)?|local-object-credentials\.json|perf\.data.*|target|node_modules|\.aws|\.ssh)(?:/|$)|\.(?:sqlite3?|db|wal|pem|p12|pfx|core|dmp)$')
+private=re.compile(rb'https?://[^\s<>"()]*?(?:gecgithub01|walmart\.(?:com|net)|wal-mart\.com|homeoffice|wmlink)|\.iam\.gserviceaccount\.com|workloadIdentityPools/|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|fixture-[0-9a-f]{16}',re.I)
+object_key=re.compile(r'electric/[a-z0-9-]+/[01]/[0-9]{20}/[pi]/[0-9]{20}/[0-9]{20}/[0-9]{20}/[0-9a-f]{64}')
+known=collections.defaultdict(set)
+source_digests={hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in git('ls-files',EXP+'engine',EXP+'vendor').splitlines() if (ROOT/p).is_file()}
+keys=set()
+for directory in (ROOT/'.tmp/electric-labs').glob('subscription-fault-*'):
+    for wal in directory.glob('[123]/[01]/wal/*.wal'):
+        for match in re.finditer(rb'\{"Keys":\{"signing":\[[0-9,]+\],"token":\[[0-9,]+\]\}\}',wal.read_bytes()):
+            pair=json.loads(match[0])['Keys']
+            keys.update(bytes(pair[k]) for k in ('signing','token'))
+assert len(keys)==68
+needles=set()
+for key in keys:
+    forms={key,key.hex().encode(),key.hex().upper().encode(),base64.b64encode(key),
+        base64.urlsafe_b64encode(key),base64.b64encode(key).rstrip(b'='),base64.urlsafe_b64encode(key).rstrip(b'='),
+        json.dumps(list(key)).encode(),json.dumps(list(key),separators=(',',':')).encode()}
+    for form in list(forms):
+        if form.startswith(b'['):
+            forms.add(json.dumps(list(form)).encode())
+            forms.add(json.dumps(list(form),separators=(',',':')).encode())
+    needles.update(forms)
+
+def histogram(data):
+    # ds-bench93a1a066 uses hdrhistogram7.5.4's uncompressed V2Serializer;
+    # fixed numeric header plus canonical ZigZag/LEB128-64b9B count tokens.
+    cookie,length,normal,digits,low,high,ratio=struct.unpack('>IIIIQQd',data[:40])
+    assert (cookie,normal,digits,low,high,ratio)==(0x1c849313,0,3,1,60000000,1.0)
+    assert len(data)==40+length and 1<=length<=9*17408
+    offset,bins,total=40,0,0
+    tokens=[]
+    while offset<len(data):
+        n=0;start=offset
+        for i in range(9):
+            b=data[offset];offset+=1
+            n|=(b if i==8 else b&127)<<(7*i)
+            if i==8 or b<128:break
+        assert offset-start==max(1,min(9,(n.bit_length()+6)//7))
+        value=(n>>1)^-(n&1)
+        assert value != -(1<<63)
+        if value<0:
+            assert value<=-2
+            bins-=value
+        else:
+            assert bins<17408
+            bins+=1;total+=value
+        assert bins<=17408 and total<(1<<64)
+        tokens.append(value)
+    assert offset==len(data)
+    return json.dumps(dict(hdr_v2_numeric=True,digits=digits,low=low,high=high,total=total,tokens=tokens))
+
+def raw(path):
+    data=(ROOT/path).read_bytes()
+    assert len(data)<50*1024**2,(path,'large stored file')
+    if path.endswith('.gz'):return gzip.decompress(data)
+    if path.endswith('.zst'):return subprocess.check_output(['zstd','-dq','-c',str(ROOT/path)])
+    return data
+
+def descriptor_keys(value,cluster):
+    if isinstance(value,dict):
+        if {'birth','len','sha256','kind'} <= value.keys():
+            k=value['kind']
+            if 'Inventory' in k:kind,inc,start='i',0,k['Inventory']['cut']
+            else:
+                item=k['Payload'];kind,inc,start='p',item['incarnation'],item['start']
+            for group in (0,1):
+                yield f"electric/{cluster}/{group}/{value['birth']:020}/{kind}/{inc:020}/{start:020}/{value['len']:020}/{value['sha256']}"
+        else:
+            for v in value.values():yield from descriptor_keys(v,cluster)
+    elif isinstance(value,list):
+        for v in value:yield from descriptor_keys(v,cluster)
+
+# Object keys and status descriptors establish the checksum domain independently
+# of the inventory whose hash fields are reviewed below.
+for path in sorted(paths):
+    assert not bad.search(path),path
+    if not path.endswith(('.json','.jsonl','.jsonl.gz','.jsonl.zst')):continue
+    text=raw(path).decode()
+    parent=str(Path(path).parent)
+    known[parent].update(hashlib.sha256(m[0].encode()).hexdigest() for m in object_key.finditer(text))
+    if Path(path).name=='result.json':
+        config=ROOT/parent/'node-1.json'
+        if config.exists():
+            cluster=json.loads(config.read_text())['cluster']
+            known[parent].update(hashlib.sha256(k.encode()).hexdigest() for k in descriptor_keys(json.loads(text),cluster))
+
+reviewed=0;events=0;decoded_bytes=0;rows=[];histograms=0
+def inspect(path,data,parent):
+    global reviewed,events,decoded_bytes,histograms
+    decoded_bytes+=len(data)
+    assert not private.search(data),(path,'private endpoint/key/access-id pattern')
+    assert not any(n in data for n in needles),(path,'retired fixture private key')
+    assert not data.startswith((b'SQLite format 3\0',b'PERFILE2',b'\x7fELF')),(path,'raw store/profile/binary')
+    digest=hashlib.sha256(data).hexdigest()
+    if path.endswith('.hdr'):
+        text=histogram(data);histograms+=1
+    else:
+        try:text=data.decode()
+        except UnicodeDecodeError:raise AssertionError((path,'unknown binary format')) from None
+    if re.search(r'/objects-\d+\.jsonl(?:\.(?:gz|zst))?$',path):
+        normalized=[]
+        for line in text.splitlines():
+            value=json.loads(line)
+            inv=value.get('inventory')
+            if inv:
+                assert set(inv)=={'cut','records'}
+                encoded=bytearray(b'ERIC0001'+inv['cut'].to_bytes(8,'big'))
+                for r in inv['records']:
+                    assert set(r)=={'birth','key_sha256'}
+                    assert r['key_sha256'] in known[parent],(path,'unverified inventory key hash',r['birth'])
+                    encoded.extend(r['birth'].to_bytes(8,'big')+bytes.fromhex(r['key_sha256']))
+                    reviewed+=1
+                assert hashlib.sha256(encoded).hexdigest()==value['sha256']==value['path'].rsplit('/',1)[-1]
+                assert len(encoded)==value['bytes'] and value['method']=='GET'
+                value['inventory']=dict(cut=inv['cut'],verified_public_key_hashes=len(inv['records']))
+                events+=1
+            normalized.append(json.dumps(value,separators=(',',':')))
+        text='\n'.join(normalized)+'\n'
+    output=OUT/'decoded'/(hashlib.sha256(text.encode()).hexdigest()+'.txt')
+    output.write_text(text)
+    rows.append(dict(path=path,decoded_sha256=digest,decoded_bytes=len(data),projection=str(output.relative_to(ROOT)),projection_sha256=output.stem))
+
+for path in sorted(paths):
+    p=ROOT/path
+    assert p.is_file() and not p.is_symlink()
+    data=raw(path)
+    if path.endswith('.tar.gz'):
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for item in archive:
+                assert item.isfile() and '/' not in item.name
+                inspect(path+'::'+item.name,archive.extractfile(item).read(),str(p.parent.relative_to(ROOT)))
+    else:inspect(path,data,str(p.parent.relative_to(ROOT)))
+
+assert 'No orb services are running.' in subprocess.check_output(['amp','orb','service','list'],text=True)
+result=dict(verdict='PASS_STATIC_INCREMENT',files=len(paths),decoded_bytes=decoded_bytes,
+    verified_inventory_events=events,independently_verified_object_key_hash_fields=reviewed,
+    stored_bytes=sum((ROOT/p).stat().st_size for p in paths),largest_stored_bytes=max((ROOT/p).stat().st_size for p in paths),
+    raw_store_profile_private_pattern_matches=0,runtime_inputs_unchanged=True,private_fixture_keys_checked=len(keys),
+    private_key_encoding_matches=0,validated_numeric_hdr_histograms=histograms,
+    scanner_projection='Verified inventory key-hash fields only are represented by their counts after independent object-name and whole-body digest validation; numeric HDR files decoded strictly from fixed headers/counts with no trailing bytes. All other decoded text scanned unmodified. Original evidence unchanged.',
+    limitations='Increment only, not a new full-history publication audit or proof against arbitrary secret encodings. Fresh local S3 credentials were retired/deleted by each lab; no external/provider credentials used.')
+(OUT/'inventory.json').write_text(json.dumps(result,indent=2)+'\n')
+(OUT/'map.json').write_text(json.dumps(rows,indent=2)+'\n')
+(OUT/'source-digests.json').write_text(json.dumps(sorted(source_digests))+'\n')
+print(json.dumps(result,indent=2))

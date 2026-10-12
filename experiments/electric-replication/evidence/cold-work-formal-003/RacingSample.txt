@@ -1,0 +1,139 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 16 and seed -6395845932540415021 with 2 workers on 8 cores with 1024MB heap and 64MB offheap memory [pid: 1799496] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/evidence/cold-work-formal-003/ColdWork.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ColdWork
+Starting... (2026-10-10 11:51:15)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-10 11:51:15.
+Error: Invariant AdmissionSafe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"New", "New", "New">>
+/\ sampling = FALSE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<0, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 0
+/\ served = {}
+/\ owed = {}
+
+State 2: <Action line 90, col 54 to line 90, col 82 of module ColdWork>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"Active", "New", "New">>
+/\ sampling = FALSE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<2, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 0
+/\ served = {}
+/\ owed = {}
+
+State 3: <Action line 90, col 54 to line 90, col 82 of module ColdWork>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"Active", "New", "New">>
+/\ sampling = TRUE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<2, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 0
+/\ served = {}
+/\ owed = {}
+
+State 4: <Action line 90, col 54 to line 90, col 82 of module ColdWork>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"Written", "New", "New">>
+/\ sampling = TRUE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<2, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 2
+/\ served = {}
+/\ owed = {}
+
+State 5: <Action line 90, col 54 to line 90, col 82 of module ColdWork>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"Finished", "New", "New">>
+/\ sampling = TRUE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<2, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 2
+/\ served = {}
+/\ owed = {}
+
+State 6: <Action line 90, col 54 to line 90, col 82 of module ColdWork>
+/\ phase = "Scan"
+/\ attempts = 0
+/\ provider = TRUE
+/\ running = TRUE
+/\ work = <<1, 1, 1>>
+/\ stage = <<"Finished", "New", "New">>
+/\ sampling = FALSE
+/\ captured = 0
+/\ pending = {}
+/\ credit = <<0, 0, 0>>
+/\ observed = 0
+/\ inflight = 0
+/\ wake = TRUE
+/\ cursor = 0
+/\ used = 2
+/\ served = {}
+/\ owed = {}
+
+304 states generated, 154 distinct states found, 84 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 6 and the 95th percentile is 5).
+Finished in 00s at (2026-10-10 11:51:15)

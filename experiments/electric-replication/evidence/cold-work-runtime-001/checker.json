@@ -1,0 +1,46 @@
+{
+  "verdict": "PASS",
+  "reads": 28,
+  "sse_reads": 1,
+  "retries": 1,
+  "unknown_http_outcomes": 2,
+  "observed_object_gets": 425,
+  "observed_deletes": 244,
+  "observed_inventories": 55,
+  "state_observations": 122,
+  "negative_controls": [
+    {
+      "mutation": "wrong-read-prefix",
+      "detected": "read differs from committed client prefix (including fork/retry semantics)"
+    },
+    {
+      "mutation": "lost-participant",
+      "detected": "membership forgot a storage participant"
+    },
+    {
+      "mutation": "inventory-corruption",
+      "detected": "inventory evidence checksum mismatch"
+    },
+    {
+      "mutation": "delete-held-reader",
+      "detected": "premature deletion in protected interval"
+    },
+    {
+      "mutation": "miss-late-inventory",
+      "detected": "late inventory completion was not subsequently deleted"
+    },
+    {
+      "mutation": "duplicate-sse",
+      "detected": "SSE data after closure"
+    },
+    {
+      "mutation": "premature-sse-offset",
+      "detected": "SSE advertised a skipped offset"
+    },
+    {
+      "mutation": "retained-generation",
+      "detected": "retired generations changed the baseline live metadata set"
+    }
+  ],
+  "checker_sha256": "c25f9a9c450332e561e1df8b04eb06faa31c7cf031649fe31e4906ac825a3d81"
+}

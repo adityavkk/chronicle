@@ -1,0 +1,39 @@
+'ElectricReplication.publication_committed' depends on axioms: [propext]
+'ElectricReplication.session_no_rollback' depends on axioms: [propext]
+'ElectricReplication.session_monotone' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.majority_overlap_slots' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.restore_bound' does not depend on any axioms
+'ElectricReplication.recreated_fences' does not depend on any axioms
+'ElectricReplication.generation_fences' does not depend on any axioms
+'ElectricReplication.expired_fences' does not depend on any axioms
+'ElectricReplication.snapshot_ack_keeps_suffix' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.grant_irrevocable' depends on axioms: [propext]
+'ElectricReplication.abort_fences_delayed_grant' depends on axioms: [propext]
+'ElectricReplication.release_fences_delayed_grant' depends on axioms: [propext]
+'ElectricReplication.import_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ElectricReplication.import_progress' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.publication_exact_prefix' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.descendant_prevents_release' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.advance_exact_and_bounded' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ElectricReplication.quoted_comma_is_not_boundary' depends on axioms: [propext]
+'ElectricReplication.nested_comma_is_not_boundary' depends on axioms: [propext]
+'ElectricReplication.scan_chunk_independent' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.restore_no_published_rollback' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.replay_chunks_do_not_regress_marker' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.retained_location_survives' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.suffix_survives_checkpoint' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.before_cut_replay_not_needed' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.in_flight_round_not_reusable' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.batch_fold_equivalent' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.singleton_metadata_identity' depends on axioms: [propext]
+'ElectricReplication.moving_to_consensus_keeps_charge' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.receipt_result_binds_identity_and_semantics' depends on axioms: [propext]
+'ElectricReplication.missing_result_is_not_invalidation' depends on axioms: [propext]
+'ElectricReplication.uncommitted_replacement_is_not_invalidation' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.recovered_suffix_fences_new_admission' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.stale_proposal_rejected' does not depend on any axioms
+'ElectricReplication.assignment_requires_preparation' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.projection_keeps_first_value' depends on axioms: [propext]
+'ElectricReplication.host_is_not_transport' does not depend on any axioms
+'ElectricReplication.durability_is_not_transport' does not depend on any axioms
+'ElectricReplication.content_type_is_not_transport' does not depend on any axioms

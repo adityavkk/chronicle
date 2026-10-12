@@ -1,0 +1,34 @@
+{
+  "verdict": "PASS_STATIC_UNPUBLISHED_RANGE",
+  "base": "de52d72bff77fd4bab736516a03644a77755c2ca",
+  "head": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "unpublished_commits": [
+    "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+    "b231c8ffec60fbc605f61f513bfdf8c8731b4c2b",
+    "a038bcbc1e37e2564b8cc938a31f038481540598"
+  ],
+  "human_author_committer": true,
+  "ai_attribution_trailers": 0,
+  "preserved_human_coauthor": [
+    {
+      "commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+      "credit": "Aditya Krishnan <adityavkk@gmail.com>"
+    }
+  ],
+  "working_files": 6911,
+  "historical_blob_versions": 673,
+  "decoded_bytes": 4877072390,
+  "verified_inventory_events": 264676,
+  "independently_verified_object_key_hash_fields": 22302773,
+  "stored_bytes": 695479904,
+  "largest_stored_bytes": 7013295,
+  "raw_store_profile_private_pattern_matches": 0,
+  "runtime_inputs_match_qualified_candidate": true,
+  "private_fixture_keys_checked": 68,
+  "private_key_encoding_matches": 0,
+  "validated_numeric_hdr_histograms": 357,
+  "new_bearer_token_literals": 0,
+  "fixture_audit": "The actual two-part JSON/HMAC token and retired key lifecycle audit is rerun separately over all historical subscription fixtures and compressed branch blobs, not assumed JWTs.",
+  "scanner_projection": "Verified inventory key-hash fields only are represented by their counts after independent object-name and whole-body digest validation; numeric HDR files decoded strictly from fixed headers/counts with no trailing bytes. All other decoded text scanned unmodified. Original evidence unchanged.",
+  "limitations": "Entire origin/experiment/electric-replication..HEAD blob range plus every working change; not proof against arbitrary secret encodings. Fresh local S3 credentials were retired/deleted by each lab; no external/provider credentials used. Final staged closure and final commit identity must still be checked before any push."
+}

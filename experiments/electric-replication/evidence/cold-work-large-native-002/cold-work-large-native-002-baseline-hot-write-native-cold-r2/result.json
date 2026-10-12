@@ -1,0 +1,377 @@
+{
+  "version": 1,
+  "arm": "native",
+  "cold": true,
+  "workload": "hot-write",
+  "repetition": 2,
+  "replicas": 1,
+  "streams": 1,
+  "seed_bytes": 8388608,
+  "payload_bytes": 256,
+  "verdict": "PASS",
+  "duration_secs": 24,
+  "object_bucket": "cold-fixture",
+  "cpu_hz": 100,
+  "page_bytes": 4096,
+  "profile": "none",
+  "source_commit": "a75aa98c59c27aa4cf8f7df3ade56986665d55e5",
+  "binary_sha256": "372370093f47a578fa1623b4450b37bb0179a38eef8a87d18d3440ee8ac40be0",
+  "client_sha256": "c53cee32c25ad5d8f063d5ca6b68c92843f603d72c0c22bdc9459dc4d55abef2",
+  "disk_free_before": 9945038848,
+  "startup_seconds": 2.7255314979993273,
+  "roles": {
+    "sut": [
+      1728951
+    ],
+    "provider": [
+      1727688,
+      1728649
+    ],
+    "client": [
+      1731842
+    ]
+  },
+  "startup_resources": {
+    "unix_ms": 1791651700654,
+    "monotonic_ns": 170458213435515,
+    "processes": {
+      "1728951": {
+        "cpu_ticks": 12,
+        "rss_pages": 1295,
+        "io": {
+          "rchar": 19851457,
+          "wchar": 388,
+          "syscr": 952,
+          "syscw": 17,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1727688": {
+        "cpu_ticks": 68,
+        "rss_pages": 26894,
+        "io": {
+          "rchar": 161259771,
+          "wchar": 14782,
+          "syscr": 5486,
+          "syscw": 21,
+          "read_bytes": 0,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        }
+      },
+      "1728649": {
+        "cpu_ticks": 30,
+        "rss_pages": 11424,
+        "io": {
+          "rchar": 8246029,
+          "wchar": 442,
+          "syscr": 816,
+          "syscw": 5,
+          "read_bytes": 0,
+          "write_bytes": 4096,
+          "cancelled_write_bytes": 0
+        }
+      }
+    },
+    "sockets": [
+      {
+        "local": "127.0.0.1:20650",
+        "peer": "127.0.0.1:42950",
+        "owners": [
+          1727688
+        ],
+        "counters": {
+          "bytes_sent": 1227,
+          "bytes_acked": 1227,
+          "bytes_received": 1371
+        },
+        "replication": false
+      }
+    ],
+    "process_gaps": []
+  },
+  "garbage_keys": [
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-0%7E8226248166701622/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-0%7E8226248166701622/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-0%7E8226248166701622/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-0%7E8226248166701622/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-1%7E8226248166701623/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-1%7E8226248166701623/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-1%7E8226248166701623/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-1%7E8226248166701623/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-2%7E8226248166701624/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-2%7E8226248166701624/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-2%7E8226248166701624/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-2%7E8226248166701624/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-3%7E8226248166701625/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-3%7E8226248166701625/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-3%7E8226248166701625/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-3%7E8226248166701625/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-4%7E8226248166701626/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-4%7E8226248166701626/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-4%7E8226248166701626/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-4%7E8226248166701626/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-5%7E8226248166701627/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-5%7E8226248166701627/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-5%7E8226248166701627/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-5%7E8226248166701627/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-6%7E8226248166701629/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-6%7E8226248166701629/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-6%7E8226248166701629/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-6%7E8226248166701629/0000000025165824",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-7%7E8226248166701628/0000000000000000",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-7%7E8226248166701628/0000000008388608",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-7%7E8226248166701628/0000000016777216",
+    "cb-d445a9d227511559/+v1+stream+gc-prefill-7%7E8226248166701628/0000000025165824"
+  ],
+  "precondition": {
+    "time_ns": 170468968213867,
+    "remote_keys": [
+      "cb-d445a9d227511559/+v1+stream+s00000000~8226248166701621/0000000000000000"
+    ],
+    "listing_keys": [
+      "cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000000000000"
+    ],
+    "local_payload_bytes": 0,
+    "local_segment_bytes": 0,
+    "manifests": [
+      {
+        "node": 1,
+        "path": "/v1/stream/s00000000",
+        "local_bytes": 0,
+        "file_base": 8388608,
+        "segments": [
+          {
+            "logical_start": 0,
+            "len": 8388608,
+            "remote_key": "cb-d445a9d227511559/+v1+stream+s00000000~8226248166701621/0000000000000000",
+            "local_file": null
+          }
+        ]
+      }
+    ]
+  },
+  "client_object_keys": [
+    "/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000000000000"
+  ],
+  "before_client": {
+    "time_ns": 170468968845286,
+    "free_bytes": 9548607488,
+    "storage": {
+      "1": {
+        "logical": 119030546,
+        "allocated": 119110656,
+        "files": 40,
+        "payload": 3,
+        "segments": 0,
+        "metadata": 9517
+      }
+    },
+    "object_store": {
+      "count": 33,
+      "bytes": 276824064
+    },
+    "garbage_objects_remaining": 32
+  },
+  "client_window": {
+    "start_ns": 170468981448796,
+    "start_unix_ms": 1791651711422,
+    "scope": "outer invocation; pinned reads/mixed/fanout lack exact monotonic drive timestamps; warmup/settle/seed are zero",
+    "end_ns": 170493027138589,
+    "end_unix_ms": 1791651735467
+  },
+  "gc_delete_window": {
+    "start_ns": 170469982451247,
+    "start_unix_ms": 1791651712423,
+    "end_ns": 170470003116646
+  },
+  "client_exit_code": 0,
+  "after_client": {
+    "time_ns": 170493027902596,
+    "free_bytes": 9373704192,
+    "storage": {
+      "1": {
+        "logical": 24085458,
+        "allocated": 24095744,
+        "files": 11,
+        "payload": 7306755,
+        "segments": 0,
+        "metadata": 1243
+      }
+    },
+    "object_store": {
+      "count": 5,
+      "bytes": 41943040
+    },
+    "garbage_objects_remaining": 0
+  },
+  "target_bytes": 49249792,
+  "drain": [
+    {
+      "node": 1,
+      "bytes": 49249792,
+      "offsets": [
+        49249792
+      ]
+    }
+  ],
+  "drain_seconds": 0.0035936539934482425,
+  "probes": [
+    {
+      "node": 1,
+      "name": "s00000000",
+      "bytes": 49249792,
+      "sha256": "c9d3eec7437ad3cd92264f5d56f2777c698148f726af1991bb791d612b2f1398",
+      "expected_sha256": "c9d3eec7437ad3cd92264f5d56f2777c698148f726af1991bb791d612b2f1398",
+      "offset": 49249792
+    }
+  ],
+  "gc_observed_complete_ns": 170493876028213,
+  "check": {
+    "verdict": "PASS",
+    "errors": [],
+    "clock": {
+      "status": "STABLE",
+      "tolerance_ms": 100,
+      "samples": 24,
+      "discontinuities": [],
+      "scope": "Sampled wall/monotonic consistency only; unsampled intervals are not qualified."
+    },
+    "objects": {
+      "methods": {
+        "DELETE": 32,
+        "PUT": 4,
+        "HEAD": 4
+      },
+      "statuses": {
+        "204": 32,
+        "200": 8
+      },
+      "request_body_bytes": 33554432,
+      "response_body_bytes": 0,
+      "client_payload_gets": 0,
+      "client_remote_fetched_bytes": 0,
+      "boundary_requests_excluded": 0,
+      "errors": 0,
+      "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+    }
+  },
+  "final_state": {
+    "time_ns": 170493881274649,
+    "free_bytes": 9371066368,
+    "storage": {
+      "1": {
+        "logical": 24085458,
+        "allocated": 24095744,
+        "files": 11,
+        "payload": 7306755,
+        "segments": 0,
+        "metadata": 1243
+      }
+    },
+    "object_store": {
+      "count": 5,
+      "bytes": 41943040
+    },
+    "garbage_objects_remaining": 0
+  },
+  "data_files": {
+    "object-fault-1.json": 43,
+    "cb-d445a9d227511559-s3-1.log": 0,
+    "cb-d445a9d227511559-minio.log": 438,
+    "minio/.minio.sys/format.json": 232,
+    "minio/.minio.sys/buckets/.heal/mrf/list.bin": 4,
+    "minio/.minio.sys/buckets/cold-fixture/.metadata.bin/xl.meta": 1191,
+    "minio/.minio.sys/tmp/.trash/1d7f7783-ae59-45f8-8cb3-571b9ca4862d": 356,
+    "minio/.minio.sys/tmp/.trash/8f303ef7-8873-4719-9e5c-37ec3277d659": 356,
+    "minio/.minio.sys/tmp/.trash/c8cebf82-ad15-4201-8cd4-3ab542b58fe2": 356,
+    "minio/.minio.sys/tmp/.trash/d91bad03-6ddf-4aab-8792-b90884c1dcd8": 356,
+    "minio/.minio.sys/tmp/.trash/88af6d3e-7697-48a0-91af-b1028f122ca1": 356,
+    "minio/.minio.sys/tmp/.trash/cf2a0b14-ada2-4dea-9290-7f9a0023fd68": 356,
+    "minio/.minio.sys/tmp/.trash/de5f392c-15ed-4fcf-9f40-d1e9829fefac": 356,
+    "minio/.minio.sys/tmp/.trash/35030efd-4e4d-444e-a86d-68bd693c19a8": 356,
+    "minio/.minio.sys/tmp/.trash/56806066-8dce-4f7d-9afb-05715cf31ad2": 356,
+    "minio/.minio.sys/tmp/.trash/4decbaa6-20df-4aa1-96f4-662525c07056": 356,
+    "minio/.minio.sys/tmp/.trash/e0cbe380-dfb0-4249-a815-765f923a450f": 356,
+    "minio/.minio.sys/tmp/.trash/96004aaa-32be-4c97-9906-5762f0dc834f": 356,
+    "minio/.minio.sys/tmp/.trash/6826f268-5afa-4965-9f78-6eceeb4b22eb": 356,
+    "minio/.minio.sys/tmp/.trash/461f25ad-b8a0-4950-a255-0752898ee895": 356,
+    "minio/.minio.sys/tmp/.trash/10e1615d-f1b4-41a2-ae66-473a8d6da9a1": 356,
+    "minio/.minio.sys/tmp/.trash/6c51877f-6341-4fed-b6a5-6c38a6c04a48": 356,
+    "minio/.minio.sys/tmp/.trash/e1b91117-04f2-48ff-9641-90dca6aaa109": 356,
+    "minio/.minio.sys/tmp/.trash/1c82021a-3744-41c9-a1e0-2fbd2ea070ff": 356,
+    "minio/.minio.sys/tmp/.trash/f9cbde91-0053-40c4-be95-7c655f4227dc": 356,
+    "minio/.minio.sys/tmp/.trash/f6bced4e-30bf-4d1a-8350-afaae0097c6d": 356,
+    "minio/.minio.sys/tmp/.trash/06e59ca2-3dbd-422e-95d8-eb063b7986f9": 356,
+    "minio/.minio.sys/tmp/.trash/de09db34-71e4-454f-bed5-13781bf49a85": 356,
+    "minio/.minio.sys/tmp/.trash/88f8ad84-8b95-4d63-ac9a-d95df9cd58eb": 356,
+    "minio/.minio.sys/tmp/.trash/2b468a71-8d59-4466-b749-c539310bfe30": 356,
+    "minio/.minio.sys/tmp/.trash/0b182186-fec3-41c3-9b6f-0b737700c2ca": 356,
+    "minio/.minio.sys/tmp/.trash/ac4b5183-7c9e-4e11-b656-0d6f1e5cf32c": 356,
+    "minio/.minio.sys/tmp/.trash/f306ff51-84c9-4a0d-a8e1-5588460ac49f": 356,
+    "minio/.minio.sys/tmp/.trash/cf8713e3-93c7-4f57-98d3-1d8ec6b9427b": 356,
+    "minio/.minio.sys/tmp/.trash/02438d77-5c39-421f-96b7-8d202bce357f": 356,
+    "minio/.minio.sys/tmp/.trash/c6ea80e8-d934-44c9-9e8c-f4dd4ae86b28": 356,
+    "minio/.minio.sys/tmp/.trash/b4873e1d-505a-4802-847b-dbd9b2eeed73": 356,
+    "minio/.minio.sys/tmp/.trash/65ff6a04-9ad1-4be7-bbba-599f2d1e3519": 356,
+    "minio/.minio.sys/tmp/.trash/49fca098-4ab7-45a5-a752-bd832d1078ee/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/6fc7c284-08ca-4ef5-8916-1da9a3cb0e77/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/c0d292f4-2e57-440f-8f11-17b8a5f5152a/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a7f97246-37ee-439c-a325-198eaa4188d7/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a69edd23-cd9d-42d8-864e-8700ad475211/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/e81c8d94-34ff-4800-b57f-a907b5483997/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/dfc6090a-1cfa-4682-ae96-56d8ca8228ff/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/431ade82-ce88-4873-8d09-821a7ce50423/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/916f05af-92c5-49bb-a81e-4a7970fbd10a/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/59dc3c2e-ff19-46af-8251-4407697bfcb1/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/8383e1a1-5007-49c7-a40d-b8597b6ebc82/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/c317ec17-ce57-4a62-8b85-aa7afefdcf17/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/4c1eb6f5-d1f5-449b-b8ad-ef9e2aaf2503/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/8df2d668-4728-49c8-9b38-6853e987e7af/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/135735fd-a6e0-41c3-ba7c-28957b15d7d9/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/c9cf3c40-693f-44a9-b6c1-45247ce6c13e/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/e4b49c1a-76a1-426e-a325-fcd70bb55757/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/6d32c9ce-c717-496a-a167-616831f3aa8a/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/e37ed0b5-358c-4b5e-a967-cae5e9c0d30a/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/997aaae6-ce4e-451f-b6b0-db7ebd883764/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/6eb57f77-64ff-4e65-bf75-ee7054af31cc/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/cdacf12b-e319-43bc-9a96-8830b480624c/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/75255b8a-84f9-4533-844c-c7927a14c139/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/83661178-dded-48b9-befd-3887e5fbe449/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/95312666-7e8a-4080-a1a4-dd667513b12c/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/26580202-799c-48d7-b5ae-47f5593dcf34/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a0e6abb6-2506-40d3-acc8-da9956424bb9/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/45692155-5517-4b8a-a299-5e8667a5edba/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/8796d66e-ea39-4e57-9732-ec0d17264456/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/a6733c9e-29cc-4a74-a1b1-ecf1eb54b837/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/7d3dd01d-3708-4f1a-b95d-f4592200d21d/part.1": 8388864,
+    "minio/.minio.sys/tmp/.trash/2f233350-0f20-4e12-8b46-df0943eb9a15/part.1": 8388864,
+    "minio/.minio.sys/pool.bin/xl.meta": 588,
+    "minio/.minio.sys/config/iam/format.json/xl.meta": 430,
+    "minio/.minio.sys/config/config.json/xl.meta": 9807,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000025165824/xl.meta": 356,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000025165824/b87b3c07-ce32-4541-8da2-f61f6857d3a9/part.1": 8388864,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000008388608/xl.meta": 356,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000008388608/fcd26e1c-8054-4abc-8eed-da7f0801f8ba/part.1": 8388864,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000016777216/xl.meta": 356,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000016777216/303db3ac-2605-4907-8ffd-331fa6f0314b/part.1": 8388864,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000033554432/xl.meta": 356,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000033554432/47b60f9a-e74f-4802-ab23-420dade6f042/part.1": 8388864,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000000000000/xl.meta": 356,
+    "minio/cold-fixture/cb-d445a9d227511559/+v1+stream+s00000000%7E8226248166701621/0000000000000000/da3a3aea-f9ad-427c-9fbd-55c694a0c7ea/part.1": 8388864,
+    "1/wal/shards": 1,
+    "1/wal/0/139366.wal": 8388608,
+    "1/wal/0/tails": 130,
+    "1/wal/0/checkpoint": 6,
+    "1/wal/1/tails": 104,
+    "1/wal/1/256.wal": 8388608,
+    "1/wal/1/checkpoint": 3,
+    "1/streams/.lane": 1,
+    "1/streams/+v1+stream+s00000000~8226248166701621.meta": 1243,
+    "1/streams/.lanes": 2,
+    "1/streams/+v1+stream+s00000000~8226248166701621": 7306752
+  },
+  "variant": "baseline"
+}

@@ -1,0 +1,58 @@
+"""Losslessly compact only this task's untracked JSONL evidence; keep originals."""
+import gzip
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+
+root = Path('/home/user/workspace/repo')
+evidence = root/'experiments/electric-replication/evidence'
+cache = root/'.tmp/electric-cold-original-gzip'
+tracked = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0'))
+manifest = evidence/'cold-work-qualification-001/recompression.json'
+assert not manifest.exists()
+shutil.copyfile(__file__, manifest.parent/'recompress.py.txt')
+rows = []
+for folder in sorted(evidence.glob('cold-work-*')):
+    for source in sorted(folder.rglob('*.jsonl.gz')):
+        if source.stat().st_size < 512*1024:
+            continue
+        assert str(source.relative_to(root)) not in tracked
+        relative = source.relative_to(evidence)
+        backup = cache/relative
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        candidate = Path(str(backup)+'.zst')
+        assert not backup.exists() and not candidate.exists()
+        with gzip.open(source, 'rb') as raw, candidate.open('xb') as out:
+            process = subprocess.Popen(['zstd', '-q', '-T2', '-10', '-c'], stdin=subprocess.PIPE, stdout=out)
+            digest = hashlib.sha256()
+            size = 0
+            for block in iter(lambda: raw.read(1024*1024), b''):
+                digest.update(block)
+                size += len(block)
+                process.stdin.write(block)
+            process.stdin.close()
+            assert process.wait() == 0
+        with subprocess.Popen(['zstd', '-dq', '-c', str(candidate)], stdout=subprocess.PIPE) as decoded:
+            after = hashlib.file_digest(decoded.stdout, 'sha256').hexdigest()
+            decoded.stdout.close()
+            assert decoded.wait() == 0 and after == digest.hexdigest()
+        target = source.with_suffix('.zst')
+        row = dict(original=str(relative), original_bytes=source.stat().st_size,
+            original_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            raw_bytes=size, raw_sha256=after, zstd_bytes=candidate.stat().st_size,
+            zstd_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest())
+        if candidate.stat().st_size < source.stat().st_size:
+            assert not target.exists()
+            candidate.rename(target)
+            source.rename(backup)
+            row.update(retained=str(target.relative_to(evidence)), original_local_backup=str(backup.relative_to(root)))
+        else:
+            row['retained'] = str(relative)
+        rows.append(row)
+        manifest.write_text(json.dumps(dict(version=1,
+            scope='Lossless encoding change only; original gzip bytes retained locally, no evidence content discarded.',
+            files=rows), indent=2)+'\n')
+print(json.dumps(dict(files=len(rows), old_bytes=sum(r['original_bytes'] for r in rows),
+    new_bytes=sum(min(r['original_bytes'],r['zstd_bytes']) for r in rows))))

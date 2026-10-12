@@ -1,0 +1,313 @@
+{
+  "cells": [
+    {
+      "cell": "cold-bench-repair-001-many-write-native-cold-r2",
+      "arm": "native",
+      "cold": true,
+      "workload": "many-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 161112,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 6713.0,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 161112,
+        "mean_ms": 2.380747610358011,
+        "p50_ms": 1.835,
+        "p90_ms": 3.299,
+        "p99_ms": 8.063,
+        "p999_ms": 89.535,
+        "max_ms": 535.039
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {
+          "DELETE": 32,
+          "PUT": 6348,
+          "HEAD": 5886
+        },
+        "statuses": {
+          "204": 32,
+          "200": 12234
+        },
+        "request_body_bytes": 416022528,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 15,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 16,
+          "sampled_seconds": 22.246818447,
+          "cpu_cores": 1.1331957448234395,
+          "peak_rss_bytes": 163594240,
+          "io_delta": {
+            "rchar": 466423109,
+            "wchar": 2324835738,
+            "syscr": 7863,
+            "syscw": 389629,
+            "read_bytes": 0,
+            "write_bytes": 2005721088,
+            "cancelled_write_bytes": 87281664
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 16,
+          "sampled_seconds": 22.246818447,
+          "cpu_cores": 1.2208487278621427,
+          "peak_rss_bytes": 458178560,
+          "io_delta": {
+            "rchar": 640913099,
+            "wchar": 420597016,
+            "syscr": 140470,
+            "syscw": 31134,
+            "read_bytes": 0,
+            "write_bytes": 422264832,
+            "cancelled_write_bytes": 905216
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 15,
+          "sampled_seconds": 21.051408907,
+          "cpu_cores": 0.3500953324577403,
+          "peak_rss_bytes": 9318400,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 626959104,
+            "syscr": 0,
+            "syscw": 148272,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 1.9926767709839623,
+        "startup_rss_bytes": {
+          "sut": 5238784,
+          "provider": 155123712
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 6625,
+        "peak_object_bytes": 434176000,
+        "peak_local_allocated_bytes": 504429056,
+        "peak_local_metadata_bytes": 1513739,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 6348,
+        "payload_upload_bytes_in_window": 416022528,
+        "garbage_objects": 32,
+        "observed_garbage_deletes": 32,
+        "garbage_deletes_in_window": 32,
+        "garbage_reclamation_seconds": 1.041128285,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.30129451100947335,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 140618206566037,
+        "local_payload_bytes": 0,
+        "local_segment_bytes": 0,
+        "remote_objects": 1024,
+        "manifests": 1024
+      },
+      "after_client": {
+        "time_ns": 140642473818651,
+        "storage": {
+          "1": {
+            "logical": 523536833,
+            "allocated": 526457344,
+            "files": 2915,
+            "payload": 415662083,
+            "segments": 55902208,
+            "metadata": 1619003
+          }
+        },
+        "object_store": {
+          "count": 7431,
+          "bytes": 486998016
+        },
+        "garbage_objects_remaining": 0
+      }
+    },
+    {
+      "cell": "cold-bench-repair-001-many-write-native-hot-r2",
+      "arm": "native",
+      "cold": false,
+      "workload": "many-write",
+      "repetition": 2,
+      "verdict": "PASS",
+      "errors": [],
+      "counts": {
+        "ok": 275588,
+        "backpressure": 0,
+        "other_err": 0
+      },
+      "ops_per_sec": 11482.833333333334,
+      "bytes_per_sec": null,
+      "latency": {
+        "count": 275588,
+        "mean_ms": 1.390104097420783,
+        "p50_ms": 1.297,
+        "p90_ms": 1.778,
+        "p99_ms": 3.363,
+        "p999_ms": 7.151,
+        "max_ms": 45.375
+      },
+      "write_latency": null,
+      "read_latency": null,
+      "objects": {
+        "methods": {},
+        "statuses": {},
+        "request_body_bytes": 0,
+        "response_body_bytes": 0,
+        "client_payload_gets": 0,
+        "client_remote_fetched_bytes": 0,
+        "boundary_requests_excluded": 0,
+        "errors": 0,
+        "scope": "whole completed S3 requests inside client invocation; remote fetch bytes, not HTTP emitted bytes"
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.94222267,
+          "cpu_cores": 0.9635696868239009,
+          "peak_rss_bytes": 9084928,
+          "io_delta": {
+            "rchar": 8086,
+            "wchar": 2260191598,
+            "syscr": 144,
+            "syscw": 594051,
+            "read_bytes": 0,
+            "write_bytes": 2514219008,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 24,
+          "sampled_seconds": 23.94222267,
+          "cpu_cores": 0.0020883608297006958,
+          "peak_rss_bytes": 159653888,
+          "io_delta": {
+            "rchar": 16536,
+            "wchar": 17525,
+            "syscr": 89,
+            "syscw": 43,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "client": {
+          "status": "MEASURED",
+          "complete_samples": 23,
+          "sampled_seconds": 22.904688393,
+          "cpu_cores": 0.5972576341261557,
+          "peak_rss_bytes": 9342976,
+          "io_delta": {
+            "rchar": 0,
+            "wchar": 1117448064,
+            "syscr": 0,
+            "syscw": 264192,
+            "read_bytes": 0,
+            "write_bytes": 0,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "diagnostics": {
+        "startup_seconds": 2.0841065169952344,
+        "startup_rss_bytes": {
+          "sut": 4038656,
+          "provider": 157892608
+        },
+        "node_socket_sent_bytes_lower_bound": 0,
+        "raft_entry_gaps": {},
+        "stages": {},
+        "cold_progress": {},
+        "peak_object_count": 0,
+        "peak_object_bytes": 0,
+        "peak_local_allocated_bytes": 1234790912,
+        "peak_local_metadata_bytes": 501576,
+        "peak_pending_replicated_descriptors": 0,
+        "payload_upload_parts_in_window": 0,
+        "payload_upload_bytes_in_window": 0,
+        "garbage_objects": 0,
+        "observed_garbage_deletes": 0,
+        "garbage_deletes_in_window": 0,
+        "garbage_reclamation_seconds": null,
+        "scope": "Resources/S3 use outer invocation. Non-atomic admin observations finish before the next included sample. Log-stage counters include internal metadata, not HTTP acks; first/last samples inside reported client bounds. Entry gaps are not command/byte lag. Stage gaps include unresolved unknowns, not just backlog. Socket deltas miss closed sockets; sampled peaks can miss transients. Payload PUT classification excludes /i/ inventory keys in this fixture's grammar; parts are not publication acknowledgements. GC interval runs from first application DELETE to last completed remote DELETE."
+      },
+      "drain_seconds": 0.2988925389945507,
+      "sequence": null,
+      "precondition": {
+        "time_ns": 140579142980567,
+        "local_payload_bytes": 67108864,
+        "local_segment_bytes": 0,
+        "remote_objects": 0,
+        "manifests": 1024
+      },
+      "after_client": {
+        "time_ns": 140603270408527,
+        "storage": {
+          "1": {
+            "logical": 1347424176,
+            "allocated": 1354680832,
+            "files": 2073,
+            "payload": 1195917315,
+            "segments": 0,
+            "metadata": 497664
+          }
+        },
+        "object_store": {
+          "count": 0,
+          "bytes": 0
+        },
+        "garbage_objects_remaining": 0
+      }
+    }
+  ],
+  "aggregates": [
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "many-write",
+      "cells": 1,
+      "passed": 1,
+      "median_ops_per_sec": 6713.0,
+      "min_ops_per_sec": 6713.0,
+      "max_ops_per_sec": 6713.0
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "many-write",
+      "cells": 1,
+      "passed": 1,
+      "median_ops_per_sec": 11482.833333333334,
+      "min_ops_per_sec": 11482.833333333334,
+      "max_ops_per_sec": 11482.833333333334
+    }
+  ],
+  "passed": 2,
+  "total": 2,
+  "checker_sha256": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+  "helper_sha256": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8"
+}

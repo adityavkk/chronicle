@@ -1,0 +1,591 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cpu-clock:u'
+# Event count (approx.): 18585858400
+#
+# Overhead  Command          Shared Object           Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+# ........  ...............  ......................  .......................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+     6.14%  tokio-rt-worker  durable-streams-server  [.] sha2::sha256::x86::digest_blocks
+            |
+            ---sha2::sha256::x86::digest_blocks
+               |          
+               |--5.87%--durable_streams_server::replication::machine::hash_prefix
+               |          0xffffffffffffffff
+               |          
+                --0.27%--<D as digest::digest::Digest>::digest
+
+     2.61%  minio            minio                   [.] github.com/minio/minio/cmd.pathNeedsClean
+            |
+            ---github.com/minio/minio/cmd.pathNeedsClean
+
+     2.07%  minio            [vdso]                  [.] 0x0000000000000a7b
+            |
+            ---0x7ffc25ceca7b
+               |          
+               |--1.47%--time.now
+               |          
+                --0.60%--runtime.nanotime1.abi0
+
+     1.85%  minio            minio                   [.] runtime.typePointers.next
+            |
+            ---runtime.typePointers.next
+
+     1.79%  minio            minio                   [.] runtime.mallocgcSmallNoscan
+            |
+            ---runtime.mallocgcSmallNoscan
+
+     1.74%  minio            minio                   [.] runtime.scanObject
+            |
+            ---runtime.scanObject
+
+     1.68%  minio            minio                   [.] github.com/minio/minio/cmd.(*xlStorage).readMetadataWithDMTime
+            |
+            ---github.com/minio/minio/cmd.(*xlStorage).readMetadataWithDMTime
+
+     1.47%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::run
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     1.30%  minio            minio                   [.] runtime.reentersyscall
+            |
+            ---runtime.reentersyscall
+
+     1.25%  minio            minio                   [.] path.Clean
+            |
+            ---path.Clean
+
+     1.20%  minio            minio                   [.] runtime.mapaccess2_fast32
+            |
+            ---runtime.mapaccess2_fast32
+
+     1.20%  minio            minio                   [.] runtime.memmove
+            |
+            ---runtime.memmove
+
+     1.20%  tokio-rt-worker  durable-streams-server  [.] serde_core::de::SeqAccess::next_element
+            |
+            ---serde_core::de::SeqAccess::next_element
+               <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               bincode::internal::deserialize_seed
+               durable_streams_server::replication::journal::Journal::read
+               <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               durable_streams_server::replication::journal::<impl openraft::storage::v2::raft_log_reader::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::worker_loop::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.14%  tokio-rt-worker  libc.so.6               [.] malloc
+            |
+            ---malloc
+
+     1.09%  minio            minio                   [.] runtime.lock2
+            |
+            ---runtime.lock2
+
+     1.09%  minio            minio                   [.] runtime.mallocgcSmallScanNoHeader
+            |
+            ---runtime.mallocgcSmallScanNoHeader
+
+     1.03%  minio            minio                   [.] runtime.memclrNoHeapPointers
+            |
+            ---runtime.memclrNoHeapPointers
+
+     0.98%  minio            minio                   [.] runtime.unlock2
+            |
+            ---runtime.unlock2
+
+     0.92%  minio            minio                   [.] github.com/minio/minio/cmd.(*xlStorage).WalkDir.func3
+            |
+            ---github.com/minio/minio/cmd.(*xlStorage).WalkDir.func3
+
+     0.92%  minio            minio                   [.] internal/runtime/syscall/linux.Syscall6
+            |
+            ---internal/runtime/syscall/linux.Syscall6
+
+     0.87%  minio            minio                   [.] github.com/klauspost/compress/s2.encodeBlockAsm4MB.abi0
+            |
+            ---github.com/klauspost/compress/s2.encodeBlockAsm4MB.abi0
+
+     0.71%  minio            minio                   [.] runtime.mallocgc
+            |
+            ---runtime.mallocgc
+
+     0.71%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.71%  tokio-rt-worker  libc.so.6               [.] epoll_wait
+            |
+            ---epoll_wait
+               tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.65%  minio            minio                   [.] github.com/minio/minio/cmd.pathJoinBuf
+            |
+            ---github.com/minio/minio/cmd.pathJoinBuf
+
+     0.65%  minio            minio                   [.] runtime.findRunnable
+            |
+            ---runtime.findRunnable
+
+     0.65%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000a7b
+            |
+            ---0x7ffc405a3a7b
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+               |          
+                --0.22%--tokio::runtime::scheduler::multi_thread::worker::run
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f7a98c96043
+                          0x7f7a98d1661b
+
+     0.60%  minio            minio                   [.] github.com/valyala/bytebufferpool.(*Pool).Put
+            |
+            ---github.com/valyala/bytebufferpool.(*Pool).Put
+
+     0.60%  minio            minio                   [.] runtime.selectgo
+            |
+            ---runtime.selectgo
+
+     0.60%  minio            minio                   [.] runtime.step
+            |
+            ---runtime.step
+
+     0.54%  minio            minio                   [.] runtime.(*mspan).init
+            |
+            ---runtime.(*mspan).init
+
+     0.54%  minio            minio                   [.] runtime.casgstatus
+            |
+            ---runtime.casgstatus
+
+     0.54%  minio            minio                   [.] runtime.exitsyscall
+            |
+            ---runtime.exitsyscall
+
+     0.54%  minio            minio                   [.] runtime.procyieldAsm.abi0
+            |
+            ---runtime.procyieldAsm.abi0
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.54%  tokio-rt-worker  libc.so.6               [.] cfree
+            |
+            ---__libc_free (inlined)
+
+     0.49%  minio            minio                   [.] context.(*cancelCtx).Done
+            |
+            ---context.(*cancelCtx).Done
+
+     0.49%  minio            minio                   [.] runtime.(*spanSet).push
+            |
+            ---runtime.(*spanSet).push
+
+     0.49%  minio            minio                   [.] runtime.findfunc
+            |
+            ---runtime.findfunc
+
+     0.49%  minio            minio                   [.] sync/atomic.CompareAndSwapUintptr
+            |
+            ---sync/atomic.CompareAndSwapUintptr
+
+     0.49%  tokio-rt-worker  durable-streams-server  [.] openraft::core::raft_core::RaftCore<C,NF,LS,SM>::flush_metrics
+            |
+            ---openraft::core::raft_core::RaftCore<C,NF,LS,SM>::flush_metrics
+               openraft::core::raft_core::RaftCore<C,NF,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,NF,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.43%  minio            minio                   [.] github.com/minio/minio/cmd.(*lockedLastMinuteLatency).addSize
+            |
+            ---github.com/minio/minio/cmd.(*lockedLastMinuteLatency).addSize
+
+     0.43%  minio            minio                   [.] github.com/minio/xxml.(*printer).EscapeString
+            |
+            ---github.com/minio/xxml.(*printer).EscapeString
+
+     0.43%  minio            minio                   [.] runtime.runqgrab
+            |
+            ---runtime.runqgrab
+
+     0.43%  minio            minio                   [.] runtime.stealWork
+            |
+            ---runtime.stealWork
+
+     0.43%  tokio-rt-worker  durable-streams-server  [.] openraft::entry::entry::_::<impl serde_core::ser::Serialize for openraft::entry::entry::Entry<CLID,P>>::serialize
+            |
+            ---openraft::entry::entry::_::<impl serde_core::ser::Serialize for openraft::entry::entry::Entry<CLID,P>>::serialize
+               durable_streams_server::replication::journal::Journal::stage
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C,SM>>::run_command::{{closure}}
+               0xffffffffffffffff
+
+     0.43%  wal-committer    libc.so.6               [.] fdatasync
+            |
+            ---fdatasync
+               durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.38%  minio            minio                   [.] github.com/minio/minio/internal/config/drive.(*Config).GetOPTimeout
+            |
+            ---github.com/minio/minio/internal/config/drive.(*Config).GetOPTimeout
+
+     0.38%  minio            minio                   [.] runtime.futex.abi0
+            |
+            ---runtime.futex.abi0
+
+     0.38%  tokio-rt-worker  durable-streams-server  [.] parking_lot::condvar::Condvar::wait_until_internal
+            |
+            ---parking_lot::condvar::Condvar::wait_until_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.38%  tokio-rt-worker  libc.so.6               [.] realloc
+            |
+            ---realloc
+
+     0.38%  wal-committer    durable-streams-server  [.] durable_streams_server::wal::shard::Shard::commit_once
+            |
+            ---durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.33%  minio            minio                   [.] aeshashbody
+            |
+            ---aeshashbody
+
+     0.33%  minio            minio                   [.] github.com/minio/minio/cmd.xlMetaV2Object.ToFileInfo
+            |
+            ---github.com/minio/minio/cmd.xlMetaV2Object.ToFileInfo
+
+     0.33%  minio            minio                   [.] indexbytebody
+            |
+            ---indexbytebody
+
+     0.33%  minio            minio                   [.] regexp.(*Regexp).doOnePass
+            |
+            ---regexp.(*Regexp).doOnePass
+
+     0.33%  minio            minio                   [.] runtime.(*mspan).writeHeapBitsSmall
+            |
+            ---runtime.(*mspan).writeHeapBitsSmall
+
+     0.33%  minio            minio                   [.] runtime.chanrecv
+            |
+            ---runtime.chanrecv
+
+     0.33%  minio            minio                   [.] runtime.growslice
+            |
+            ---runtime.growslice
+
+     0.33%  minio            minio                   [.] runtime.newproc1
+            |
+            ---runtime.newproc1
+
+     0.33%  minio            minio                   [.] runtime.schedule
+            |
+            ---runtime.schedule
+
+     0.33%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::machine::Machine::apply_committed::{{closure}}
+            |
+            ---durable_streams_server::replication::machine::Machine::apply_committed::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::worker_loop::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.33%  tokio-rt-worker  durable-streams-server  [.] openraft::core::raft_core::RaftCore<C,NF,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+            |
+            ---openraft::core::raft_core::RaftCore<C,NF,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,NF,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.33%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.33%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::wake_by_val
+            |
+            ---tokio::runtime::task::waker::wake_by_val
+
+     0.27%  minio            minio                   [.] context.(*cancelCtx).propagateCancel
+            |
+            ---context.(*cancelCtx).propagateCancel
+
+     0.27%  minio            minio                   [.] github.com/minio/minio/cmd.(*metacacheReader).peek
+            |
+            ---github.com/minio/minio/cmd.(*metacacheReader).peek
+
+     0.27%  minio            minio                   [.] runtime.newobject
+            |
+            ---runtime.newobject
+
+     0.27%  minio            minio                   [.] runtime.selunlock
+            |
+            ---runtime.selunlock
+
+     0.27%  minio            minio                   [.] runtime.sweepone
+            |
+            ---runtime.sweepone
+
+     0.27%  minio            minio                   [.] time.now
+            |
+            ---time.now
+
+     0.27%  tokio-rt-worker  durable-streams-server  [.] <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C,SM>>::run_command::{{closure}}
+            |
+            ---<openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C,SM>>::run_command::{{closure}}
+               0xffffffffffffffff
+
+     0.27%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::time::<impl tokio::runtime::time::handle::Handle>::process_at_time
+            |
+            ---tokio::runtime::time::<impl tokio::runtime::time::handle::Handle>::process_at_time
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.22%  minio            minio                   [.] context.(*cancelCtx).Deadline
+            |
+            ---context.(*cancelCtx).Deadline
+
+     0.22%  minio            minio                   [.] context.(*valueCtx).Deadline
+            |
+            ---context.(*valueCtx).Deadline
+
+     0.22%  minio            minio                   [.] crypto/md5.block.abi0
+            |
+            ---crypto/md5.block.abi0
+
+     0.22%  minio            minio                   [.] github.com/klauspost/compress/s2.s2Decode.abi0
+            |
+            ---github.com/klauspost/compress/s2.s2Decode.abi0
+
+     0.22%  minio            minio                   [.] github.com/minio/minio/cmd.isDirEmpty
+            |
+            ---github.com/minio/minio/cmd.isDirEmpty
+
+     0.22%  minio            minio                   [.] github.com/minio/minio/internal/ioutil.WithDeadline[go.shape.[]uint8].func1
+            |
+            ---github.com/minio/minio/internal/ioutil.WithDeadline[go.shape.[]uint8].func1
+
+     0.22%  minio            minio                   [.] internal/runtime/maps.(*Map).getWithoutKeySmallFastStr
+            |
+            ---internal/runtime/maps.(*Map).getWithoutKeySmallFastStr
+
+     0.22%  minio            minio                   [.] internal/runtime/maps.(*Map).putSlotSmallFastStr
+            |
+            ---internal/runtime/maps.(*Map).putSlotSmallFastStr
+
+     0.22%  minio            minio                   [.] os.open
+            |
+            ---os.open
+
+     0.22%  minio            minio                   [.] runtime.(*fixalloc).alloc
+            |
+            ---runtime.(*fixalloc).alloc
+
+     0.22%  minio            minio                   [.] runtime.(*gcControllerState).update
+            |
+            ---runtime.(*gcControllerState).update
+
+     0.22%  minio            minio                   [.] runtime.(*mspan).moveInlineMarks
+            |
+            ---runtime.(*mspan).moveInlineMarks
+
+     0.22%  minio            minio                   [.] runtime.(*spanSet).pop
+            |
+            ---runtime.(*spanSet).pop
+
+     0.22%  minio            minio                   [.] runtime.gfget
+            |
+            ---runtime.gfget
+
+     0.22%  minio            minio                   [.] runtime.ifaceeq
+            |
+            ---runtime.ifaceeq
+
+     0.22%  minio            minio                   [.] runtime.nanotime1.abi0
+            |
+            ---runtime.nanotime1.abi0
+
+     0.22%  minio            minio                   [.] runtime.newMarkBits
+            |
+            ---runtime.newMarkBits
+
+     0.22%  minio            minio                   [.] runtime.pcvalue
+            |
+            ---runtime.pcvalue
+
+     0.22%  minio            minio                   [.] runtime.wakep
+            |
+            ---runtime.wakep
+
+     0.22%  minio            minio                   [.] syscall.RawSyscall6
+            |
+            ---syscall.RawSyscall6
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] <dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+            |
+            ---<dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+               durable_streams_server::store::Store::get
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::Machine::apply_committed::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM,LR>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] core::ptr::drop_in_place<core::option::Option<durable_streams_server::replication::timing::Probe>>
+            |
+            ---core::ptr::drop_in_place<core::option::Option<durable_streams_server::replication::timing::Probe>>
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] crc32c::hw_x86_64::crc32c
+            |
+            ---crc32c::hw_x86_64::crc32c
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+            |
+            ---durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] tokio::process::imp::GlobalOrphanQueue::reap_orphans
+            |
+            ---tokio::process::imp::GlobalOrphanQueue::reap_orphans
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::driver::Driver::turn
+            |
+            ---tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::run
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::mpsc::list::Rx<T>::pop
+            |
+            ---tokio::sync::mpsc::list::Rx<T>::pop
+               openraft::core::raft_core::RaftCore<C,NF,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,NF,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.22%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::notify::NotifyGuard::notify_waiters
+            |
+            ---tokio::sync::notify::NotifyGuard::notify_waiters
+               tokio::sync::watch::big_notify::BigNotify::notify_waiters
+
+     0.22%  tokio-rt-worker  libc.so.6               [.] syscall
+            |
+            ---syscall
+
+     0.22%  tokio-rt-worker  libc.so.6               [.] 0x00000000000856d5
+            |
+            ---0x7f7a98c926d5
+
+     0.22%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163d8c
+            |
+            ---0x7f7a98d70d8c
+
+     0.22%  wal-committer    durable-streams-server  [.] std::sys::backtrace::__rust_begin_short_backtrace
+            |
+            ---std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f7a98c96043
+               0x7f7a98d1661b
+
+     0.22%  wal-committer    libc.so.6               [.] syscall
+            |
+            ---syscall
+
+
+
+#
+# (Tip: To count events in every 1000 msec: perf stat -I 1000)
+#

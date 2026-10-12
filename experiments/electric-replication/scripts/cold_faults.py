@@ -19,6 +19,7 @@ import time
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from lab import Lab, BINARY, EXPERIMENT, ROOT, partition, source_hashes
 
 MINIO = ROOT / ".tmp/electric-tools/minio"
@@ -48,6 +49,27 @@ class ColdLab(Lab):
                         "--cwd",str(ROOT),"--port",str(port)],check=True,stdout=subprocess.DEVNULL)
         self.services.append(name)
 
+    def create_bucket(self):
+        # This MinIO pin's /ready returns 200 even with an uninitialized
+        # object layer. Signed ListBuckets exercises the same nil-layer guard
+        # as CreateBucket, without retrying a mutating request on unknown I/O.
+        observations=[]
+        def ready():
+            try:
+                self.s3.list_buckets()
+            except ClientError as error:
+                code=error.response["Error"]["Code"]
+                observations.append(dict(time_ns=time.monotonic_ns(),code=code))
+                if code!="XMinioServerNotInitialized":raise
+                return False
+            observations.append(dict(time_ns=time.monotonic_ns(),code="ready"))
+            return True
+        try:
+            self.wait(ready,"MinIO S3 object layer ready",timeout=40)
+            self.s3.create_bucket(Bucket=self.bucket)  # Exactly one mutating attempt.
+        finally:
+            (self.output/"storage-startup.json").write_text(json.dumps(observations,indent=2)+"\n")
+
     def start_storage(self):
         self.service("minio", [sys.executable,SERVICE,"exec",self.secret_file,MINIO,
                               "server","--address",f"127.0.0.1:{self.port+50}",self.data/"minio"],self.port+50)
@@ -59,7 +81,7 @@ class ColdLab(Lab):
             finally:
                 connection.close()
         self.wait(lambda:healthy(self.port+50),"MinIO ready",timeout=40)
-        self.s3.create_bucket(Bucket=self.bucket)
+        self.create_bucket()
         for node in (1,2,3,4):
             self.object_fault(node)
             self.service(f"s3-{node}",[sys.executable,SERVICE,"proxy",self.port+50,self.port+60+node,

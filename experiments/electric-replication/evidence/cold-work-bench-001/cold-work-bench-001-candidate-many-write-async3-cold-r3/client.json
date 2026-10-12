@@ -1,0 +1,35 @@
+{
+  "scenario": "multi-stream-pool-write",
+  "api_style": "Durable",
+  "target": "http://127.0.0.1:20601",
+  "bucket": "bench-multistream",
+  "basin": "benchmark",
+  "streams": 1024,
+  "duration_secs": 24,
+  "payload_bytes": 4096,
+  "rate_per_stream": 0,
+  "elapsed_secs": 24.0,
+  "counts": {
+    "ok": 33774,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "errors": [],
+  "aggregate_ops_per_sec": 1407.25,
+  "per_stream_ops_per_sec_mean": 1.374267578125,
+  "latency_ms": {
+    "count": 33774,
+    "mean_ms": 2.838389115887959,
+    "p50_ms": 1.936,
+    "p90_ms": 4.279,
+    "p99_ms": 16.639,
+    "p999_ms": 52.191,
+    "max_ms": 194.175
+  },
+  "measure_start_unix_ms": 1791639676217,
+  "measure_end_unix_ms": 1791639700217,
+  "ok_total_all_phases": 33774,
+  "lazy_creates": 0,
+  "pod_slice_lo": 0,
+  "pod_slice_hi": 1024
+}

@@ -1,0 +1,3006 @@
+{
+  "evidence_consistency": "PASS",
+  "performance_acceptance": "NOT_MET",
+  "runtime_changed": false,
+  "binary_sha256": "bd4834f72cf88609377c273a844ba89967edec21cc2122edf18304e119f2f878",
+  "source_inputs": 280,
+  "conformance": {
+    "conformance-036": {
+      "numTotalTests": 332,
+      "numPassedTests": 332,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0
+    },
+    "conformance-cold-004": {
+      "numTotalTests": 332,
+      "numPassedTests": 332,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTodoTests": 0
+    }
+  },
+  "original_ledgers": {
+    "cold-bench-001": {
+      "passed": 118,
+      "total": 120
+    },
+    "cold-bench-repair-001": {
+      "passed": 2,
+      "total": 2
+    },
+    "cold-bench-envelope-001": {
+      "passed": 6,
+      "total": 6
+    },
+    "cold-profile-kernel-001": {
+      "passed": 7,
+      "total": 8
+    },
+    "cold-profile-kernel-repair-001": {
+      "passed": 1,
+      "total": 2
+    },
+    "cold-profile-cpu-001": {
+      "passed": 8,
+      "total": 8
+    },
+    "cold-profile-syscalls-001": {
+      "passed": 8,
+      "total": 8
+    },
+    "cold-profile-fsync-001": {
+      "passed": 4,
+      "total": 8
+    },
+    "cold-profile-fsync-002": {
+      "passed": 8,
+      "total": 8
+    },
+    "cold-generations-001": {
+      "passed": 22,
+      "total": 24
+    },
+    "cold-generations-repair-001": {
+      "passed": 4,
+      "total": 4
+    }
+  },
+  "selected_benchmark": {
+    "passed": 119,
+    "total": 120,
+    "cells": [
+      "cold-bench-001-fanout-async3-cold-r1",
+      "cold-bench-001-fanout-async3-cold-r2",
+      "cold-bench-001-fanout-async3-cold-r3",
+      "cold-bench-001-fanout-async3-hot-r1",
+      "cold-bench-001-fanout-async3-hot-r2",
+      "cold-bench-001-fanout-async3-hot-r3",
+      "cold-bench-001-fanout-native-cold-r1",
+      "cold-bench-001-fanout-native-cold-r2",
+      "cold-bench-001-fanout-native-cold-r3",
+      "cold-bench-001-fanout-native-hot-r1",
+      "cold-bench-001-fanout-native-hot-r2",
+      "cold-bench-001-fanout-native-hot-r3",
+      "cold-bench-001-fanout-quorum3-cold-r1",
+      "cold-bench-001-fanout-quorum3-cold-r2",
+      "cold-bench-001-fanout-quorum3-cold-r3",
+      "cold-bench-001-fanout-quorum3-hot-r1",
+      "cold-bench-001-fanout-quorum3-hot-r2",
+      "cold-bench-001-fanout-quorum3-hot-r3",
+      "cold-bench-001-fanout-raft1-cold-r1",
+      "cold-bench-001-fanout-raft1-cold-r2",
+      "cold-bench-001-fanout-raft1-cold-r3",
+      "cold-bench-001-fanout-raft1-hot-r1",
+      "cold-bench-001-fanout-raft1-hot-r2",
+      "cold-bench-001-fanout-raft1-hot-r3",
+      "cold-bench-001-hot-write-async3-cold-r1",
+      "cold-bench-001-hot-write-async3-cold-r2",
+      "cold-bench-001-hot-write-async3-cold-r3",
+      "cold-bench-001-hot-write-async3-hot-r1",
+      "cold-bench-001-hot-write-async3-hot-r2",
+      "cold-bench-001-hot-write-async3-hot-r3",
+      "cold-bench-001-hot-write-native-cold-r1",
+      "cold-bench-001-hot-write-native-cold-r2",
+      "cold-bench-001-hot-write-native-cold-r3",
+      "cold-bench-001-hot-write-native-hot-r1",
+      "cold-bench-001-hot-write-native-hot-r2",
+      "cold-bench-001-hot-write-native-hot-r3",
+      "cold-bench-001-hot-write-quorum3-cold-r1",
+      "cold-bench-001-hot-write-quorum3-cold-r2",
+      "cold-bench-001-hot-write-quorum3-cold-r3",
+      "cold-bench-001-hot-write-quorum3-hot-r1",
+      "cold-bench-001-hot-write-quorum3-hot-r2",
+      "cold-bench-001-hot-write-quorum3-hot-r3",
+      "cold-bench-001-hot-write-raft1-cold-r1",
+      "cold-bench-001-hot-write-raft1-cold-r2",
+      "cold-bench-001-hot-write-raft1-cold-r3",
+      "cold-bench-001-hot-write-raft1-hot-r1",
+      "cold-bench-001-hot-write-raft1-hot-r2",
+      "cold-bench-001-hot-write-raft1-hot-r3",
+      "cold-bench-001-many-write-async3-cold-r1",
+      "cold-bench-001-many-write-async3-cold-r2",
+      "cold-bench-001-many-write-async3-cold-r3",
+      "cold-bench-001-many-write-async3-hot-r1",
+      "cold-bench-001-many-write-async3-hot-r2",
+      "cold-bench-001-many-write-async3-hot-r3",
+      "cold-bench-001-many-write-native-cold-r1",
+      "cold-bench-repair-001-many-write-native-cold-r2",
+      "cold-bench-001-many-write-native-cold-r3",
+      "cold-bench-001-many-write-native-hot-r1",
+      "cold-bench-repair-001-many-write-native-hot-r2",
+      "cold-bench-001-many-write-native-hot-r3",
+      "cold-bench-001-many-write-quorum3-cold-r1",
+      "cold-bench-001-many-write-quorum3-cold-r2",
+      "cold-bench-001-many-write-quorum3-cold-r3",
+      "cold-bench-001-many-write-quorum3-hot-r1",
+      "cold-bench-001-many-write-quorum3-hot-r2",
+      "cold-bench-001-many-write-quorum3-hot-r3",
+      "cold-bench-001-many-write-raft1-cold-r1",
+      "cold-bench-001-many-write-raft1-cold-r2",
+      "cold-bench-001-many-write-raft1-cold-r3",
+      "cold-bench-001-many-write-raft1-hot-r1",
+      "cold-bench-001-many-write-raft1-hot-r2",
+      "cold-bench-001-many-write-raft1-hot-r3",
+      "cold-bench-001-mixed-async3-cold-r1",
+      "cold-bench-001-mixed-async3-cold-r2",
+      "cold-bench-001-mixed-async3-cold-r3",
+      "cold-bench-001-mixed-async3-hot-r1",
+      "cold-bench-001-mixed-async3-hot-r2",
+      "cold-bench-001-mixed-async3-hot-r3",
+      "cold-bench-001-mixed-native-cold-r1",
+      "cold-bench-001-mixed-native-cold-r2",
+      "cold-bench-001-mixed-native-cold-r3",
+      "cold-bench-001-mixed-native-hot-r1",
+      "cold-bench-001-mixed-native-hot-r2",
+      "cold-bench-001-mixed-native-hot-r3",
+      "cold-bench-001-mixed-quorum3-cold-r1",
+      "cold-bench-001-mixed-quorum3-cold-r2",
+      "cold-bench-001-mixed-quorum3-cold-r3",
+      "cold-bench-001-mixed-quorum3-hot-r1",
+      "cold-bench-001-mixed-quorum3-hot-r2",
+      "cold-bench-001-mixed-quorum3-hot-r3",
+      "cold-bench-001-mixed-raft1-cold-r1",
+      "cold-bench-001-mixed-raft1-cold-r2",
+      "cold-bench-001-mixed-raft1-cold-r3",
+      "cold-bench-001-mixed-raft1-hot-r1",
+      "cold-bench-001-mixed-raft1-hot-r2",
+      "cold-bench-001-mixed-raft1-hot-r3",
+      "cold-bench-001-replay-async3-cold-r1",
+      "cold-bench-001-replay-async3-cold-r2",
+      "cold-bench-001-replay-async3-cold-r3",
+      "cold-bench-001-replay-async3-hot-r1",
+      "cold-bench-001-replay-async3-hot-r2",
+      "cold-bench-001-replay-async3-hot-r3",
+      "cold-bench-001-replay-native-cold-r1",
+      "cold-bench-001-replay-native-cold-r2",
+      "cold-bench-001-replay-native-cold-r3",
+      "cold-bench-001-replay-native-hot-r1",
+      "cold-bench-001-replay-native-hot-r2",
+      "cold-bench-001-replay-native-hot-r3",
+      "cold-bench-001-replay-quorum3-cold-r1",
+      "cold-bench-001-replay-quorum3-cold-r2",
+      "cold-bench-001-replay-quorum3-cold-r3",
+      "cold-bench-001-replay-quorum3-hot-r1",
+      "cold-bench-001-replay-quorum3-hot-r2",
+      "cold-bench-001-replay-quorum3-hot-r3",
+      "cold-bench-001-replay-raft1-cold-r1",
+      "cold-bench-001-replay-raft1-cold-r2",
+      "cold-bench-001-replay-raft1-cold-r3",
+      "cold-bench-001-replay-raft1-hot-r1",
+      "cold-bench-001-replay-raft1-hot-r2",
+      "cold-bench-001-replay-raft1-hot-r3"
+    ]
+  },
+  "selected_generations": {
+    "passed": 24,
+    "total": 24,
+    "cells": [
+      "cold-generations-001-async3-cold-r1",
+      "cold-generations-repair-001-async3-cold-r2",
+      "cold-generations-001-async3-cold-r3",
+      "cold-generations-001-async3-hot-r1",
+      "cold-generations-repair-001-async3-hot-r2",
+      "cold-generations-001-async3-hot-r3",
+      "cold-generations-001-native-cold-r1",
+      "cold-generations-001-native-cold-r2",
+      "cold-generations-001-native-cold-r3",
+      "cold-generations-001-native-hot-r1",
+      "cold-generations-001-native-hot-r2",
+      "cold-generations-001-native-hot-r3",
+      "cold-generations-001-quorum3-cold-r1",
+      "cold-generations-repair-001-quorum3-cold-r2",
+      "cold-generations-001-quorum3-cold-r3",
+      "cold-generations-001-quorum3-hot-r1",
+      "cold-generations-repair-001-quorum3-hot-r2",
+      "cold-generations-001-quorum3-hot-r3",
+      "cold-generations-001-raft1-cold-r1",
+      "cold-generations-001-raft1-cold-r2",
+      "cold-generations-001-raft1-cold-r3",
+      "cold-generations-001-raft1-hot-r1",
+      "cold-generations-001-raft1-hot-r2",
+      "cold-generations-001-raft1-hot-r3"
+    ],
+    "negative_controls": 174
+  },
+  "actual_benchmark_mutations": {
+    "cold-bench-001-replay-quorum3-cold-r1/missing-replica": [
+      "missing replica drain",
+      "wrong or duplicated drain identities"
+    ],
+    "cold-bench-001-replay-quorum3-cold-r1/corrupt-byte-hash": [
+      "replicas disagree on exact stream bytes",
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-replay-quorum3-cold-r1/offset-off-by-one": [
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-replay-quorum3-cold-r1/not-reclaimed": [
+      "cold precondition did not reclaim all seeded local payload"
+    ],
+    "cold-bench-001-replay-quorum3-cold-r1/wrong-attribution": [
+      "client attribution contains keys outside its immutable precondition",
+      "no attributable client cold-read bytes in measurement"
+    ],
+    "cold-bench-001-mixed-quorum3-cold-r1/missing-replica": [
+      "missing replica drain",
+      "wrong or duplicated drain identities"
+    ],
+    "cold-bench-001-mixed-quorum3-cold-r1/corrupt-byte-hash": [
+      "replicas disagree on exact stream bytes",
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-mixed-quorum3-cold-r1/offset-off-by-one": [
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-mixed-quorum3-cold-r1/not-reclaimed": [
+      "cold precondition did not reclaim all seeded local payload"
+    ],
+    "cold-bench-001-mixed-quorum3-cold-r1/wrong-attribution": [
+      "client attribution contains keys outside its immutable precondition",
+      "no attributable client cold-read bytes in measurement"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/missing-replica": [
+      "missing replica drain",
+      "wrong or duplicated drain identities"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/corrupt-byte-hash": [
+      "replicas disagree on exact stream bytes",
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/offset-off-by-one": [
+      "byte/offset mismatch"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/not-reclaimed": [
+      "cold precondition did not reclaim all seeded local payload"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/wrong-attribution": [
+      "client attribution contains keys outside its immutable precondition"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/false-closure": [
+      "fanout byte/sequence/closure mismatch"
+    ],
+    "cold-bench-001-fanout-quorum3-cold-r1/duplicate-reader": [
+      "fanout byte/sequence/closure mismatch"
+    ]
+  },
+  "aggregates": [
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.80968763689366,
+      "cells": [
+        "cold-bench-001-fanout-async3-hot-r1",
+        "cold-bench-001-fanout-async3-hot-r2",
+        "cold-bench-001-fanout-async3-hot-r3"
+      ],
+      "ops_per_sec": [
+        127.65780773444185,
+        127.85624158704006,
+        127.80968763689366
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 2.062137930361218,
+          "p50_ms": 1.924,
+          "p90_ms": 2.763,
+          "p99_ms": 4.021,
+          "p999_ms": 6.235,
+          "max_ms": 8.951
+        },
+        {
+          "count": 307342,
+          "mean_ms": 1.9148433536581388,
+          "p50_ms": 1.798,
+          "p90_ms": 2.529,
+          "p99_ms": 3.343,
+          "p999_ms": 8.271,
+          "max_ms": 13.831
+        },
+        {
+          "count": 307300,
+          "mean_ms": 1.983400735437686,
+          "p50_ms": 1.818,
+          "p90_ms": 2.645,
+          "p99_ms": 4.291,
+          "p999_ms": 9.063,
+          "max_ms": 10.959
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        122056704,
+        120475648,
+        120881152
+      ],
+      "peak_provider_rss_bytes": [
+        252198912,
+        252977152,
+        252489728
+      ],
+      "sut_cpu_cores": [
+        0.4583082815436588,
+        0.4394774139569316,
+        0.4411453947524058
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 8627.25,
+      "cells": [
+        "cold-bench-001-hot-write-async3-hot-r1",
+        "cold-bench-001-hot-write-async3-hot-r2",
+        "cold-bench-001-hot-write-async3-hot-r3"
+      ],
+      "ops_per_sec": [
+        8867.208333333334,
+        8627.25,
+        8198.333333333334
+      ],
+      "latency": [
+        {
+          "count": 212813,
+          "mean_ms": 1.80047867376523,
+          "p50_ms": 1.761,
+          "p90_ms": 2.349,
+          "p99_ms": 3.497,
+          "p999_ms": 9.367,
+          "max_ms": 27.519
+        },
+        {
+          "count": 207054,
+          "mean_ms": 1.8505034483757885,
+          "p50_ms": 1.81,
+          "p90_ms": 2.405,
+          "p99_ms": 3.535,
+          "p999_ms": 8.791,
+          "max_ms": 42.239
+        },
+        {
+          "count": 196760,
+          "mean_ms": 1.9477623449888195,
+          "p50_ms": 1.846,
+          "p90_ms": 2.629,
+          "p99_ms": 4.623,
+          "p999_ms": 10.375,
+          "max_ms": 39.519
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        143904768,
+        147406848,
+        142098432
+      ],
+      "peak_provider_rss_bytes": [
+        252395520,
+        253726720,
+        256135168
+      ],
+      "sut_cpu_cores": [
+        1.8436384437727862,
+        1.8176280714256907,
+        1.7711766290657458
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "many-write",
+      "passed": 2,
+      "total": 3,
+      "median_ops_per_sec": null,
+      "cells": [
+        "cold-bench-001-many-write-async3-hot-r1",
+        "cold-bench-001-many-write-async3-hot-r2",
+        "cold-bench-001-many-write-async3-hot-r3"
+      ],
+      "ops_per_sec": [
+        5409.75,
+        4467.958333333333,
+        4686.708333333333
+      ],
+      "latency": [
+        {
+          "count": 129834,
+          "mean_ms": 2.953910185313558,
+          "p50_ms": 2.397,
+          "p90_ms": 3.743,
+          "p99_ms": 9.495,
+          "p999_ms": 106.367,
+          "max_ms": 349.183
+        },
+        {
+          "count": 107231,
+          "mean_ms": 3.57734264345199,
+          "p50_ms": 2.915,
+          "p90_ms": 5.147,
+          "p99_ms": 13.823,
+          "p999_ms": 70.591,
+          "max_ms": 320.767
+        },
+        {
+          "count": 112481,
+          "mean_ms": 3.327220917310475,
+          "p50_ms": 2.703,
+          "p90_ms": 4.463,
+          "p99_ms": 11.327,
+          "p999_ms": 105.407,
+          "max_ms": 1011.199
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        160407552,
+        161624064,
+        161701888
+      ],
+      "peak_provider_rss_bytes": [
+        252272640,
+        251305984,
+        252362752
+      ],
+      "sut_cpu_cores": [
+        2.309570707046895,
+        2.0764611872980065,
+        2.1939479889415434
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-async3-hot-r1",
+        "cold-bench-001-mixed-async3-hot-r2",
+        "cold-bench-001-mixed-async3-hot-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 2.63663906046814,
+          "p50_ms": 2.483,
+          "p90_ms": 3.721,
+          "p99_ms": 6.235,
+          "p999_ms": 10.343,
+          "max_ms": 12.415
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.855420838751629,
+          "p50_ms": 2.757,
+          "p90_ms": 3.893,
+          "p99_ms": 5.515,
+          "p999_ms": 8.999,
+          "max_ms": 12.231
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.6442715377113077,
+          "p50_ms": 2.525,
+          "p90_ms": 3.637,
+          "p99_ms": 5.531,
+          "p999_ms": 12.471,
+          "max_ms": 18.127
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        133959680,
+        134385664,
+        134373376
+      ],
+      "peak_provider_rss_bytes": [
+        251281408,
+        251928576,
+        254119936
+      ],
+      "sut_cpu_cores": [
+        0.4578941286706593,
+        0.38196609708765944,
+        0.410508871115015
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": false,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 3385.2916666666665,
+      "cells": [
+        "cold-bench-001-replay-async3-hot-r1",
+        "cold-bench-001-replay-async3-hot-r2",
+        "cold-bench-001-replay-async3-hot-r3"
+      ],
+      "ops_per_sec": [
+        3385.2916666666665,
+        3588.5416666666665,
+        3140.375
+      ],
+      "latency": [
+        {
+          "count": 81247,
+          "mean_ms": 1.1807312023828582,
+          "p50_ms": 1.118,
+          "p90_ms": 1.399,
+          "p99_ms": 2.497,
+          "p999_ms": 5.191,
+          "max_ms": 24.991
+        },
+        {
+          "count": 86125,
+          "mean_ms": 1.1138076748911478,
+          "p50_ms": 1.079,
+          "p90_ms": 1.285,
+          "p99_ms": 1.937,
+          "p999_ms": 4.507,
+          "max_ms": 17.519
+        },
+        {
+          "count": 75369,
+          "mean_ms": 1.272820602635028,
+          "p50_ms": 1.183,
+          "p90_ms": 1.592,
+          "p99_ms": 2.831,
+          "p999_ms": 5.427,
+          "max_ms": 25.855
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        122802176,
+        122646528,
+        122712064
+      ],
+      "peak_provider_rss_bytes": [
+        251691008,
+        250466304,
+        251629568
+      ],
+      "sut_cpu_cores": [
+        2.126292580904612,
+        2.1233739102492186,
+        2.128133647045007
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.76255303193194,
+      "cells": [
+        "cold-bench-001-fanout-async3-cold-r1",
+        "cold-bench-001-fanout-async3-cold-r2",
+        "cold-bench-001-fanout-async3-cold-r3"
+      ],
+      "ops_per_sec": [
+        127.76255303193194,
+        127.6864759613395,
+        127.78993611142934
+      ],
+      "latency": [
+        {
+          "count": 307005,
+          "mean_ms": 2.8928017980163223,
+          "p50_ms": 2.629,
+          "p90_ms": 4.015,
+          "p99_ms": 8.895,
+          "p999_ms": 16.959,
+          "max_ms": 31.007
+        },
+        {
+          "count": 307138,
+          "mean_ms": 2.3638197585450205,
+          "p50_ms": 2.303,
+          "p90_ms": 3.087,
+          "p99_ms": 4.471,
+          "p999_ms": 11.767,
+          "max_ms": 17.887
+        },
+        {
+          "count": 307299,
+          "mean_ms": 2.5066429633679355,
+          "p50_ms": 2.401,
+          "p90_ms": 3.357,
+          "p99_ms": 5.495,
+          "p999_ms": 13.615,
+          "max_ms": 19.311
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        139964416,
+        136642560,
+        157249536
+      ],
+      "peak_provider_rss_bytes": [
+        434712576,
+        432631808,
+        431337472
+      ],
+      "sut_cpu_cores": [
+        0.7995327237690463,
+        0.7287004781669661,
+        0.7536876970209283
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 6203.666666666667,
+      "cells": [
+        "cold-bench-001-hot-write-async3-cold-r1",
+        "cold-bench-001-hot-write-async3-cold-r2",
+        "cold-bench-001-hot-write-async3-cold-r3"
+      ],
+      "ops_per_sec": [
+        6726.875,
+        6203.666666666667,
+        6187.791666666667
+      ],
+      "latency": [
+        {
+          "count": 161445,
+          "mean_ms": 2.3763718789680675,
+          "p50_ms": 1.759,
+          "p90_ms": 2.399,
+          "p99_ms": 13.903,
+          "p999_ms": 99.647,
+          "max_ms": 234.623
+        },
+        {
+          "count": 148888,
+          "mean_ms": 2.583630205254961,
+          "p50_ms": 1.881,
+          "p90_ms": 2.691,
+          "p99_ms": 15.239,
+          "p999_ms": 101.183,
+          "max_ms": 169.855
+        },
+        {
+          "count": 148507,
+          "mean_ms": 2.582007386857181,
+          "p50_ms": 1.921,
+          "p90_ms": 2.755,
+          "p99_ms": 13.679,
+          "p999_ms": 96.767,
+          "max_ms": 203.263
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        193806336,
+        199147520,
+        187404288
+      ],
+      "peak_provider_rss_bytes": [
+        446930944,
+        440434688,
+        441286656
+      ],
+      "sut_cpu_cores": [
+        1.8187954314030286,
+        1.7514913188858465,
+        1.771205594162829
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 2817.4166666666665,
+      "cells": [
+        "cold-bench-001-many-write-async3-cold-r1",
+        "cold-bench-001-many-write-async3-cold-r2",
+        "cold-bench-001-many-write-async3-cold-r3"
+      ],
+      "ops_per_sec": [
+        2501.2916666666665,
+        3947.5833333333335,
+        2817.4166666666665
+      ],
+      "latency": [
+        {
+          "count": 60031,
+          "mean_ms": 6.3927391514384135,
+          "p50_ms": 3.717,
+          "p90_ms": 8.431,
+          "p99_ms": 56.255,
+          "p999_ms": 316.415,
+          "max_ms": 698.367
+        },
+        {
+          "count": 94742,
+          "mean_ms": 4.1322306052226025,
+          "p50_ms": 2.775,
+          "p90_ms": 5.375,
+          "p99_ms": 25.615,
+          "p999_ms": 138.239,
+          "max_ms": 1604.607
+        },
+        {
+          "count": 67618,
+          "mean_ms": 5.674812402023134,
+          "p50_ms": 3.823,
+          "p90_ms": 8.479,
+          "p99_ms": 34.399,
+          "p999_ms": 163.327,
+          "max_ms": 663.551
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        226189312,
+        250650624,
+        244400128
+      ],
+      "peak_provider_rss_bytes": [
+        480727040,
+        485777408,
+        482439168
+      ],
+      "sut_cpu_cores": [
+        1.9354335526822164,
+        2.460538038230041,
+        2.0302355755008596
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-async3-cold-r1",
+        "cold-bench-001-mixed-async3-cold-r2",
+        "cold-bench-001-mixed-async3-cold-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 3.118109801690507,
+          "p50_ms": 2.843,
+          "p90_ms": 4.319,
+          "p99_ms": 8.703,
+          "p999_ms": 33.919,
+          "max_ms": 39.935
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.3121830299089705,
+          "p50_ms": 2.941,
+          "p90_ms": 5.099,
+          "p99_ms": 9.743,
+          "p999_ms": 18.111,
+          "max_ms": 22.543
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.4157437418725625,
+          "p50_ms": 3.049,
+          "p90_ms": 4.971,
+          "p99_ms": 10.271,
+          "p999_ms": 25.119,
+          "max_ms": 30.591
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        154312704,
+        151236608,
+        152768512
+      ],
+      "peak_provider_rss_bytes": [
+        470384640,
+        473382912,
+        474570752
+      ],
+      "sut_cpu_cores": [
+        0.4739649907718675,
+        0.5032506629823643,
+        0.4831313570978416
+      ],
+      "client_remote_fetched_bytes": [
+        26214400,
+        26214400,
+        26214400
+      ]
+    },
+    {
+      "arm": "async3",
+      "cold": true,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 36.291666666666664,
+      "cells": [
+        "cold-bench-001-replay-async3-cold-r1",
+        "cold-bench-001-replay-async3-cold-r2",
+        "cold-bench-001-replay-async3-cold-r3"
+      ],
+      "ops_per_sec": [
+        36.291666666666664,
+        36.833333333333336,
+        34.041666666666664
+      ],
+      "latency": [
+        {
+          "count": 871,
+          "mean_ms": 110.29543972445458,
+          "p50_ms": 107.967,
+          "p90_ms": 130.879,
+          "p99_ms": 157.439,
+          "p999_ms": 173.183,
+          "max_ms": 173.183
+        },
+        {
+          "count": 884,
+          "mean_ms": 108.96177375565605,
+          "p50_ms": 106.303,
+          "p90_ms": 128.383,
+          "p99_ms": 152.063,
+          "p999_ms": 1142.783,
+          "max_ms": 1142.783
+        },
+        {
+          "count": 817,
+          "mean_ms": 117.79779681762544,
+          "p50_ms": 110.975,
+          "p90_ms": 146.687,
+          "p99_ms": 233.983,
+          "p999_ms": 284.927,
+          "max_ms": 284.927
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        162148352,
+        164663296,
+        166227968
+      ],
+      "peak_provider_rss_bytes": [
+        457838592,
+        454914048,
+        459325440
+      ],
+      "sut_cpu_cores": [
+        0.36195299950191384,
+        0.34346677978700424,
+        0.37105066487913146
+      ],
+      "client_remote_fetched_bytes": [
+        913309696,
+        926941184,
+        856686592
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.68651588532431,
+      "cells": [
+        "cold-bench-001-fanout-native-hot-r1",
+        "cold-bench-001-fanout-native-hot-r2",
+        "cold-bench-001-fanout-native-hot-r3"
+      ],
+      "ops_per_sec": [
+        127.68651588532431,
+        127.61281418048009,
+        127.74215166092877
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 1.3651067100553198,
+          "p50_ms": 1.301,
+          "p90_ms": 1.743,
+          "p99_ms": 2.567,
+          "p999_ms": 5.395,
+          "max_ms": 7.767
+        },
+        {
+          "count": 307275,
+          "mean_ms": 1.383095116752094,
+          "p50_ms": 1.301,
+          "p90_ms": 1.824,
+          "p99_ms": 2.811,
+          "p999_ms": 6.487,
+          "max_ms": 8.631
+        },
+        {
+          "count": 307300,
+          "mean_ms": 1.3466006508298114,
+          "p50_ms": 1.283,
+          "p90_ms": 1.723,
+          "p99_ms": 2.505,
+          "p999_ms": 4.991,
+          "max_ms": 8.303
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        6955008,
+        6639616,
+        6836224
+      ],
+      "peak_provider_rss_bytes": [
+        159547392,
+        158445568,
+        159002624
+      ],
+      "sut_cpu_cores": [
+        0.16412687955594918,
+        0.1686270613448993,
+        0.16376181821508914
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 13526.333333333334,
+      "cells": [
+        "cold-bench-001-hot-write-native-hot-r1",
+        "cold-bench-001-hot-write-native-hot-r2",
+        "cold-bench-001-hot-write-native-hot-r3"
+      ],
+      "ops_per_sec": [
+        14180.041666666666,
+        13172.75,
+        13526.333333333334
+      ],
+      "latency": [
+        {
+          "count": 340321,
+          "mean_ms": 1.1250797541144983,
+          "p50_ms": 1.09,
+          "p90_ms": 1.683,
+          "p99_ms": 2.203,
+          "p999_ms": 4.163,
+          "max_ms": 14.823
+        },
+        {
+          "count": 316146,
+          "mean_ms": 1.2113022084733003,
+          "p50_ms": 1.165,
+          "p90_ms": 1.814,
+          "p99_ms": 2.615,
+          "p999_ms": 4.715,
+          "max_ms": 14.287
+        },
+        {
+          "count": 324632,
+          "mean_ms": 1.1796857426254965,
+          "p50_ms": 1.114,
+          "p90_ms": 1.792,
+          "p99_ms": 3.011,
+          "p999_ms": 6.827,
+          "max_ms": 20.575
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        6389760,
+        6365184,
+        6750208
+      ],
+      "peak_provider_rss_bytes": [
+        158658560,
+        158367744,
+        158019584
+      ],
+      "sut_cpu_cores": [
+        0.7261174848363329,
+        0.7009726849239987,
+        0.6777569128412798
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 8422.208333333334,
+      "cells": [
+        "cold-bench-001-many-write-native-hot-r1",
+        "cold-bench-repair-001-many-write-native-hot-r2",
+        "cold-bench-001-many-write-native-hot-r3"
+      ],
+      "ops_per_sec": [
+        8422.208333333334,
+        11482.833333333334,
+        6893.041666666667
+      ],
+      "latency": [
+        {
+          "count": 202133,
+          "mean_ms": 1.8963016875027798,
+          "p50_ms": 1.555,
+          "p90_ms": 2.717,
+          "p99_ms": 5.883,
+          "p999_ms": 23.295,
+          "max_ms": 305.919
+        },
+        {
+          "count": 275588,
+          "mean_ms": 1.390104097420783,
+          "p50_ms": 1.297,
+          "p90_ms": 1.778,
+          "p99_ms": 3.363,
+          "p999_ms": 7.151,
+          "max_ms": 45.375
+        },
+        {
+          "count": 165433,
+          "mean_ms": 2.317522495511774,
+          "p50_ms": 2.035,
+          "p90_ms": 3.419,
+          "p99_ms": 6.099,
+          "p999_ms": 14.415,
+          "max_ms": 231.551
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        8740864,
+        9084928,
+        8769536
+      ],
+      "peak_provider_rss_bytes": [
+        157765632,
+        159653888,
+        158494720
+      ],
+      "sut_cpu_cores": [
+        0.7780243595642323,
+        0.9635696868239009,
+        0.7754003871216183
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-native-hot-r1",
+        "cold-bench-001-mixed-native-hot-r2",
+        "cold-bench-001-mixed-native-hot-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 2.1192934817945384,
+          "p50_ms": 2.018,
+          "p90_ms": 2.989,
+          "p99_ms": 4.895,
+          "p999_ms": 7.003,
+          "max_ms": 8.191
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.0799930916775042,
+          "p50_ms": 1.992,
+          "p90_ms": 2.979,
+          "p99_ms": 4.143,
+          "p999_ms": 8.351,
+          "max_ms": 11.103
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.2632015604681404,
+          "p50_ms": 2.157,
+          "p90_ms": 3.213,
+          "p99_ms": 4.799,
+          "p999_ms": 6.775,
+          "max_ms": 10.351
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        6836224,
+        7188480,
+        6434816
+      ],
+      "peak_provider_rss_bytes": [
+        158777344,
+        159363072,
+        159375360
+      ],
+      "sut_cpu_cores": [
+        0.09111404308142965,
+        0.09346805826824214,
+        0.086761119518569
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": false,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 4177.75,
+      "cells": [
+        "cold-bench-001-replay-native-hot-r1",
+        "cold-bench-001-replay-native-hot-r2",
+        "cold-bench-001-replay-native-hot-r3"
+      ],
+      "ops_per_sec": [
+        3894.3333333333335,
+        4200.541666666667,
+        4177.75
+      ],
+      "latency": [
+        {
+          "count": 93464,
+          "mean_ms": 1.0262629675597015,
+          "p50_ms": 0.972,
+          "p90_ms": 1.235,
+          "p99_ms": 2.065,
+          "p999_ms": 4.947,
+          "max_ms": 39.519
+        },
+        {
+          "count": 100813,
+          "mean_ms": 0.9514202335016301,
+          "p50_ms": 0.926,
+          "p90_ms": 1.096,
+          "p99_ms": 1.635,
+          "p999_ms": 3.689,
+          "max_ms": 17.007
+        },
+        {
+          "count": 100266,
+          "mean_ms": 0.9566185646181171,
+          "p50_ms": 0.928,
+          "p90_ms": 1.1,
+          "p99_ms": 1.656,
+          "p999_ms": 4.475,
+          "max_ms": 19.343
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        7090176,
+        6238208,
+        6815744
+      ],
+      "peak_provider_rss_bytes": [
+        158220288,
+        160071680,
+        159436800
+      ],
+      "sut_cpu_cores": [
+        1.734408476254545,
+        1.740945794777153,
+        1.7401265864264548
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.88341343094396,
+      "cells": [
+        "cold-bench-001-fanout-native-cold-r1",
+        "cold-bench-001-fanout-native-cold-r2",
+        "cold-bench-001-fanout-native-cold-r3"
+      ],
+      "ops_per_sec": [
+        127.88341343094396,
+        127.75181002462139,
+        127.89209380421008
+      ],
+      "latency": [
+        {
+          "count": 306919,
+          "mean_ms": 1.9688329233446002,
+          "p50_ms": 1.889,
+          "p90_ms": 2.563,
+          "p99_ms": 4.195,
+          "p999_ms": 10.903,
+          "max_ms": 27.119
+        },
+        {
+          "count": 307298,
+          "mean_ms": 1.9485526459658002,
+          "p50_ms": 1.88,
+          "p90_ms": 2.567,
+          "p99_ms": 3.765,
+          "p999_ms": 11.055,
+          "max_ms": 23.039
+        },
+        {
+          "count": 307079,
+          "mean_ms": 1.8972164361613741,
+          "p50_ms": 1.787,
+          "p90_ms": 2.541,
+          "p99_ms": 5.055,
+          "p999_ms": 12.743,
+          "max_ms": 20.511
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        9400320,
+        9928704,
+        9043968
+      ],
+      "peak_provider_rss_bytes": [
+        177938432,
+        177668096,
+        178966528
+      ],
+      "sut_cpu_cores": [
+        0.42136758027774884,
+        0.4259096133578118,
+        0.40474778158243413
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 10707.208333333334,
+      "cells": [
+        "cold-bench-001-hot-write-native-cold-r1",
+        "cold-bench-001-hot-write-native-cold-r2",
+        "cold-bench-001-hot-write-native-cold-r3"
+      ],
+      "ops_per_sec": [
+        12003.541666666666,
+        9168.166666666666,
+        10707.208333333334
+      ],
+      "latency": [
+        {
+          "count": 288085,
+          "mean_ms": 1.3295962059808712,
+          "p50_ms": 1.064,
+          "p90_ms": 1.87,
+          "p99_ms": 6.111,
+          "p999_ms": 8.471,
+          "max_ms": 22.015
+        },
+        {
+          "count": 220036,
+          "mean_ms": 1.741711479030701,
+          "p50_ms": 1.368,
+          "p90_ms": 2.715,
+          "p99_ms": 8.383,
+          "p999_ms": 14.743,
+          "max_ms": 94.911
+        },
+        {
+          "count": 256973,
+          "mean_ms": 1.4909016044487133,
+          "p50_ms": 1.186,
+          "p90_ms": 2.195,
+          "p99_ms": 6.611,
+          "p999_ms": 11.055,
+          "max_ms": 42.431
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        9916416,
+        9105408,
+        9555968
+      ],
+      "peak_provider_rss_bytes": [
+        364724224,
+        333283328,
+        371367936
+      ],
+      "sut_cpu_cores": [
+        0.7451090523329609,
+        0.6577591288013748,
+        0.702880037060592
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 6512.041666666667,
+      "cells": [
+        "cold-bench-001-many-write-native-cold-r1",
+        "cold-bench-repair-001-many-write-native-cold-r2",
+        "cold-bench-001-many-write-native-cold-r3"
+      ],
+      "ops_per_sec": [
+        6512.041666666667,
+        6713.0,
+        5416.458333333333
+      ],
+      "latency": [
+        {
+          "count": 156289,
+          "mean_ms": 2.4539089507259106,
+          "p50_ms": 1.901,
+          "p90_ms": 3.691,
+          "p99_ms": 11.551,
+          "p999_ms": 54.783,
+          "max_ms": 199.807
+        },
+        {
+          "count": 161112,
+          "mean_ms": 2.380747610358011,
+          "p50_ms": 1.835,
+          "p90_ms": 3.299,
+          "p99_ms": 8.063,
+          "p999_ms": 89.535,
+          "max_ms": 535.039
+        },
+        {
+          "count": 129995,
+          "mean_ms": 2.9512727027962553,
+          "p50_ms": 2.359,
+          "p90_ms": 5.179,
+          "p99_ms": 12.023,
+          "p999_ms": 21.807,
+          "max_ms": 62.047
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        166481920,
+        163594240,
+        162324480
+      ],
+      "peak_provider_rss_bytes": [
+        527183872,
+        458178560,
+        435777536
+      ],
+      "sut_cpu_cores": [
+        1.0809678406055179,
+        1.1331957448234395,
+        0.986093851492952
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-native-cold-r1",
+        "cold-bench-001-mixed-native-cold-r2",
+        "cold-bench-001-mixed-native-cold-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 2.2910441319895987,
+          "p50_ms": 2.163,
+          "p90_ms": 3.289,
+          "p99_ms": 5.103,
+          "p999_ms": 10.159,
+          "max_ms": 34.047
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.5440858257477177,
+          "p50_ms": 2.375,
+          "p90_ms": 3.585,
+          "p99_ms": 6.215,
+          "p999_ms": 13.967,
+          "max_ms": 20.543
+        },
+        {
+          "count": 12304,
+          "mean_ms": 2.302138491547464,
+          "p50_ms": 2.183,
+          "p90_ms": 3.313,
+          "p99_ms": 4.579,
+          "p999_ms": 8.263,
+          "max_ms": 19.695
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        12529664,
+        13471744,
+        13074432
+      ],
+      "peak_provider_rss_bytes": [
+        289099776,
+        288669696,
+        307769344
+      ],
+      "sut_cpu_cores": [
+        0.11209437516562488,
+        0.12005849045087573,
+        0.11938922492314091
+      ],
+      "client_remote_fetched_bytes": [
+        26214400,
+        26214400,
+        26214400
+      ]
+    },
+    {
+      "arm": "native",
+      "cold": true,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 40.458333333333336,
+      "cells": [
+        "cold-bench-001-replay-native-cold-r1",
+        "cold-bench-001-replay-native-cold-r2",
+        "cold-bench-001-replay-native-cold-r3"
+      ],
+      "ops_per_sec": [
+        39.875,
+        41.583333333333336,
+        40.458333333333336
+      ],
+      "latency": [
+        {
+          "count": 957,
+          "mean_ms": 100.48275862068968,
+          "p50_ms": 96.575,
+          "p90_ms": 122.431,
+          "p99_ms": 154.751,
+          "p999_ms": 1154.047,
+          "max_ms": 1154.047
+        },
+        {
+          "count": 998,
+          "mean_ms": 96.30722244488977,
+          "p50_ms": 92.863,
+          "p90_ms": 112.063,
+          "p99_ms": 135.039,
+          "p999_ms": 1142.783,
+          "max_ms": 1142.783
+        },
+        {
+          "count": 971,
+          "mean_ms": 98.98703192584952,
+          "p50_ms": 93.887,
+          "p90_ms": 116.735,
+          "p99_ms": 154.495,
+          "p999_ms": 1159.167,
+          "max_ms": 1159.167
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        11931648,
+        12058624,
+        10584064
+      ],
+      "peak_provider_rss_bytes": [
+        357253120,
+        356364288,
+        353263616
+      ],
+      "sut_cpu_cores": [
+        0.26153665278105054,
+        0.25328308321977466,
+        0.26057738743609415
+      ],
+      "client_remote_fetched_bytes": [
+        1003487232,
+        1046478848,
+        1018167296
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.72971107874743,
+      "cells": [
+        "cold-bench-001-fanout-quorum3-hot-r1",
+        "cold-bench-001-fanout-quorum3-hot-r2",
+        "cold-bench-001-fanout-quorum3-hot-r3"
+      ],
+      "ops_per_sec": [
+        127.77305017653822,
+        127.72971107874743,
+        127.68283480789972
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 2.056820159453302,
+          "p50_ms": 1.901,
+          "p90_ms": 2.761,
+          "p99_ms": 4.013,
+          "p999_ms": 8.131,
+          "max_ms": 15.263
+        },
+        {
+          "count": 307300,
+          "mean_ms": 1.9213755483241135,
+          "p50_ms": 1.802,
+          "p90_ms": 2.575,
+          "p99_ms": 3.641,
+          "p999_ms": 5.663,
+          "max_ms": 8.407
+        },
+        {
+          "count": 307300,
+          "mean_ms": 2.042825919297105,
+          "p50_ms": 1.879,
+          "p90_ms": 2.723,
+          "p99_ms": 4.779,
+          "p999_ms": 7.711,
+          "max_ms": 11.639
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        121237504,
+        119746560,
+        121110528
+      ],
+      "peak_provider_rss_bytes": [
+        253550592,
+        252235776,
+        252411904
+      ],
+      "sut_cpu_cores": [
+        0.44758339048054085,
+        0.4291388517038803,
+        0.43765170500200734
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 5927.041666666667,
+      "cells": [
+        "cold-bench-001-hot-write-quorum3-hot-r1",
+        "cold-bench-001-hot-write-quorum3-hot-r2",
+        "cold-bench-001-hot-write-quorum3-hot-r3"
+      ],
+      "ops_per_sec": [
+        6461.958333333333,
+        5794.291666666667,
+        5927.041666666667
+      ],
+      "latency": [
+        {
+          "count": 155087,
+          "mean_ms": 2.4727333496682498,
+          "p50_ms": 2.435,
+          "p90_ms": 3.075,
+          "p99_ms": 3.973,
+          "p999_ms": 12.231,
+          "max_ms": 53.663
+        },
+        {
+          "count": 139063,
+          "mean_ms": 2.757844430222281,
+          "p50_ms": 2.629,
+          "p90_ms": 3.559,
+          "p99_ms": 5.547,
+          "p999_ms": 14.791,
+          "max_ms": 119.871
+        },
+        {
+          "count": 142249,
+          "mean_ms": 2.696420811394106,
+          "p50_ms": 2.571,
+          "p90_ms": 3.453,
+          "p99_ms": 6.087,
+          "p999_ms": 12.943,
+          "max_ms": 48.767
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        126005248,
+        124735488,
+        124182528
+      ],
+      "peak_provider_rss_bytes": [
+        253001728,
+        252182528,
+        254001152
+      ],
+      "sut_cpu_cores": [
+        1.8911610988252336,
+        1.7811289958372158,
+        1.8081180309993756
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 3348.4583333333335,
+      "cells": [
+        "cold-bench-001-many-write-quorum3-hot-r1",
+        "cold-bench-001-many-write-quorum3-hot-r2",
+        "cold-bench-001-many-write-quorum3-hot-r3"
+      ],
+      "ops_per_sec": [
+        3348.4583333333335,
+        3491.5416666666665,
+        2603.5416666666665
+      ],
+      "latency": [
+        {
+          "count": 80363,
+          "mean_ms": 4.775361459875807,
+          "p50_ms": 4.315,
+          "p90_ms": 6.159,
+          "p99_ms": 11.063,
+          "p999_ms": 106.175,
+          "max_ms": 123.711
+        },
+        {
+          "count": 83797,
+          "mean_ms": 4.579433237466728,
+          "p50_ms": 4.139,
+          "p90_ms": 5.755,
+          "p99_ms": 10.791,
+          "p999_ms": 93.951,
+          "max_ms": 198.399
+        },
+        {
+          "count": 62485,
+          "mean_ms": 6.142823317596234,
+          "p50_ms": 5.319,
+          "p90_ms": 8.759,
+          "p99_ms": 14.943,
+          "p999_ms": 143.615,
+          "max_ms": 168.191
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        142741504,
+        143585280,
+        141037568
+      ],
+      "peak_provider_rss_bytes": [
+        252190720,
+        254631936,
+        251469824
+      ],
+      "sut_cpu_cores": [
+        2.1680957271976706,
+        2.2274956376268746,
+        1.9331741857412947
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-quorum3-hot-r1",
+        "cold-bench-001-mixed-quorum3-hot-r2",
+        "cold-bench-001-mixed-quorum3-hot-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 3.7024305916774995,
+          "p50_ms": 3.627,
+          "p90_ms": 4.811,
+          "p99_ms": 6.139,
+          "p999_ms": 7.915,
+          "max_ms": 9.359
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.441065100780232,
+          "p50_ms": 3.225,
+          "p90_ms": 4.487,
+          "p99_ms": 8.983,
+          "p999_ms": 18.687,
+          "max_ms": 20.719
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.5267539011703524,
+          "p50_ms": 3.411,
+          "p90_ms": 4.571,
+          "p99_ms": 6.123,
+          "p999_ms": 13.543,
+          "max_ms": 15.735
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        124149760,
+        123645952,
+        123994112
+      ],
+      "peak_provider_rss_bytes": [
+        253874176,
+        253820928,
+        253521920
+      ],
+      "sut_cpu_cores": [
+        0.4076452765841404,
+        0.49503329419440456,
+        0.4117529875860923
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": false,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 3425.6666666666665,
+      "cells": [
+        "cold-bench-001-replay-quorum3-hot-r1",
+        "cold-bench-001-replay-quorum3-hot-r2",
+        "cold-bench-001-replay-quorum3-hot-r3"
+      ],
+      "ops_per_sec": [
+        3468.375,
+        3425.6666666666665,
+        3185.4583333333335
+      ],
+      "latency": [
+        {
+          "count": 83241,
+          "mean_ms": 1.152425247173868,
+          "p50_ms": 1.096,
+          "p90_ms": 1.339,
+          "p99_ms": 2.501,
+          "p999_ms": 5.163,
+          "max_ms": 18.511
+        },
+        {
+          "count": 82216,
+          "mean_ms": 1.1667936046511647,
+          "p50_ms": 1.095,
+          "p90_ms": 1.365,
+          "p99_ms": 2.835,
+          "p999_ms": 6.167,
+          "max_ms": 22.191
+        },
+        {
+          "count": 76451,
+          "mean_ms": 1.2548845535048614,
+          "p50_ms": 1.19,
+          "p90_ms": 1.535,
+          "p99_ms": 2.503,
+          "p999_ms": 4.647,
+          "max_ms": 19.647
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        123961344,
+        122425344,
+        121737216
+      ],
+      "peak_provider_rss_bytes": [
+        252317696,
+        252477440,
+        252964864
+      ],
+      "sut_cpu_cores": [
+        2.0873072663597476,
+        2.027826889922339,
+        2.147705643326611
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.7025098395214,
+      "cells": [
+        "cold-bench-001-fanout-quorum3-cold-r1",
+        "cold-bench-001-fanout-quorum3-cold-r2",
+        "cold-bench-001-fanout-quorum3-cold-r3"
+      ],
+      "ops_per_sec": [
+        127.61486055745758,
+        127.9087593023347,
+        127.7025098395214
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 3.1172934331272355,
+          "p50_ms": 2.785,
+          "p90_ms": 4.491,
+          "p99_ms": 9.015,
+          "p999_ms": 21.167,
+          "max_ms": 53.567
+        },
+        {
+          "count": 307300,
+          "mean_ms": 2.4482464399609456,
+          "p50_ms": 2.363,
+          "p90_ms": 3.307,
+          "p99_ms": 5.043,
+          "p999_ms": 10.023,
+          "max_ms": 11.631
+        },
+        {
+          "count": 307300,
+          "mean_ms": 2.611948411975267,
+          "p50_ms": 2.469,
+          "p90_ms": 3.553,
+          "p99_ms": 6.787,
+          "p999_ms": 13.535,
+          "max_ms": 20.255
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        133701632,
+        153251840,
+        141688832
+      ],
+      "peak_provider_rss_bytes": [
+        433287168,
+        441364480,
+        438284288
+      ],
+      "sut_cpu_cores": [
+        0.8349989122845208,
+        0.7492438685764796,
+        0.7540908336781982
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 4733.416666666667,
+      "cells": [
+        "cold-bench-001-hot-write-quorum3-cold-r1",
+        "cold-bench-001-hot-write-quorum3-cold-r2",
+        "cold-bench-001-hot-write-quorum3-cold-r3"
+      ],
+      "ops_per_sec": [
+        4850.458333333333,
+        4371.041666666667,
+        4733.416666666667
+      ],
+      "latency": [
+        {
+          "count": 116411,
+          "mean_ms": 3.299959376691206,
+          "p50_ms": 2.537,
+          "p90_ms": 3.345,
+          "p99_ms": 32.719,
+          "p999_ms": 85.631,
+          "max_ms": 168.191
+        },
+        {
+          "count": 104905,
+          "mean_ms": 3.6634787474381514,
+          "p50_ms": 2.807,
+          "p90_ms": 4.207,
+          "p99_ms": 31.007,
+          "p999_ms": 82.943,
+          "max_ms": 168.703
+        },
+        {
+          "count": 113602,
+          "mean_ms": 3.3779151687470304,
+          "p50_ms": 2.579,
+          "p90_ms": 3.653,
+          "p99_ms": 29.631,
+          "p999_ms": 82.559,
+          "max_ms": 126.591
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        162119680,
+        160763904,
+        160051200
+      ],
+      "peak_provider_rss_bytes": [
+        439181312,
+        454656000,
+        440262656
+      ],
+      "sut_cpu_cores": [
+        1.7247334514651227,
+        1.6754347286483893,
+        1.6899359109781487
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 2823.625,
+      "cells": [
+        "cold-bench-001-many-write-quorum3-cold-r1",
+        "cold-bench-001-many-write-quorum3-cold-r2",
+        "cold-bench-001-many-write-quorum3-cold-r3"
+      ],
+      "ops_per_sec": [
+        2878.0833333333335,
+        2533.25,
+        2823.625
+      ],
+      "latency": [
+        {
+          "count": 69074,
+          "mean_ms": 5.556971306135455,
+          "p50_ms": 4.243,
+          "p90_ms": 7.087,
+          "p99_ms": 31.183,
+          "p999_ms": 126.591,
+          "max_ms": 331.263
+        },
+        {
+          "count": 60798,
+          "mean_ms": 6.313257870324666,
+          "p50_ms": 4.935,
+          "p90_ms": 8.975,
+          "p99_ms": 27.247,
+          "p999_ms": 131.967,
+          "max_ms": 250.623
+        },
+        {
+          "count": 67767,
+          "mean_ms": 5.664093511591196,
+          "p50_ms": 4.515,
+          "p90_ms": 8.147,
+          "p99_ms": 28.703,
+          "p999_ms": 86.783,
+          "max_ms": 242.943
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        245219328,
+        259321856,
+        202579968
+      ],
+      "peak_provider_rss_bytes": [
+        478269440,
+        481501184,
+        483704832
+      ],
+      "sut_cpu_cores": [
+        2.318370637084176,
+        2.1905332141192964,
+        2.265897697262427
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-quorum3-cold-r1",
+        "cold-bench-001-mixed-quorum3-cold-r2",
+        "cold-bench-001-mixed-quorum3-cold-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 4.425585663198955,
+          "p50_ms": 4.179,
+          "p90_ms": 5.903,
+          "p99_ms": 10.103,
+          "p999_ms": 15.079,
+          "max_ms": 17.871
+        },
+        {
+          "count": 12304,
+          "mean_ms": 4.345735614434331,
+          "p50_ms": 4.111,
+          "p90_ms": 5.859,
+          "p99_ms": 9.151,
+          "p999_ms": 29.887,
+          "max_ms": 31.855
+        },
+        {
+          "count": 12304,
+          "mean_ms": 4.218019505851751,
+          "p50_ms": 3.845,
+          "p90_ms": 5.643,
+          "p99_ms": 11.999,
+          "p999_ms": 25.087,
+          "max_ms": 51.583
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        142069760,
+        134922240,
+        144576512
+      ],
+      "peak_provider_rss_bytes": [
+        472948736,
+        471748608,
+        471482368
+      ],
+      "sut_cpu_cores": [
+        0.4485428051055857,
+        0.4391001180346725,
+        0.4964735145478771
+      ],
+      "client_remote_fetched_bytes": [
+        26214400,
+        26214400,
+        26214400
+      ]
+    },
+    {
+      "arm": "quorum3",
+      "cold": true,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 36.166666666666664,
+      "cells": [
+        "cold-bench-001-replay-quorum3-cold-r1",
+        "cold-bench-001-replay-quorum3-cold-r2",
+        "cold-bench-001-replay-quorum3-cold-r3"
+      ],
+      "ops_per_sec": [
+        36.166666666666664,
+        37.0,
+        34.25
+      ],
+      "latency": [
+        {
+          "count": 868,
+          "mean_ms": 111.10020276497691,
+          "p50_ms": 108.223,
+          "p90_ms": 133.631,
+          "p99_ms": 167.295,
+          "p999_ms": 187.391,
+          "max_ms": 187.391
+        },
+        {
+          "count": 888,
+          "mean_ms": 108.33376576576578,
+          "p50_ms": 105.599,
+          "p90_ms": 131.583,
+          "p99_ms": 175.743,
+          "p999_ms": 222.207,
+          "max_ms": 222.207
+        },
+        {
+          "count": 822,
+          "mean_ms": 117.08118734793185,
+          "p50_ms": 113.791,
+          "p90_ms": 140.671,
+          "p99_ms": 186.367,
+          "p999_ms": 214.015,
+          "max_ms": 214.015
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        159539200,
+        165769216,
+        153800704
+      ],
+      "peak_provider_rss_bytes": [
+        460435456,
+        454610944,
+        461651968
+      ],
+      "sut_cpu_cores": [
+        0.3647859844820438,
+        0.3511356348022688,
+        0.36721074904474105
+      ],
+      "client_remote_fetched_bytes": [
+        910163968,
+        931135488,
+        861929472
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.72472368276009,
+      "cells": [
+        "cold-bench-001-fanout-raft1-hot-r1",
+        "cold-bench-001-fanout-raft1-hot-r2",
+        "cold-bench-001-fanout-raft1-hot-r3"
+      ],
+      "ops_per_sec": [
+        127.72472368276009,
+        127.57447558428191,
+        127.82852286303152
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 1.8694826911812545,
+          "p50_ms": 1.769,
+          "p90_ms": 2.479,
+          "p99_ms": 3.343,
+          "p999_ms": 7.527,
+          "max_ms": 9.967
+        },
+        {
+          "count": 307300,
+          "mean_ms": 1.8673096322811595,
+          "p50_ms": 1.765,
+          "p90_ms": 2.493,
+          "p99_ms": 3.393,
+          "p999_ms": 6.515,
+          "max_ms": 12.423
+        },
+        {
+          "count": 307300,
+          "mean_ms": 1.8560799316628689,
+          "p50_ms": 1.695,
+          "p90_ms": 2.599,
+          "p99_ms": 4.307,
+          "p999_ms": 7.539,
+          "max_ms": 10.303
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        38875136,
+        39735296,
+        39264256
+      ],
+      "peak_provider_rss_bytes": [
+        158646272,
+        159612928,
+        158486528
+      ],
+      "sut_cpu_cores": [
+        0.20893499806485644,
+        0.20253659180142775,
+        0.1888879874036248
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 7257.791666666667,
+      "cells": [
+        "cold-bench-001-hot-write-raft1-hot-r1",
+        "cold-bench-001-hot-write-raft1-hot-r2",
+        "cold-bench-001-hot-write-raft1-hot-r3"
+      ],
+      "ops_per_sec": [
+        7257.791666666667,
+        6869.375,
+        7704.625
+      ],
+      "latency": [
+        {
+          "count": 174187,
+          "mean_ms": 2.2011387244742755,
+          "p50_ms": 2.135,
+          "p90_ms": 2.947,
+          "p99_ms": 4.451,
+          "p999_ms": 11.415,
+          "max_ms": 47.135
+        },
+        {
+          "count": 164865,
+          "mean_ms": 2.325732441694721,
+          "p50_ms": 2.209,
+          "p90_ms": 3.235,
+          "p99_ms": 5.227,
+          "p999_ms": 10.615,
+          "max_ms": 35.903
+        },
+        {
+          "count": 184911,
+          "mean_ms": 2.07333759484293,
+          "p50_ms": 2.041,
+          "p90_ms": 2.747,
+          "p99_ms": 3.729,
+          "p999_ms": 7.995,
+          "max_ms": 22.479
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        41111552,
+        41443328,
+        41664512
+      ],
+      "peak_provider_rss_bytes": [
+        158650368,
+        157470720,
+        158998528
+      ],
+      "sut_cpu_cores": [
+        0.6587139201586019,
+        0.6595883279195799,
+        0.6890295800085737
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 5335.0,
+      "cells": [
+        "cold-bench-001-many-write-raft1-hot-r1",
+        "cold-bench-001-many-write-raft1-hot-r2",
+        "cold-bench-001-many-write-raft1-hot-r3"
+      ],
+      "ops_per_sec": [
+        6143.708333333333,
+        5335.0,
+        5321.333333333333
+      ],
+      "latency": [
+        {
+          "count": 147449,
+          "mean_ms": 2.6012737149794116,
+          "p50_ms": 2.231,
+          "p90_ms": 3.085,
+          "p99_ms": 6.191,
+          "p999_ms": 38.079,
+          "max_ms": 898.559
+        },
+        {
+          "count": 128040,
+          "mean_ms": 2.9956771633864427,
+          "p50_ms": 2.617,
+          "p90_ms": 4.049,
+          "p99_ms": 7.855,
+          "p999_ms": 42.847,
+          "max_ms": 249.343
+        },
+        {
+          "count": 127712,
+          "mean_ms": 3.0034624859057883,
+          "p50_ms": 2.703,
+          "p90_ms": 4.123,
+          "p99_ms": 8.287,
+          "p999_ms": 30.879,
+          "max_ms": 92.607
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        47001600,
+        47378432,
+        48873472
+      ],
+      "peak_provider_rss_bytes": [
+        158642176,
+        159031296,
+        159207424
+      ],
+      "sut_cpu_cores": [
+        1.04511177804695,
+        1.053424989787764,
+        1.0510465478231619
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-raft1-hot-r1",
+        "cold-bench-001-mixed-raft1-hot-r2",
+        "cold-bench-001-mixed-raft1-hot-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 3.5354778933680118,
+          "p50_ms": 3.371,
+          "p90_ms": 4.819,
+          "p99_ms": 6.759,
+          "p999_ms": 10.063,
+          "max_ms": 11.991
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.2702339889466794,
+          "p50_ms": 3.225,
+          "p90_ms": 4.231,
+          "p99_ms": 5.411,
+          "p999_ms": 7.983,
+          "max_ms": 9.191
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.3423552503250966,
+          "p50_ms": 3.283,
+          "p90_ms": 4.263,
+          "p99_ms": 5.319,
+          "p999_ms": 9.279,
+          "max_ms": 16.087
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        39960576,
+        39710720,
+        40677376
+      ],
+      "peak_provider_rss_bytes": [
+        159498240,
+        159997952,
+        158552064
+      ],
+      "sut_cpu_cores": [
+        0.1405971668708986,
+        0.13216673817704533,
+        0.12742864165580903
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": false,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 3998.625,
+      "cells": [
+        "cold-bench-001-replay-raft1-hot-r1",
+        "cold-bench-001-replay-raft1-hot-r2",
+        "cold-bench-001-replay-raft1-hot-r3"
+      ],
+      "ops_per_sec": [
+        3941.75,
+        4098.0,
+        3998.625
+      ],
+      "latency": [
+        {
+          "count": 94602,
+          "mean_ms": 1.0139135641952592,
+          "p50_ms": 0.965,
+          "p90_ms": 1.216,
+          "p99_ms": 2.026,
+          "p999_ms": 4.175,
+          "max_ms": 17.167
+        },
+        {
+          "count": 98352,
+          "mean_ms": 0.9752217545143977,
+          "p50_ms": 0.945,
+          "p90_ms": 1.133,
+          "p99_ms": 1.635,
+          "p999_ms": 3.595,
+          "max_ms": 15.791
+        },
+        {
+          "count": 95967,
+          "mean_ms": 0.9995000677316174,
+          "p50_ms": 0.958,
+          "p90_ms": 1.166,
+          "p99_ms": 1.991,
+          "p999_ms": 4.575,
+          "max_ms": 21.551
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        38207488,
+        37806080,
+        38457344
+      ],
+      "peak_provider_rss_bytes": [
+        159010816,
+        157884416,
+        159760384
+      ],
+      "sut_cpu_cores": [
+        1.787369861476946,
+        1.766086677082272,
+        1.749279051862314
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "fanout",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 127.81894767318983,
+      "cells": [
+        "cold-bench-001-fanout-raft1-cold-r1",
+        "cold-bench-001-fanout-raft1-cold-r2",
+        "cold-bench-001-fanout-raft1-cold-r3"
+      ],
+      "ops_per_sec": [
+        127.79776468601248,
+        127.81894767318983,
+        127.86111618477885
+      ],
+      "latency": [
+        {
+          "count": 307300,
+          "mean_ms": 2.3387228441262553,
+          "p50_ms": 2.251,
+          "p90_ms": 3.097,
+          "p99_ms": 4.483,
+          "p999_ms": 9.511,
+          "max_ms": 34.431
+        },
+        {
+          "count": 307300,
+          "mean_ms": 2.34404351448096,
+          "p50_ms": 2.187,
+          "p90_ms": 3.163,
+          "p99_ms": 5.743,
+          "p999_ms": 14.807,
+          "max_ms": 34.751
+        },
+        {
+          "count": 307300,
+          "mean_ms": 2.558075206638461,
+          "p50_ms": 2.367,
+          "p90_ms": 3.555,
+          "p99_ms": 6.399,
+          "p999_ms": 12.983,
+          "max_ms": 41.919
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        47300608,
+        51744768,
+        45821952
+      ],
+      "peak_provider_rss_bytes": [
+        292532224,
+        292925440,
+        289513472
+      ],
+      "sut_cpu_cores": [
+        0.48782827494336034,
+        0.4833360503901284,
+        0.4982265647243092
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "hot-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 6451.875,
+      "cells": [
+        "cold-bench-001-hot-write-raft1-cold-r1",
+        "cold-bench-001-hot-write-raft1-cold-r2",
+        "cold-bench-001-hot-write-raft1-cold-r3"
+      ],
+      "ops_per_sec": [
+        6687.208333333333,
+        5808.5,
+        6451.875
+      ],
+      "latency": [
+        {
+          "count": 160493,
+          "mean_ms": 2.389339379287571,
+          "p50_ms": 1.966,
+          "p90_ms": 2.753,
+          "p99_ms": 9.575,
+          "p999_ms": 60.671,
+          "max_ms": 87.231
+        },
+        {
+          "count": 139404,
+          "mean_ms": 2.7512140828096667,
+          "p50_ms": 2.193,
+          "p90_ms": 3.475,
+          "p99_ms": 16.639,
+          "p999_ms": 62.847,
+          "max_ms": 94.463
+        },
+        {
+          "count": 154845,
+          "mean_ms": 2.476564299783658,
+          "p50_ms": 2.061,
+          "p90_ms": 2.939,
+          "p99_ms": 10.727,
+          "p999_ms": 56.319,
+          "max_ms": 77.119
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        83111936,
+        76746752,
+        70594560
+      ],
+      "peak_provider_rss_bytes": [
+        342126592,
+        352210944,
+        344580096
+      ],
+      "sut_cpu_cores": [
+        0.7205232733856578,
+        0.6654749476925499,
+        0.7112123315425334
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "many-write",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 4982.125,
+      "cells": [
+        "cold-bench-001-many-write-raft1-cold-r1",
+        "cold-bench-001-many-write-raft1-cold-r2",
+        "cold-bench-001-many-write-raft1-cold-r3"
+      ],
+      "ops_per_sec": [
+        5746.666666666667,
+        4932.541666666667,
+        4982.125
+      ],
+      "latency": [
+        {
+          "count": 137920,
+          "mean_ms": 2.780831598027842,
+          "p50_ms": 2.277,
+          "p90_ms": 3.497,
+          "p99_ms": 11.743,
+          "p999_ms": 66.239,
+          "max_ms": 235.391
+        },
+        {
+          "count": 118381,
+          "mean_ms": 3.241605367415378,
+          "p50_ms": 2.487,
+          "p90_ms": 4.519,
+          "p99_ms": 16.359,
+          "p999_ms": 59.999,
+          "max_ms": 255.103
+        },
+        {
+          "count": 119571,
+          "mean_ms": 3.208686838781977,
+          "p50_ms": 2.501,
+          "p90_ms": 4.835,
+          "p99_ms": 15.591,
+          "p999_ms": 50.431,
+          "max_ms": 87.807
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        108552192,
+        109178880,
+        98537472
+      ],
+      "peak_provider_rss_bytes": [
+        385069056,
+        386514944,
+        388554752
+      ],
+      "sut_cpu_cores": [
+        1.2199053578775236,
+        1.1486207590196436,
+        1.0959264485891556
+      ],
+      "client_remote_fetched_bytes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "mixed",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 512.6666666666666,
+      "cells": [
+        "cold-bench-001-mixed-raft1-cold-r1",
+        "cold-bench-001-mixed-raft1-cold-r2",
+        "cold-bench-001-mixed-raft1-cold-r3"
+      ],
+      "ops_per_sec": [
+        512.6666666666666,
+        512.6666666666666,
+        512.6666666666666
+      ],
+      "latency": [
+        {
+          "count": 12304,
+          "mean_ms": 3.339139710663202,
+          "p50_ms": 3.219,
+          "p90_ms": 4.331,
+          "p99_ms": 7.035,
+          "p999_ms": 17.199,
+          "max_ms": 20.255
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.8525406371911677,
+          "p50_ms": 3.641,
+          "p90_ms": 5.175,
+          "p99_ms": 8.639,
+          "p999_ms": 16.191,
+          "max_ms": 17.647
+        },
+        {
+          "count": 12304,
+          "mean_ms": 3.9536887191157364,
+          "p50_ms": 3.475,
+          "p90_ms": 5.159,
+          "p99_ms": 15.879,
+          "p999_ms": 47.615,
+          "max_ms": 60.383
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        47276032,
+        46354432,
+        55201792
+      ],
+      "peak_provider_rss_bytes": [
+        376635392,
+        379039744,
+        376664064
+      ],
+      "sut_cpu_cores": [
+        0.2038387346777175,
+        0.20304725220443612,
+        0.18700457972361614
+      ],
+      "client_remote_fetched_bytes": [
+        26214400,
+        26214400,
+        26214400
+      ]
+    },
+    {
+      "arm": "raft1",
+      "cold": true,
+      "workload": "replay",
+      "passed": 3,
+      "total": 3,
+      "median_ops_per_sec": 36.541666666666664,
+      "cells": [
+        "cold-bench-001-replay-raft1-cold-r1",
+        "cold-bench-001-replay-raft1-cold-r2",
+        "cold-bench-001-replay-raft1-cold-r3"
+      ],
+      "ops_per_sec": [
+        36.541666666666664,
+        37.958333333333336,
+        36.541666666666664
+      ],
+      "latency": [
+        {
+          "count": 877,
+          "mean_ms": 109.61824401368304,
+          "p50_ms": 107.647,
+          "p90_ms": 132.351,
+          "p99_ms": 156.287,
+          "p999_ms": 185.087,
+          "max_ms": 185.087
+        },
+        {
+          "count": 911,
+          "mean_ms": 105.55264983534578,
+          "p50_ms": 102.463,
+          "p90_ms": 125.951,
+          "p99_ms": 149.375,
+          "p999_ms": 1133.567,
+          "max_ms": 1133.567
+        },
+        {
+          "count": 877,
+          "mean_ms": 109.61496009122004,
+          "p50_ms": 107.647,
+          "p90_ms": 130.751,
+          "p99_ms": 158.335,
+          "p999_ms": 196.223,
+          "max_ms": 196.223
+        }
+      ],
+      "peak_sut_rss_bytes": [
+        87478272,
+        78516224,
+        76345344
+      ],
+      "peak_provider_rss_bytes": [
+        361066496,
+        374157312,
+        364580864
+      ],
+      "sut_cpu_cores": [
+        0.2963366001230739,
+        0.2957237769904808,
+        0.3028519934134157
+      ],
+      "client_remote_fetched_bytes": [
+        919601152,
+        955252736,
+        919601152
+      ]
+    }
+  ],
+  "input_reports_sha256": {
+    "cold-bench-001/summary.json": "9935ac98e424fd80a76e7936599f909d3489db112bcc0ed12fdfd89288fe75a1",
+    "cold-bench-repair-001/summary.json": "decee5b8ac7b12865b98bcfdab3d1d3e8b7e23b99316c4fac059e41a2dd957d4",
+    "cold-bench-envelope-001/summary.json": "841d1912394c8dfe6e07475314b2b9557bf2306850cb8bcc59fd5743d2d8b749",
+    "cold-profile-kernel-001/summary.json": "17a99e88cc95a3ae734db39a408b9f45545167c9b6cf93615f4a0c48421ba66b",
+    "cold-profile-kernel-repair-001/summary.json": "5987a1cb55c5fb43f4fd495d82a2c1ff452f6936e75dc4bf8357c78bfb365a39",
+    "cold-profile-cpu-001/summary.json": "1b2504957e052af1f18c8add1fa0abc6e48e6d1a7852fbc8621f8891f4443da0",
+    "cold-profile-syscalls-001/summary.json": "1b89789189e9f2f636c396b34712e3096bb7c3c8b3153dcaba99dc129122b08d",
+    "cold-profile-fsync-001/summary.json": "f1302156215bb69e5da8ef34213cf9c6b881e492ff61307479b118ca194c8866",
+    "cold-profile-fsync-002/summary.json": "df9d0b0420daf267fbb9ddab2236b9d9d8d08e95123bbe8e40d8ee953bbf1977",
+    "cold-generations-001/checked.json": "c221860521d54cd7f3fd1fb5c1dfe0898982bcb1d8e1c9b85519ae137e019f0b",
+    "cold-generations-repair-001/checked.json": "4bc978fa6d94d050ae0f9d78a9b42e4f62fa102999347e7fd27f4af00c3afdc1",
+    "cold-bench-001/provenance.json": "129ddbb9e38fa8af0d6d999bc981628e0f4c1dd8b4405144a645e95211ee948e",
+    "cold-bench-repair-001/provenance.json": "56d190c33681d218a3e5ac719b59b1bfe2c5d9016ddb7c74eb8e183a599d3d1d",
+    "cold-bench-envelope-001/provenance.json": "b716e7e159ab0d0d1402065d7d53a2cc6aedf78cdd1ce577d52815099219afc8",
+    "cold-profile-kernel-001/provenance.json": "389e63efe31335edf3e82f465baf6566aff30e30b5b94b2224d1cdaadfada746",
+    "cold-profile-kernel-repair-001/provenance.json": "b0048df6ff5048a160c0329ef477457a439d91f879f6f1a6efb46ad55c12de41",
+    "cold-profile-cpu-001/provenance.json": "7024156b7cd5110564df49e51d679f40553fe8b13f363217d01e667127777758",
+    "cold-profile-syscalls-001/provenance.json": "34e95ec2947f80a19adad3b4c590f8527034095c5e90b17bd7d8bf6936d2fa43",
+    "cold-profile-fsync-001/provenance.json": "0c4adbf05081da57288cd082c85e7243d95a7128ba5a1c71e37fb46974fc98f7",
+    "cold-profile-fsync-002/provenance.json": "2442f723cfc177a84419b8315027e5040af0e26355573e8e29466bf105e62d95",
+    "cold-generations-001/provenance.json": "0b7e09a2917859d50925cca964f7e7bbda80c7a183da8373496e67268620b8a9",
+    "cold-generations-repair-001/provenance.json": "ce475c6c10f7981bf79248e4bba04da68cbce190aa122eb76c857544f4fe5559"
+  },
+  "checker_sha256": {
+    "cold_campaign_check.py": "5683e28a4f4722441e227518be130c8eccdd6545390c5f18daf7fd6c2317d3bc",
+    "cold_benchmark_check.py": "7a621373cffb191236f7d0a64aba133f0e3737c9d2468fbdb9af8c58a245e870",
+    "cold_generations_check.py": "d74854a3fbeac365b27fc752a48560863980e517110fd3d564fdd872611c3b2f",
+    "benchmark_summary.py": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8"
+  },
+  "limitations": [
+    "Selected replacements are complete hot/cold pairs; originals remain failures, not erased.",
+    "c4 envelope and perturbed profiles are separate, never replacements for c16 capacity.",
+    "Zero API errors and exact replication drain do not establish sustainable cold offload.",
+    "Read/mixed/fanout remote observations use invocation windows; ds-bench lacks exact drive bounds.",
+    "All processes and MinIO share one host/disk; no independent-provider/power-loss claim."
+  ]
+}

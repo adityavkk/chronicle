@@ -1,0 +1,891 @@
+{
+  "passed": 4,
+  "total": 4,
+  "cells": [
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 7905,
+      "read_remote_bytes": 37748736,
+      "cycles": 24,
+      "cell": "cold-generations-repair-001-async3-cold-r2",
+      "arm": "async3",
+      "cold": true,
+      "elapsed_seconds": 123.759629763,
+      "completion_ops_per_second": 64.00752831787162,
+      "latency_ms": {
+        "count": 7905,
+        "p50": 1.128566,
+        "p99": 5.636799,
+        "max": 63.474248
+      },
+      "schedule_lateness_ms": {
+        "count": 7905,
+        "p50": 0.166552,
+        "p99": 3.76025,
+        "max": 52.810686
+      },
+      "gc_seconds": {
+        "count": 24,
+        "p50": 2.546791907,
+        "p99": 7.476338576,
+        "max": 7.476338576
+      },
+      "gc_unpinned_seconds": {
+        "count": 23,
+        "p50": 2.546791907,
+        "p99": 3.818028267,
+        "max": 3.818028267
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.476338576,
+        "p99": 7.476338576,
+        "max": 7.476338576
+      },
+      "generation_overrun_seconds": {
+        "count": 24,
+        "p50": 0,
+        "p99": 3.5040480399911758,
+        "max": 3.5040480399911758
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 120,
+          "sampled_seconds": 123.000326662,
+          "cpu_cores": 0.25585297904515575,
+          "peak_rss_bytes": 195883008,
+          "io_delta": {
+            "rchar": 207286222,
+            "wchar": 234595461,
+            "syscr": 140842,
+            "syscw": 731465,
+            "read_bytes": 0,
+            "write_bytes": 412987392,
+            "cancelled_write_bytes": 71401472
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 120,
+          "sampled_seconds": 123.000326662,
+          "cpu_cores": 0.25390176471497344,
+          "peak_rss_bytes": 487419904,
+          "io_delta": {
+            "rchar": 243288915,
+            "wchar": 97567576,
+            "syscr": 123152,
+            "syscw": 25325,
+            "read_bytes": 0,
+            "write_bytes": 22982656,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 120,
+          "sampled_seconds": 123.000326662,
+          "cpu_cores": 0.09300788307202357,
+          "peak_rss_bytes": 67047424,
+          "io_delta": {
+            "rchar": 8880181,
+            "wchar": 7195651,
+            "syscr": 31155,
+            "syscw": 8767,
+            "read_bytes": 0,
+            "write_bytes": 5636096,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 41,
+      "peak_object_bytes": 2427456,
+      "peak_local_allocated_bytes": 76882944,
+      "final_objects": {
+        "count": 4,
+        "bytes": 344
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197312
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 12,
+          "bytes": 459632
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590808
+        },
+        {
+          "count": 16,
+          "bytes": 722096
+        },
+        {
+          "count": 15,
+          "bytes": 722000
+        },
+        {
+          "count": 17,
+          "bytes": 853392
+        },
+        {
+          "count": 18,
+          "bytes": 918808
+        },
+        {
+          "count": 21,
+          "bytes": 1115576
+        },
+        {
+          "count": 22,
+          "bytes": 1181392
+        },
+        {
+          "count": 22,
+          "bytes": 1181272
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 25,
+          "bytes": 1378280
+        },
+        {
+          "count": 26,
+          "bytes": 1443736
+        },
+        {
+          "count": 28,
+          "bytes": 1575008
+        },
+        {
+          "count": 29,
+          "bytes": 1640784
+        },
+        {
+          "count": 30,
+          "bytes": 1706200
+        },
+        {
+          "count": 32,
+          "bytes": 1837552
+        },
+        {
+          "count": 33,
+          "bytes": 1903168
+        },
+        {
+          "count": 34,
+          "bytes": 1968664
+        }
+      ],
+      "peak_pending_replicated_descriptors": 4,
+      "methods": {
+        "GET": 5892,
+        "HEAD": 3701,
+        "PUT": 307,
+        "POST": 170,
+        "DELETE": 303
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 2
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 7682,
+      "read_remote_bytes": 0,
+      "cycles": 24,
+      "cell": "cold-generations-repair-001-async3-hot-r2",
+      "arm": "async3",
+      "cold": false,
+      "elapsed_seconds": 120.049949065,
+      "completion_ops_per_second": 64.00767174109892,
+      "latency_ms": {
+        "count": 7682,
+        "p50": 1.143111,
+        "p99": 4.270038,
+        "max": 21.267509
+      },
+      "schedule_lateness_ms": {
+        "count": 7682,
+        "p50": 0.151441,
+        "p99": 1.758229,
+        "max": 10.67322
+      },
+      "gc_seconds": {
+        "count": 24,
+        "p50": 8.6e-07,
+        "p99": 1.129e-06,
+        "max": 1.129e-06
+      },
+      "gc_unpinned_seconds": {
+        "count": 24,
+        "p50": 8.6e-07,
+        "p99": 1.129e-06,
+        "max": 1.129e-06
+      },
+      "gc_pinned_seconds": null,
+      "generation_overrun_seconds": {
+        "count": 24,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.420424842,
+          "cpu_cores": 0.20105438438832046,
+          "peak_rss_bytes": 125534208,
+          "io_delta": {
+            "rchar": 123109097,
+            "wchar": 176898549,
+            "syscr": 42491,
+            "syscw": 669714,
+            "read_bytes": 0,
+            "write_bytes": 295227392,
+            "cancelled_write_bytes": 37748736
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.420424842,
+          "cpu_cores": 0.0025121330827361987,
+          "peak_rss_bytes": 262725632,
+          "io_delta": {
+            "rchar": 141185,
+            "wchar": 120199,
+            "syscr": 555,
+            "syscw": 251,
+            "read_bytes": 0,
+            "write_bytes": 73728,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.420424842,
+          "cpu_cores": 0.061212309449338705,
+          "peak_rss_bytes": 56999936,
+          "io_delta": {
+            "rchar": 4003266,
+            "wchar": 4290811,
+            "syscr": 24680,
+            "syscw": 8400,
+            "read_bytes": 0,
+            "write_bytes": 3248128,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 0,
+      "peak_object_bytes": 0,
+      "peak_local_allocated_bytes": 81391104,
+      "final_objects": {
+        "count": 0,
+        "bytes": 0
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        }
+      ],
+      "peak_pending_replicated_descriptors": 0,
+      "methods": {
+        "GET": 3
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 2
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 7908,
+      "read_remote_bytes": 37748736,
+      "cycles": 24,
+      "cell": "cold-generations-repair-001-quorum3-cold-r2",
+      "arm": "quorum3",
+      "cold": true,
+      "elapsed_seconds": 123.884904978,
+      "completion_ops_per_second": 64.00700334806025,
+      "latency_ms": {
+        "count": 7908,
+        "p50": 2.068244,
+        "p99": 9.304056,
+        "max": 285.475816
+      },
+      "schedule_lateness_ms": {
+        "count": 7908,
+        "p50": 0.17352,
+        "p99": 6.657292,
+        "max": 286.64661
+      },
+      "gc_seconds": {
+        "count": 24,
+        "p50": 2.355485311,
+        "p99": 7.504512483,
+        "max": 7.504512483
+      },
+      "gc_unpinned_seconds": {
+        "count": 23,
+        "p50": 2.355485311,
+        "p99": 3.77215166,
+        "max": 3.77215166
+      },
+      "gc_pinned_seconds": {
+        "count": 1,
+        "p50": 7.504512483,
+        "p99": 7.504512483,
+        "max": 7.504512483
+      },
+      "generation_overrun_seconds": {
+        "count": 24,
+        "p50": 0,
+        "p99": 3.5473406840173993,
+        "max": 3.5473406840173993
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 119,
+          "sampled_seconds": 123.113155142,
+          "cpu_cores": 0.3031357612186506,
+          "peak_rss_bytes": 171118592,
+          "io_delta": {
+            "rchar": 144436851,
+            "wchar": 191846361,
+            "syscr": 138447,
+            "syscw": 728759,
+            "read_bytes": 0,
+            "write_bytes": 371093504,
+            "cancelled_write_bytes": 50528256
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 119,
+          "sampled_seconds": 123.113155142,
+          "cpu_cores": 0.3059786743061782,
+          "peak_rss_bytes": 491122688,
+          "io_delta": {
+            "rchar": 234948659,
+            "wchar": 96435329,
+            "syscr": 119515,
+            "syscw": 24717,
+            "read_bytes": 0,
+            "write_bytes": 22847488,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 119,
+          "sampled_seconds": 123.113155142,
+          "cpu_cores": 0.10957399300213282,
+          "peak_rss_bytes": 84004864,
+          "io_delta": {
+            "rchar": 8361973,
+            "wchar": 6811603,
+            "syscr": 30559,
+            "syscw": 8707,
+            "read_bytes": 0,
+            "write_bytes": 5550080,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 41,
+      "peak_object_bytes": 2427656,
+      "peak_local_allocated_bytes": 75740160,
+      "final_objects": {
+        "count": 4,
+        "bytes": 424
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 2,
+          "bytes": 32
+        },
+        {
+          "count": 5,
+          "bytes": 65840
+        },
+        {
+          "count": 7,
+          "bytes": 197272
+        },
+        {
+          "count": 8,
+          "bytes": 262648
+        },
+        {
+          "count": 9,
+          "bytes": 328264
+        },
+        {
+          "count": 11,
+          "bytes": 459816
+        },
+        {
+          "count": 12,
+          "bytes": 525072
+        },
+        {
+          "count": 13,
+          "bytes": 590728
+        },
+        {
+          "count": 15,
+          "bytes": 722200
+        },
+        {
+          "count": 15,
+          "bytes": 721960
+        },
+        {
+          "count": 17,
+          "bytes": 853192
+        },
+        {
+          "count": 18,
+          "bytes": 918888
+        },
+        {
+          "count": 23,
+          "bytes": 1116368
+        },
+        {
+          "count": 21,
+          "bytes": 1115696
+        },
+        {
+          "count": 23,
+          "bytes": 1247088
+        },
+        {
+          "count": 24,
+          "bytes": 1312504
+        },
+        {
+          "count": 25,
+          "bytes": 1378120
+        },
+        {
+          "count": 26,
+          "bytes": 1443736
+        },
+        {
+          "count": 28,
+          "bytes": 1574928
+        },
+        {
+          "count": 29,
+          "bytes": 1640784
+        },
+        {
+          "count": 30,
+          "bytes": 1706200
+        },
+        {
+          "count": 31,
+          "bytes": 1771856
+        },
+        {
+          "count": 33,
+          "bytes": 1903368
+        },
+        {
+          "count": 34,
+          "bytes": 1968664
+        }
+      ],
+      "peak_pending_replicated_descriptors": 6,
+      "methods": {
+        "GET": 5791,
+        "HEAD": 3658,
+        "PUT": 307,
+        "POST": 170,
+        "DELETE": 303
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 2
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true,
+        "local-not-reclaimed": true,
+        "wrong-remote-key": true,
+        "retained-payload": true,
+        "no-reader-pin": true,
+        "early-pinned-delete": true
+      }
+    },
+    {
+      "verdict": "PASS",
+      "errors": [],
+      "writes": 7681,
+      "read_remote_bytes": 0,
+      "cycles": 24,
+      "cell": "cold-generations-repair-001-quorum3-hot-r2",
+      "arm": "quorum3",
+      "cold": false,
+      "elapsed_seconds": 120.038981489,
+      "completion_ops_per_second": 64.00536069022994,
+      "latency_ms": {
+        "count": 7681,
+        "p50": 1.826723,
+        "p99": 6.168316,
+        "max": 75.749376
+      },
+      "schedule_lateness_ms": {
+        "count": 7681,
+        "p50": 0.156186,
+        "p99": 2.427656,
+        "max": 60.493778
+      },
+      "gc_seconds": {
+        "count": 24,
+        "p50": 8.71e-07,
+        "p99": 1.165e-06,
+        "max": 1.165e-06
+      },
+      "gc_unpinned_seconds": {
+        "count": 24,
+        "p50": 8.71e-07,
+        "p99": 1.165e-06,
+        "max": 1.165e-06
+      },
+      "gc_pinned_seconds": null,
+      "generation_overrun_seconds": {
+        "count": 24,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "resources": {
+        "sut": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.775128042,
+          "cpu_cores": 0.21256499922982566,
+          "peak_rss_bytes": 122421248,
+          "io_delta": {
+            "rchar": 121488591,
+            "wchar": 175288742,
+            "syscr": 42610,
+            "syscw": 667322,
+            "read_bytes": 0,
+            "write_bytes": 294846464,
+            "cancelled_write_bytes": 37748736
+          }
+        },
+        "provider": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.775128042,
+          "cpu_cores": 0.0026716732032028363,
+          "peak_rss_bytes": 263389184,
+          "io_delta": {
+            "rchar": 141166,
+            "wchar": 120183,
+            "syscr": 553,
+            "syscw": 249,
+            "read_bytes": 0,
+            "write_bytes": 73728,
+            "cancelled_write_bytes": 0
+          }
+        },
+        "driver": {
+          "status": "MEASURED",
+          "complete_samples": 118,
+          "sampled_seconds": 119.775128042,
+          "cpu_cores": 0.06420364666446816,
+          "peak_rss_bytes": 97832960,
+          "io_delta": {
+            "rchar": 4049067,
+            "wchar": 4364539,
+            "syscr": 25186,
+            "syscw": 8447,
+            "read_bytes": 0,
+            "write_bytes": 3366912,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      "peak_objects": 0,
+      "peak_object_bytes": 0,
+      "peak_local_allocated_bytes": 81395200,
+      "final_objects": {
+        "count": 0,
+        "bytes": 0
+      },
+      "gc_cycle_objects": [
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        },
+        {
+          "count": 0,
+          "bytes": 0
+        }
+      ],
+      "peak_pending_replicated_descriptors": 0,
+      "methods": {
+        "GET": 3
+      },
+      "sampled_commit_gap_max_appends": {
+        "lower": 0,
+        "upper": 4
+      },
+      "negative_controls": {
+        "missing-drain": true,
+        "corrupt-live": true,
+        "corrupt-generation": true,
+        "missing-generation": true,
+        "unknown-write": true
+      }
+    }
+  ],
+  "checker_sources": {
+    "cold_generations_check.py": "d32c8cc4f03eb32ad691b05685c21c79bf34d19cc443888911710e00d9babec1",
+    "cold_benchmark_check.py": "ea8a31002fefeeb20d612dfb471767cf47b6d36f19896309c155264900bc8390",
+    "benchmark_summary.py": "08c91321bfd9d88cd654d2502975fba6a80e2d15d590018069f971f526cfd1c8"
+  }
+}

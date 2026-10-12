@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 369, in cell
+    start=time.monotonic();lab.boot();result["startup_seconds"]=time.monotonic()-start
+                           ^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 106, in boot
+    self.start_storage()  # Idle provider also present in hot controls.
+    ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/cold_benchmark.py", line 92, in start_storage
+    self.s3.create_bucket(Bucket=self.bucket)
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/client.py", line 569, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/.tmp/electric-tools/cold-venv/lib/python3.11/site-packages/botocore/client.py", line 1023, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (XMinioServerNotInitialized) when calling the CreateBucket operation (reached max retries: 0): Server not initialized yet, please try again.

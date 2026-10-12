@@ -1,0 +1,164 @@
+"""Offline closure of the retained cold-work campaign, not a capacity certificate.
+
+Run only after workload services stop, with PYTHONPATH pointing to the experiment
+scripts. Failing/unknown histories remain; no server or test fixture is started.
+"""
+import copy
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+from cold_benchmark_check import read_lines, read_object_events, validate
+from cold_work_faults import check as check_pressure
+from lab import BINARY, EXPERIMENT, ROOT, source_hashes
+
+
+def sha(path):
+    with Path(path).open("rb") as source:
+        return hashlib.file_digest(source,"sha256").hexdigest()
+
+
+def save(path,value):
+    path.write_text(json.dumps(value,indent=2)+"\n")
+
+
+def run(output):
+    output.mkdir(parents=True,exist_ok=False)
+    shutil.copyfile(__file__,output/"verify.py.txt")
+    assert "No orb services are running." in subprocess.check_output(["amp","orb","service","list"],text=True)
+    evidence=EXPERIMENT/"evidence"
+    sources=source_hashes()
+    assert sources==json.loads((evidence/"cold-work-build-006/sources.json").read_text())
+    binary=sha(BINARY)
+    assert binary==(evidence/"cold-work-build-006/binary-sha256.txt").read_text().split()[0]
+    baseline=json.loads((evidence/"cold-runtime-tests-001/qualification.json").read_text())
+    expected={
+        "cold-work-bench-001":36,
+        "cold-work-sustained-hot-001":18,
+        "cold-work-sustained-many-001":6,
+        "cold-work-reads-001":18,
+        "cold-work-native-001":6,
+        "cold-work-large-001":6,
+        "cold-work-large-native-001":3,
+        "cold-work-profile-cpu-001":2,
+        "cold-work-profile-fsync-001":2,
+        "cold-work-profile-fsync-002":2,
+        "cold-work-generations-001":8,
+        "cold-work-generations-002":8,
+        "cold-work-native-002":6,
+        "cold-work-large-002":6,
+        "cold-work-large-native-002":3,
+        "cold-work-profile-fsync-003":2,
+    }
+    # Preserve the full failing ledgers; paired reruns are separate evidence.
+    superseded={"cold-work-generations-001":6,"cold-work-native-001":1,
+        "cold-work-large-001":0,"cold-work-large-native-001":0,"cold-work-profile-fsync-002":0}
+    reports={}; commands=[]; inputs={}
+    for name,total in expected.items():
+        generation=name.startswith("cold-work-generations-")
+        script="cold_generations_check.py" if generation else "cold_work_summary.py"
+        command=[sys.executable,str(EXPERIMENT/"scripts"/script),str(evidence/name)]
+        with (output/(name+".txt")).open("w") as log:
+            code=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT).returncode
+        commands.append(dict(argv=command,exit_code=code));save(output/"commands.json",commands)
+        report=evidence/name/("checked.json" if generation else "summary.json")
+        value=json.loads(report.read_text())
+        assert value["total"]==total and code==int(value["passed"]!=total),(name,"unexpected checker result")
+        assert value["passed"]==superseded.get(name,total),(name,"unexpected failed cell")
+        assert int((evidence/name/"driver-exit-code.txt").read_text())==int(name in superseded)
+        assert int((evidence/name/"analysis-exit-code.txt").read_text())==int(name in superseded)
+        ledger=json.loads((evidence/name/"ledger.json").read_text())
+        assert len(ledger)==total and {r["cell"] for r in ledger}=={r["cell"] for r in value["cells"]}
+        provenance=json.loads((evidence/name/"provenance.json").read_text())
+        pins=provenance["sources"] if generation else provenance["runtime_sources"]
+        assert pins==dict(baseline=baseline["sources"],candidate=sources)
+        for path,digest in provenance["binaries"].items():
+            assert sha(ROOT/path)==digest,(name,path,"binary drift")
+        for row in value["cells"]:
+            raw=json.loads((evidence/name/row["cell"]/"result.json").read_text())
+            selected=".tmp/electric-tools/upstream-tier-target/release/durable-streams-server" if raw["arm"]=="native" else (
+                ".tmp/electric-tools/cold-schedule-baseline/durable-streams-server" if raw["variant"]=="baseline" else str(BINARY.relative_to(ROOT)))
+            assert raw["binary_sha256"]==provenance["binaries"][selected]
+            row["variant"]=raw["variant"]
+            if raw["verdict"]!="PASS":
+                allowed=("background failure or unstable observation clock","retired object has no observed completed deletion") if generation else ("8 GiB preflight failed; no SUT started",)
+                assert any(message in raw.get("error","") for message in allowed),(name,raw.get("error"))
+        reports[name]=value
+        inputs[str(report.relative_to(evidence))]=sha(report)
+        inputs[f"{name}/provenance.json"]=sha(evidence/name/"provenance.json")
+
+    suites={}
+    for name in ("cold-work-conformance-hot-001","cold-work-conform-cold-002"):
+        counts=json.loads((evidence/name/"counts.json").read_text())
+        assert counts==dict(numTotalTests=332,numPassedTests=332,numFailedTests=0,numPendingTests=0,numTodoTests=0)
+        p=json.loads((evidence/name/"provenance.json").read_text())
+        assert p["suite"]=="0.3.5" and p["subscriptions"] and p["hashes"]["binary"]==binary
+        assert all(p["hashes"][k]==v for k,v in sources.items())
+        old=json.loads((evidence/"conformance-035/provenance.json").read_text())
+        assert {k:v for k,v in p["hashes"].items() if k.startswith("suite/")}=={k:v for k,v in old["hashes"].items() if k.startswith("suite/")}
+        suites[name]=counts
+    for file in (evidence/"cold-work-formal-004").glob("*"):
+        current=EXPERIMENT/"formal"/file.name
+        if current.is_file():assert sha(current)==sha(file),file.name
+    for line in (evidence/"cold-work-full-formal-001/source-sha256.txt").read_text().splitlines():
+        digest,name=line.split(maxsplit=1)
+        assert sha(EXPERIMENT/"formal"/name)==digest,name
+    assert (evidence/"cold-work-full-formal-001/runner-exit.txt").read_text().strip()=="0"
+
+    pressure=evidence/"cold-work-faults-007"
+    assert sha(pressure/"driver.py")==sha(EXPERIMENT/"scripts/cold_work_faults.py")
+    pressure_result=check_pressure(read_lines(pressure/"history.jsonl.gz"),read_object_events(pressure))
+    retained=json.loads((pressure/"result.json").read_text())
+    assert all(retained[k]==v for k,v in pressure_result.items())
+    assert retained["negative_history_controls"]==7
+    failures={}
+    for name in ("cold-work-faults-001","cold-work-faults-002","cold-work-faults-005","cold-work-faults-006"):
+        value=json.loads((evidence/name/"result.json").read_text())
+        assert value["verdict"]=="FAIL",name
+        failures[name]=value
+
+    controls={}
+    for workload in ("replay","mixed","fanout"):
+        name=f"cold-work-reads-001-candidate-{workload}-quorum3-cold-r1"
+        path=evidence/"cold-work-reads-001"/name
+        row=json.loads((path/"result.json").read_text());raw=json.loads((path/"client.json").read_text())
+        objects=read_object_events(path);samples=read_lines(path/"samples.jsonl.gz")
+        assert validate(row,raw,objects,samples)["verdict"]=="PASS"
+        mutations={
+            "missing-replica":lambda r:r["drain"].pop(),
+            "wrong-bytes":lambda r:r["probes"][0].update(sha256="corrupt"),
+            "wrong-offset":lambda r:r["probes"][0].update(offset=r["probes"][0]["bytes"]-1),
+            "not-reclaimed":lambda r:r["precondition"].update(local_payload_bytes=1),
+            "wrong-client-attribution":lambda r:r.update(client_object_keys=["/wrong-object"]),
+        }
+        if workload=="fanout":
+            mutations["missing-closure"]=lambda r:r["sequence"]["readers"][0].update(closed=False)
+            mutations["duplicate-reader"]=lambda r:r["sequence"]["readers"][1].update(reader=0)
+        for kind,mutate in mutations.items():
+            altered=copy.deepcopy(row);mutate(altered)
+            result=validate(altered,raw,objects,samples)
+            assert result["verdict"]=="FAIL",(name,kind)
+            controls[name+"/"+kind]=result["errors"]
+    summary=dict(evidence_consistency="PASS",production_performance_gate="NOT_MET",
+        sources=sources,binary_sha256=binary,conformance=suites,
+        campaigns={n:dict(passed=v["passed"],total=v["total"]) for n,v in reports.items()},
+        retained_superseded_campaigns=list(superseded),
+        selected_campaigns={n:dict(passed=v["passed"],total=v["total"]) for n,v in reports.items() if n not in superseded},
+        pressure_probe=retained,retained_pressure_failures=failures,benchmark_mutations=controls,
+        generations=reports["cold-work-generations-002"],input_reports_sha256=inputs,
+        limitations=["Finite local shared-host MinIO evidence, not independent-host/provider/power-loss qualification.",
+            "Async acks are local acceptance, not committed throughput. Ordinary reads remain committed-only.",
+            "A green byte/drain checker is not sustainable offload capacity; high-cardinality backlog still rises.",
+            "Retained generation failures include a wall-clock step and an observation cut preceding DELETE completion; corrected wait and fresh matched runs do not relabel the originals.",
+            "Sixteen preflight-only cells started no SUT because the 8 GiB floor failed. Disposable scanner projections were reclaimed; failed stores/evidence and the floor were preserved.",
+            "The first many-stream ptrace pair had no active payload PUTs; preserve it without a cold-cost claim.",
+            "Models are finite, with explicit fairness/recovery assumptions, not an implementation refinement proof."])
+    save(output/"checked.json",summary)
+    print(json.dumps({k:summary[k] for k in ("evidence_consistency","production_performance_gate","campaigns")},indent=2))
+    return all(v["passed"]==v["total"] for n,v in reports.items() if n not in superseded)
+
+
+if __name__=="__main__":raise SystemExit(0 if run(Path(sys.argv[1]).resolve()) else 1)

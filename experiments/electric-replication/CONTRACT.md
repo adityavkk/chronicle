@@ -600,6 +600,132 @@ access, TLS or tenant isolation. The whole experimental listener remains
 loopback-only. S3 credentials come from `ELECTRIC_COLD_ACCESS_KEY_ID` and
 `ELECTRIC_COLD_SECRET_ACCESS_KEY`, not node JSON or consensus state.
 
+#### Work-driven offload and local admission
+
+The scheduler retains one uploader per group. Each pass gives one pending retry,
+one retirement and a due inventory a turn, then attempts at most 16 new payloads,
+wrapping the stream cursor immediately. A productive pass yields and continues
+without a 100 ms tax per object. Apply sends a coalesced notification; an idle/retry timer
+also covers leadership changes and missed notifications. Failures retain their
+durable Begin and impose a retry delay, not a busy retry loop. There is no
+unbounded candidate queue or new concurrent PUT pipeline. Selection scans the
+current catalog; it does not introduce a distributed scheduling index.
+Existing durable pending descriptors remain capped at 64 per group, payloads
+at 8 MiB, and the scheduler holds only its current payload plus cursor. A pass
+bounds attempts, not wall time: provider timeout/retry and quorum delays remain
+real costs. A permanently unavailable provider cannot satisfy a liveness claim.
+
+Cold resource policy is node-local, outside the identity-11 serialized cold
+configuration. It must not reinterpret committed commands or change receipts,
+leases, fsync, publication, pins, certificates or GC authority. All groups share
+one admission budget. Originating data writes count unreclaimed local stream
+tails, staged fork data, retained unapplied journal bytes and outstanding byte
+credits. A successful local 202 or canceled HTTP request does not return credit.
+Resolved credits survive until a view-locked observation accounts for their
+effects; restart and stale/failed observations close admission. The next sample
+must include unapplied WAL debt, not only readable tails.
+Sampling takes all group view read locks in group order before the node budget
+mutex. Independent admission latency between groups on that node is not
+promised; this is not a lock-free reservation or cluster-wide coordinator.
+
+The default policy is 512 MiB of node-wide originating backlog and 2 GiB of
+filesystem headroom, configurable as `cold_admission.max_backlog_bytes` and
+`cold_admission.min_free_bytes`. HTTP 429 means no admission (backlog, stale
+observation, or the existing proposal bound); 507 means disk headroom; 413 means
+a request exceeds the configured budget. The versioned `/_admin/{group}/pressure`
+observation reports node-wide sampled debt, active/spent credits and rejection
+reasons. Polling multiple groups does not make those counters additive.
+
+The charged command classes are native stream `PUT`/`POST` and fork
+`Reserve`/`Chunk`, including data-bearing replication batches. Empty stream
+creation and close POSTs are charged too. Deletion, cold maintenance,
+subscription control-plane commands and the other non-data command classes are
+exempt; snapshot reception has separate disk accounting. This is not a tenant
+quota or general bound on control-plane metadata. That state, maintenance,
+telemetry and unrelated filesystem writers still need operational headroom.
+
+At 75% backlog pressure the worker seals partial tails. It also remembers the
+largest rejected request's required headroom: high water alone deadlocks when
+small open tails occupy 1.25 MiB of a 2 MiB budget and a 1 MiB request retries.
+This is one bounded scalar, not a stored request or a promise to reserve space
+for that client. A covering observation clears satisfied demand; restart loses
+the hint, so a client must retry. Published short prefixes must also actually
+compact, rather than waiting for a full segment of reclaimable bytes.
+Recovery and snapshot installation reclaim already-published short prefixes
+left by the former threshold before admitting/serving the restored view. This
+uses the same native intent/fsync/rename compaction, not a new payload format.
+
+Follower replication needs a different rule: applying the originator's backlog
+cap to AppendEntries can stop it before a later cold-publication entry that
+would release that backlog. Followers retain disk-headroom admission, not that
+leader backlog cap. This is **not** an atomic cluster-wide byte reservation or a
+hard cap on every follower's hot bytes. A pressured follower may stop receiving;
+a healthy quorum can continue, and restoring space or replacing that replica
+may be necessary. RPC timeout must not release credits for still-running I/O.
+Snapshot installation must budget its whole received image, not just the final
+64 KiB chunk. Recovery samples before admitting new client growth.
+In particular, different group leaders can each originate their node's budget
+before the other node receives it. Neither the configured 512 MiB nor the
+originator-only `AdmissionSafe` model is a 512 MiB bound on total physical data
+at every replica. Transport admission additionally protects each receiving
+node's measured disk floor; maintenance and filesystem consumers remain the
+explicit exceptions below. There is no distributed reservation protocol.
+
+Disk admission is conservative accounting plus measured filesystem free space,
+not perfect physical reservation. Space for WAL segment allocation, snapshot
+replacement, compaction, pinned/unlinked files and maintenance must remain.
+Other processes and volumes sharing a filesystem can consume that headroom;
+no software admission policy can guarantee otherwise. Recovery/GC work must
+not depend on acquiring the same backlog credits that it releases. Object
+outages should stop new data admission, not weaken a committed obligation.
+
+`ColdWork.tla` checks round-robin service of sparse streams despite a perpetually
+hot stream, bounded pass/in-flight work, unknown-upload retention, concurrent
+byte-credit accounting, observation/release races and restart admission. Its
+admission bound assumes charged costs cover growth and observations cover all
+durable debt; it is not a proof of filesystem allocation costs. Stable-period
+progress assumes eventually successful I/O, finite outstanding requests and
+fair opportunities to reclaim and retry. The first liveness run correctly
+failed with merely weak fairness for reclamation: repeated samples could
+indefinitely preempt it. The repaired specification explicitly requires fair
+reclamation opportunities; that failed history is retained. Scheduling fairness
+is checked over a fixed finite stream set, not unbounded catalog arrivals or a
+per-tenant service guarantee. Four configurations
+and seven negative controls pass in `cold-work-formal-004`, including asymmetric
+request costs (2/3/2 with a limit of 4) and the high-water-only starvation
+mutation. The three-process MinIO history `cold-work-faults-001` reproduces that
+stall; `002` retains the incomplete fix which uploads all forty short tails but
+does not reclaim them because the native compaction threshold is still 64 KiB.
+Neither failed history is a successful qualification. The existing
+`ColdOwnership` obligations still apply separately; no composed refinement or
+implementation/performance qualification is implied by this model result.
+
+| Model action / obligation | Runtime correspondence and independent check |
+|---|---|
+| `Select`, `Yield`, `Resume`, `SparseProgress` | `cold_worker` selects from committed catalog state, wraps its cursor and bounds passes; `cold-work-faults-007` overlaps a continuously busy stream with previously queued sparse work and a real held PUT. |
+| `Unknown`, `pending = owed` | Failed PUT/publication retains the original Begin identity; `cold_finish` retries its immutable range. Existing `ColdOwnership` and actual MinIO late-I/O histories remain required. |
+| `Admit`, `Write`, `Finish`, `AdmissionSafe` | `Budget` charges an originating request; `batch::Completion` owns its ticket beyond HTTP cancellation/202; native-WAL/proptest and the concurrent outage probe check independent accepted bytes. Removing carried spent credits in an isolated real Rust implementation fails with 65 bytes promised under a 64-byte limit (`cold-work-implementation-mutation-001`). This model abstracts originator-only growth, not follower bypass. |
+| `Capture`, `Sample`, `Restart` | All view locks precede the budget mutex; observations include retained unapplied journal frames, and spent credits clear only at that cut. Full-process restart must preserve existing pressure. |
+| `Reclaim`, `AdmissionProgress` | Pressure seals short tails, rejected demand activates reclamation below high water, and committed publication uses native compaction. Generated native recovery cases include checkpoints from the former compaction threshold. Progress assumes successful I/O, usable headroom, fair sampling/retries and eventual participant recovery. |
+
+The scheduler model abstracts a pass to two new attempts over three streams;
+the runtime uses sixteen plus the separate pending-retry turn. The admission
+model uses three asymmetric requests, not every allocator/transport interleaving.
+These links identify the checked boundaries; they are not a machine-checked
+refinement between the models and the Rust program.
+
+Local implementation/qualification is recorded in
+`evidence/cold-work-qualification-001/checked.json`, not inferred from this model.
+The full existing ownership/fault obligations were rerun, as were both unchanged
+332-test compatibility suites. Measured single-stream backlog stabilizes over
+the tested 90-second intervals; high-cardinality backlog still grows and RSS
+has no established plateau. Thus the work-driven/admission contract is not an
+unconditional sustainable-rate, physical-space or production-readiness claim.
+`cold-work-generations-002` separately verifies 48-generation deletion/pin cycles,
+including observed completed DELETE rather than listing absence alone. Eventual
+reclamation still depends on recovered participants, finite late writes and
+successful fair storage work, as specified by `ColdOwnership`.
+
 The local object campaign uses a separate, unmodified MinIO process built from
 `minio/minio` tag `RELEASE.2025-04-22T22-12-26Z`, commit
 `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` (AGPL-3.0). Its source and binary
